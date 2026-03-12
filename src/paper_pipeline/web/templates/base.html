@@ -1,0 +1,70 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Paper Pipeline{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css?v={{ asset_version }}">
+  <script src="/static/htmx.min.js?v={{ asset_version }}"></script>
+  <script src="/static/htmx-sse.js?v={{ asset_version }}"></script>
+  <script defer src="/static/alpine.min.js?v={{ asset_version }}"></script>
+</head>
+<body>
+  <div id="app-shell" x-data="appShell()" :class="{ 'has-detail': detailOpen }">
+
+    <header id="app-header">
+      <div class="header-left">
+        <h1><a href="/">Paper Pipeline</a></h1>
+        <span class="header-stat" title="{{ workspace_root | default('') }}">{{ workspace_root | default('') }}</span>
+      </div>
+      <div class="header-right">
+        <span class="header-badge gpu-badge"
+              :class="{ 'gpu-offline': !gpu }"
+              :title="gpuTitle()"
+              x-text="gpuLabel()">
+          {% if gpu %}
+          GPU {{ gpu.memory_used_mb }}/{{ gpu.memory_total_mb }}MB | {{ gpu.utilization_pct }}% | {{ gpu.temperature_c }}C
+          {% else %}
+          GPU unavailable
+          {% endif %}
+        </span>
+        <span class="header-badge" id="worker-status"
+              :class="workerRunning ? 'badge-running' : 'badge-idle'"
+              x-text="workerRunning ? 'Running: ' + (currentCitekey || 'unknown') : 'Idle'">
+          {% if worker_running %}Running: {{ current_citekey }}{% else %}Idle{% endif %}
+        </span>
+      </div>
+    </header>
+
+    <div id="main-panel">
+      <div id="main-content">
+        {% block content %}{% endblock %}
+      </div>
+
+      <section id="log-panel" :class="{ collapsed: logCollapsed }">
+        <div id="log-header" @click="logCollapsed = !logCollapsed">
+          <span>Log Output</span>
+          <button class="btn-xs" @click.stop="logCollapsed = !logCollapsed" x-text="logCollapsed ? 'Expand' : 'Collapse'">Collapse</button>
+          <button class="btn-xs" @click.stop="logLines = []">Clear</button>
+        </div>
+        <pre id="log-output"></pre>
+      </section>
+    </div>
+
+    <div id="detail-panel">
+      <div id="detail-content"></div>
+    </div>
+
+  </div>
+
+  <script>
+    window._workerState = {
+      workerRunning: {{ 'true' if worker_running else 'false' }},
+      currentCitekey: {{ current_citekey | default(None) | tojson }},
+      gpu: {{ gpu | default(None) | tojson }},
+    };
+  </script>
+  <script src="/static/app.js?v={{ asset_version }}"></script>
+  {% block extra_js %}{% endblock %}
+</body>
+</html>

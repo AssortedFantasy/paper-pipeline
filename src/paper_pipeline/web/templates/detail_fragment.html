@@ -1,0 +1,77 @@
+﻿<div class="detail-header">
+  <button class="close-btn" onclick="document.getElementById('app-shell').classList.remove('has-detail'); this.closest('#detail-panel').querySelector('#detail-content').innerHTML = '';">&times; Close</button>
+  <h2>{{ record.title or citekey }}</h2>
+  <div class="detail-meta-row">
+    <span class="status-badge status-{{ status.transcription_status if status else 'pending' }}">
+      {{ status.transcription_status if status else "pending" }}
+    </span>
+    <span>{{ record.item_type }}</span>
+    <span>{{ record.date or "unknown date" }}</span>
+    {% if page_count is not none %}<span>{{ page_count }} pages</span>{% endif %}
+    {% if size_mb is not none %}<span>{{ "%.1f"|format(size_mb) }} MB</span>{% endif %}
+  </div>
+  <div class="detail-actions">
+    <button class="btn btn-primary btn-xs" @click="rerunPaper('{{ citekey }}')">Run With Current Settings</button>
+    <button class="btn btn-xs" @click="rerunPaper('{{ citekey }}', true)">Force Recompute</button>
+    <span class="detail-run-summary" x-text="detailRunSummary()"></span>
+  </div>
+</div>
+
+<div x-data="{ tab: 'meta' }">
+<div class="detail-tabs">
+  <button class="detail-tab" :class="{ active: tab === 'meta' }" @click="tab = 'meta'">Metadata</button>
+  <button class="detail-tab" :class="{ active: tab === 'transcript' }" @click="tab = 'transcript'">Transcript</button>
+  {% if log_content %}
+  <button class="detail-tab" :class="{ active: tab === 'log' }" @click="tab = 'log'">Nougat Log</button>
+  {% endif %}
+</div>
+
+<div class="detail-content">
+  <div x-show="tab === 'meta'" x-transition>
+    <div class="detail-box">
+      <table class="meta-table">
+        <tr><td>Citation Key</td><td>{{ record.citation_key }}</td></tr>
+        <tr><td>Type</td><td>{{ record.item_type }}</td></tr>
+        <tr><td>Date</td><td>{{ record.date or "unknown" }}</td></tr>
+        <tr><td>Venue</td><td>{{ record.venue or "unknown" }}</td></tr>
+        <tr><td>Publisher</td><td>{{ record.publisher or "unknown" }}</td></tr>
+        <tr><td>URL</td><td>{% if record.url %}<a href="{{ record.url }}" target="_blank">{{ record.url[:60] }}</a>{% else %}unknown{% endif %}</td></tr>
+        {% if record.tags %}<tr><td>Tags</td><td>{{ record.tags | join(", ") }}</td></tr>{% endif %}
+      </table>
+      <h4>Authors</h4>
+      <ul class="author-list">
+        {% for author in record.authors %}<li>{{ author }}</li>{% endfor %}
+      </ul>
+      {% if record.abstract %}
+      <h4>Abstract</h4>
+      <p class="abstract-text">{{ record.abstract }}</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div x-show="tab === 'transcript'" x-transition>
+    {% if transcribed_content %}
+    <div class="detail-box">
+      <pre class="content-pre">{{ transcribed_content }}</pre>
+    </div>
+    {% else %}
+    <div class="detail-box"><p class="muted">No transcription available.</p></div>
+    {% endif %}
+  </div>
+
+  {% if log_content %}
+  <div x-show="tab === 'log'" x-transition>
+    <div class="detail-box">
+      <pre class="content-pre">{{ log_content }}</pre>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if status and status.error_message %}
+  <div class="error-box">
+    <h4>Last Error</h4>
+    <pre class="error-text">{{ status.error_message }}</pre>
+  </div>
+  {% endif %}
+</div>
+</div>

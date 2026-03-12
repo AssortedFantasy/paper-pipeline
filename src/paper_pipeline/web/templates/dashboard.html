@@ -1,0 +1,94 @@
+﻿{% extends "base.html" %}
+{% block title %}Paper Pipeline — Dashboard{% endblock %}
+
+{% block content %}
+<section id="dashboard-panel">
+  <section id="controls">
+    <div class="controls-row">
+      <div class="controls-group">
+        <button class="btn btn-primary" @click="transcribeSelected()" :disabled="selectedKeys().length === 0">Transcribe Selected</button>
+        <button class="btn btn-secondary" @click="transcribeAll()">Transcribe All Pending</button>
+        <button class="btn btn-danger" @click="stopBatch()">Stop</button>
+      </div>
+      <div class="controls-group">
+        <label>Max pages <input type="number" x-model.number="config.max_pages" min="1" max="500" class="input-sm"></label>
+        <label>Chunk size <input type="number" x-model.number="config.page_chunk_size" min="0" max="100" class="input-sm" title="0 = whole PDF"></label>
+        <label>Model
+          <select x-model="config.model" class="input-sm">
+            <option value="0.1.0-small">0.1.0-small</option>
+            <option value="0.1.0-base">0.1.0-base</option>
+          </select>
+        </label>
+        <label>Timeout (s) <input type="number" x-model.number="config.page_timeout_seconds" min="60" max="7200" class="input-sm"></label>
+      </div>
+      <div class="controls-group">
+        <label class="checkbox-label"><input type="checkbox" x-model="config.recompute"> Recompute</label>
+        <label class="checkbox-label"><input type="checkbox" x-model="config.no_skipping"> No-skipping</label>
+      </div>
+    </div>
+  </section>
+
+  <section id="filters">
+    <input type="text" x-model="filterQuery" placeholder="Search citation key or title..." class="filter-input">
+    <select x-model="filterStatus" class="filter-select">
+      <option value="all">All ({{ total }})</option>
+      <option value="pending">Pending ({{ pending }})</option>
+      <option value="completed">Completed ({{ completed }})</option>
+      <option value="failed">Failed ({{ failed }})</option>
+      <option value="running">Running</option>
+    </select>
+    <label class="checkbox-label"><input type="checkbox" x-model="filterHasPdf" checked> Has PDF only</label>
+    <span class="filter-stat" x-text="visibleCount() + ' papers'">{{ total }} papers</span>
+  </section>
+
+  <div id="paper-table-wrap">
+    <table id="paper-table">
+      <thead>
+        <tr>
+          <th class="col-check"><input type="checkbox" @change="toggleAll($event.target.checked)"></th>
+          <th class="col-key sortable" @click="toggleSort('citation_key')" :data-dir="sortCol==='citation_key' ? sortDir : null">Citation Key</th>
+          <th class="col-title sortable" @click="toggleSort('title')" :data-dir="sortCol==='title' ? sortDir : null">Title</th>
+          <th class="col-type sortable" @click="toggleSort('item_type')" :data-dir="sortCol==='item_type' ? sortDir : null">Type</th>
+          <th class="col-pages sortable" @click="toggleSort('page_count')" :data-dir="sortCol==='page_count' ? sortDir : null">Pages</th>
+          <th class="col-size sortable" @click="toggleSort('size_mb')" :data-dir="sortCol==='size_mb' ? sortDir : null">Size MB</th>
+          <th class="col-status sortable" @click="toggleSort('transcription_status')" :data-dir="sortCol==='transcription_status' ? sortDir : null">Status</th>
+          <th class="col-date sortable" @click="toggleSort('last_run_iso')" :data-dir="sortCol==='last_run_iso' ? sortDir : null">Last Run</th>
+          <th class="col-actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="p in sortedPapers()" :key="p.citation_key">
+          <tr class="paper-row" x-show="isVisible(p)"
+              :class="{ active: activeCitekey === p.citation_key }"
+              @click="openDetail(p.citation_key)">
+            <td class="col-check" @click.stop>
+              <input type="checkbox" :value="p.citation_key" :disabled="!p.has_pdf"
+                     x-model="selected">
+            </td>
+            <td class="col-key" x-text="p.citation_key"></td>
+            <td class="col-title" :title="p.title" x-text="p.title.length > 80 ? p.title.substring(0,80) + '\u2026' : p.title"></td>
+            <td class="col-type" x-text="p.item_type"></td>
+            <td class="col-pages" x-text="p.page_count ?? '\u2014'"></td>
+            <td class="col-size" x-text="p.size_mb != null ? p.size_mb.toFixed(1) : '\u2014'"></td>
+            <td class="col-status">
+              <span class="status-badge" :class="'status-' + p.transcription_status"
+                    :title="p.error_message || ''"
+                    x-text="p.transcription_status"></span>
+            </td>
+            <td class="col-date" x-text="p.last_run_iso ? p.last_run_iso.substring(0,16) : '\u2014'"></td>
+            <td class="col-actions" @click.stop>
+              <button class="btn-xs" @click="openDetail(p.citation_key)">Detail</button>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window._papersData = {{ papers_json | safe }};
+</script>
+{% endblock %}

@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "paper-pipeline"
+version = "0.1.0"
+description = "Turn a Zotero RDF export and attached PDFs into a local, LLM-friendly paper database with Nougat transcriptions and a web dashboard."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "jinja2>=3.1",
+    "pypdf>=4.0",
+    "albumentations==1.4.24",
+    "huggingface-hub==0.36.2",
+    "nougat-ocr==0.1.17",
+    "pypdfium2==4.0.0",
+    "torch==2.10.0+cu128 ; platform_system == 'Windows'",
+    "torchvision==0.25.0+cu128 ; platform_system == 'Windows'",
+    "transformers==4.37.2",
+    "uvicorn[standard]>=0.34",
+]
+
+[project.scripts]
+paper-pipeline = "paper_pipeline.paper_pipeline:main"
+paper-gui = "paper_pipeline.web.cli:main"
+
+[project.urls]
+Repository = "https://github.com/AssortedFantasy/paper-pipeline"
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/paper_pipeline"]

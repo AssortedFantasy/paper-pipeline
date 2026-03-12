@@ -1,0 +1,11 @@
+/.venv/
+/files/
+/papers/
+*.rdf
+*.log
+__pycache__/
+*.py[cod]
+*run.lock
+*.egg-info/
+dist/
+build/

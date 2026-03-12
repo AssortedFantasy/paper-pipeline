@@ -1,0 +1,13 @@
+﻿{% extends "base.html" %}
+{% block title %}{{ citekey }} — Paper Pipeline{% endblock %}
+
+{% block content %}
+<div style="padding: 12px 16px;">
+  <a href="/" style="font-size:12px;">&larr; Back to Dashboard</a>
+  {% include "detail_fragment.html" %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>window._papersData = window._papersData || [];</script>
+{% endblock %}
