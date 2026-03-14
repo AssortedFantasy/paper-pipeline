@@ -214,7 +214,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_nougat.add_argument("--model", default="0.1.0-small", help="Nougat model tag.")
     run_nougat.add_argument(
-        "--batchsize", type=int, default=None, help="Optional Nougat batch size."
+        "--batchsize", type=int, default=2, help="Nougat batch size (default: 2)."
     )
     run_nougat.add_argument(
         "--dry-run", action="store_true", help="Print commands without running Nougat."

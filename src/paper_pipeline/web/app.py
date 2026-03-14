@@ -54,6 +54,7 @@ def _normalize_run_config(config: dict | None) -> dict:
         "page_timeout_seconds": max(
             60, _as_int(config.get("page_timeout_seconds"), 1800)
         ),
+        "batchsize": max(1, _as_int(config.get("batchsize"), 2)),
         "model": str(config.get("model") or "0.1.0-small"),
         "recompute": bool(config.get("recompute", False)),
         "no_skipping": bool(config.get("no_skipping", False)),
