@@ -1,0 +1,493 @@
+# PLAN.md — Paper Pipeline v2 Implementation Plan
+
+This plan decomposes the REFACTOR.md requirements into work packages (WPs)
+that agents can execute with minimal coordination. Read `AGENTS.md` first;
+it defines the commands, rules, and definition of done that apply to every
+WP here.
+
+## How to work this plan
+
+1. Pick the lowest-numbered WP whose **Depends on** entries are all `done`
+   and whose status is `todo`.
+2. Set its status to `in-progress` (edit the table below), do the work, run
+   the required checks, set it to `done`.
+3. Stay inside the WP's **Owns** file set. If you must touch a file owned by
+   another in-flight WP, coordinate or wait — do not create merge conflicts.
+4. Frozen contracts (see AGENTS.md) are inputs to your WP, not editable
+   surface. A WP that cannot be completed without changing a contract is
+   blocked: write an ADR proposal and flag it.
+5. Every WP includes its own tests. A WP without passing tests is not done.
+
+## Status board
+
+| WP | Title | Depends on | Status |
+| --- | --- | --- | --- |
+| 0.1 | Skeleton, tooling, contracts | — | done |
+| 0.2 | Config + `doctor` command | 0.1 | todo |
+| 1.1 | Library storage core | 0.1 | todo |
+| 1.2 | Staging + atomic artifact install | 1.1 | todo |
+| 1.3 | Library validator | 1.1 | todo |
+| 2A.1 | Zotero RDF parsing + fixtures | 0.1 | todo |
+| 2A.2 | Import planning (preview) | 2A.1, 1.1 | todo |
+| 2B.0 | Marker spike + PDF corpus (GATE) | 0.1 | todo |
+| 2B.1 | Fake converter + contract tests | 0.1 | todo |
+| 2B.2 | Child-process conversion runner | 2B.1 | todo |
+| 2B.3 | Marker adapter + GPU smoke test | 2B.0, 2B.2 | todo |
+| 2C.1 | Recipe template parsing + built-ins | 0.1 | todo |
+| 2C.2 | LLM providers (fake + OpenAI) | 0.1 | todo |
+| 2C.3 | Recipe runner + provenance | 2C.1, 2C.2, 1.2 | todo |
+| 2D.1 | Job queue, state machine, events | 0.1 | todo |
+| 2D.2 | Scheduling policies, cancel, retry | 2D.1 | todo |
+| 2D.3 | Completion validation + startup reconciliation | 2D.2, 1.1 | todo |
+| 2E.1 | Index builders | 1.1 | todo |
+| 2E.2 | Generated library AGENTS.md + .gitignore | 1.1 | todo |
+| 3.1 | Library services + CLI (`validate`, `reindex`) | 1.3, 2E.1, 2E.2 | todo |
+| 3.2 | Import services (preview + apply) | 2A.2, 1.2 | todo |
+| 3.3 | Processing services (convert, recipes, cancel, retry) | 2B.2, 2C.3, 2D.3 | todo |
+| 4.1 | Web API + SSE | 3.1, 3.2, 3.3 | todo |
+| 4.2 | UI shell + papers list + launch actions | 4.1 | todo |
+| 4.3 | Import UI (preview/apply) | 4.1 | todo |
+| 4.4 | Jobs dashboard | 4.1 | todo |
+| 4.5 | Paper detail view | 4.1 | todo |
+| 4.6 | Visual regression + designed edge states | 4.2–4.5 | todo |
+| 5.1 | Clean-environment smoke test | 3.x, 4.1 | todo |
+| 5.2 | End-to-end golden run (GPU) | 2B.3, 3.3 | todo |
+| 5.3 | Docs polish + release checklist | all | todo |
+
+### Parallelization guide
+
+- After **1.1** lands, tracks **A, B, C, D, E** are mutually independent —
+  up to five agents can run concurrently, one per track.
+- **2B.0** (Marker spike) touches no shared code and can start immediately,
+  in parallel with everything.
+- Phase 3 WPs are independent of each other; Phase 4 WPs 4.2–4.5 are
+  independent of each other after 4.1.
+- File ownership: track A owns `ingest/`, B owns `convert/`, C owns
+  `recipes/`, D owns `jobs/`, E owns `indexes/`. `tests/fakes.py` is shared
+  between B (FakeConverter) and C (FakeLLMProvider) — keep the classes
+  disjoint.
+
+---
+
+## Phase 0 — Foundations
+
+### WP-0.1 Skeleton, tooling, contracts — DONE
+
+Delivered: `pyproject.toml`, package skeleton with responsibility docstrings,
+frozen contracts (`library/paths.py`, `library/model.py`,
+`convert/contract.py`, `recipes/provider.py`, `recipes/model.py`,
+`jobs/model.py`), built-in recipe templates, ADRs 0001–0004, AGENTS.md, this
+plan, sanity tests.
+
+### WP-0.2 Config + `doctor` command
+
+- **Owns:** `config.py`, `cli.py` (doctor path only), `tests/test_config.py`,
+  `tests/test_doctor.py`.
+- **Goal:** finished `AppConfig` loading (env + `.env`) and a
+  `paper-pipeline doctor` command that reports, with actionable messages:
+  Python version, package version, whether the `marker` extra is importable,
+  whether LLM credentials are configured (present/absent only — never print
+  the key), and writability of a target directory if given.
+- **Requirements:** doctor never triggers heavy imports at module scope;
+  probe the `marker` extra in a subprocess or via `importlib.util.find_spec`.
+  Exit code 0 when core is healthy even if optional extras are absent.
+- **Tests:** config precedence (env over `.env` over default); doctor output
+  with and without extras (monkeypatched); secrets never appear in output.
+
+---
+
+## Phase 1 — Library core (keystone; blocks the tracks that write libraries)
+
+### WP-1.1 Library storage core
+
+- **Owns:** `library/storage.py`, `tests/library/test_storage.py`.
+- **Goal:** implement the surface sketched in the `storage.py` docstring:
+  `create_library`, `open_library`, `Library.list_papers`, `read_paper`,
+  `write_paper`, `operational_dir`.
+- **Requirements:**
+  - `create_library` writes `library.json` (format_version 1), creates
+    `papers/`, `indexes/`, `.pp/`; refuses a non-empty directory.
+  - `open_library` validates format version; a newer version fails with an
+    actionable message.
+  - `write_paper` is atomic: serialize to `.pp/tmp/<rand>`, `os.replace`
+    into place. Citekey validated against `paths.CITEKEY_PATTERN` plus
+    Windows reserved names.
+  - All serialized paths are relative POSIX; add an invariant test that
+    scans every written file for absolute paths and drive letters.
+  - `list_papers` tolerates and reports (not raises) invalid paper dirs.
+- **Tests:** round-trips, atomicity under simulated interruption (kill
+  between temp write and rename → library still opens, no partial files),
+  invalid citekeys rejected, relative-path invariant, opening a library
+  copied to a different absolute location works unchanged.
+
+### WP-1.2 Staging + atomic artifact install
+
+- **Owns:** artifact-install portion of `library/storage.py`,
+  `tests/library/test_artifacts.py`.
+- **Goal:** `Library.stage_dir()` (fresh temp dir under `.pp/tmp`) and
+  `Library.install_artifact(citekey, relative_dest, staged_src)` for files
+  and directories (`figures/`), with validation hooks (e.g. non-empty file).
+- **Requirements:** install is rename-based on the same filesystem; replaces
+  existing artifact atomically; cleans up abandoned staging dirs older than
+  the current process on request (`Library.clean_stale_staging()`).
+- **Tests:** file and directory installs, replacement, interrupted install
+  leaves prior artifact intact, staging cleanup never touches installed
+  content.
+
+### WP-1.3 Library validator
+
+- **Owns:** `library/validation.py`, `tests/library/test_validation.py`.
+- **Goal:** implement the checks listed in the module docstring, returning a
+  structured report (`problems: [{severity, citekey?, message, action}]`).
+- **Requirements:** validation is read-only; distinguishes `error`
+  (corruption/invariant breach), `warning` (stale index, missing source in a
+  clone), and `info`. Missing `source/` PDFs are "not reprocessable"
+  warnings, not errors.
+- **Tests:** healthy library; each problem class synthesized in a temp
+  library; manually deleted paper dir detected as index staleness (with a
+  hand-written index file until 2E.1 lands).
+
+---
+
+## Phase 2 — Parallel tracks
+
+### Track A — Zotero ingestion
+
+#### WP-2A.1 Zotero RDF parsing + fixtures
+
+- **Owns:** `ingest/rdf.py`, `tests/fixtures/zotero/`, `tests/ingest/test_rdf.py`.
+- **Goal:** parse a Zotero RDF export directory into `ImportRecord` objects
+  (define the dataclass in `ingest/rdf.py`: `metadata: PaperMetadata`,
+  `attachment_path: Path | None`, `problems: list[str]`).
+- **Requirements:**
+  - Support journal articles, conference papers, preprints, books/chapters;
+    map to `PaperMetadata` fields; unknown item types produce a record with
+    a problem note, never a crash.
+  - Citekey source: Zotero's Better BibTeX citation key if present in the
+    export; otherwise flag the record as problem "no citekey" (do not
+    invent citekeys silently).
+  - Locate PDF attachments via the export's `files/` links; missing files
+    are per-record problems.
+  - Build 2–3 small committed fixture exports (tiny dummy PDFs) covering:
+    clean import, missing attachment, duplicate DOI pair, odd item type.
+- **Tests:** fixture-driven parse assertions; malformed RDF fails with a
+  clear message; no absolute fixture paths leak into `PaperMetadata`.
+
+#### WP-2A.2 Import planning (preview)
+
+- **Owns:** `ingest/plan.py`, `tests/ingest/test_plan.py`.
+- **Goal:** `build_import_plan(library, records) -> ImportPlan` with
+  `additions`, `refreshes`, `problems`, and duplicate candidates (same DOI
+  or normalized-title match under a different citekey).
+- **Requirements:** pure function over data; never touches the filesystem
+  beyond reading the library; plan is fully serializable for the preview UI.
+- **Tests:** first import (all additions), re-import (all refreshes), mixed,
+  duplicate candidate surfaced not merged, invalid citekey routed to
+  problems.
+
+### Track B — Conversion
+
+#### WP-2B.0 Marker spike + PDF corpus (DECISION GATE)
+
+- **Owns:** `tests/fixtures/corpus/manifest.json`, a throwaway spike report
+  posted in the PR (not committed as a doc file).
+- **Goal:** REFACTOR.md requires a representative quality and runtime test
+  *before* the Marker implementation is finalized. Assemble the PDF corpus
+  (native text, multi-column, equations, tables, figures, scanned; record
+  source URLs in `manifest.json`), run Marker on it manually on the target
+  Windows/CUDA machine, and report: output quality per class, runtime,
+  VRAM, install friction (torch/CUDA pinning needed in the `marker` extra).
+- **Outcome:** go/no-go on Marker and the exact dependency pins for the
+  `marker` extra. **If no-go, stop track B and escalate — ADR-0001 must be
+  amended with an alternative backend.**
+
+#### WP-2B.1 Fake converter + contract tests
+
+- **Owns:** `FakeConverter` in `tests/fakes.py`, `tests/convert/test_contract.py`.
+- **Goal:** a configurable fake implementing `Converter`: writes a
+  deterministic `transcription.md` (+ optional figure files) into
+  `staging_dir`; modes for success, failure (`ok=False`), crash (raises),
+  hang (sleeps past timeout), empty output.
+- **Tests:** contract semantics — `ok=True` implies non-empty transcription
+  in staging; result paths are inside `staging_dir`.
+
+#### WP-2B.2 Child-process conversion runner
+
+- **Owns:** `convert/runner.py`, `tests/convert/test_runner.py`.
+- **Goal:** `run_conversion(converter_spec, request) -> ConversionResult`
+  executing the converter in a fresh child process (spawn), with timeout
+  kill, cancellation (kill process tree), exit-code/exception mapping to
+  `ok=False` results, and stdout/stderr captured into `diagnostics`.
+- **Requirements:** the child entry point imports the backend lazily; the
+  parent never imports Marker. Works with `FakeConverter` via a
+  module-path + kwargs spec so tests never need Marker.
+- **Tests (use FakeConverter):** success, converter failure, child crash,
+  timeout kill, cancellation mid-run, staging dir cleaned on failure, no
+  orphan processes after each test.
+
+#### WP-2B.3 Marker adapter + GPU smoke test
+
+- **Owns:** `convert/marker.py`, `marker` extra pins in `pyproject.toml`,
+  `tests/convert/test_marker_gpu.py` (marked `gpu`).
+- **Goal:** Marker adapter per the module docstring, using the pins decided
+  in WP-2B.0; normalize Marker output (markdown, images, metadata) into
+  `ConversionResult`; capture backend version.
+- **Tests:** `gpu`-marked smoke test converting one small corpus PDF
+  end-to-end through the runner, asserting non-empty transcription and
+  figure handling; skipped cleanly when extra/GPU absent.
+
+### Track C — Recipes
+
+#### WP-2C.1 Recipe template parsing + built-ins
+
+- **Owns:** parsing code in `recipes/model.py`, `recipes/builtin/`,
+  `tests/recipes/test_model.py`.
+- **Goal:** `parse_recipe(text) -> RecipeDefinition` and
+  `load_builtin_recipes() -> dict[str, RecipeDefinition]` (loaded via
+  `importlib.resources`).
+- **Requirements:** strict validation (known fields only, `output` must be a
+  bare `.md` filename with no path separators, body non-empty); clear error
+  messages naming the offending field.
+- **Tests:** both built-ins parse; each validation failure mode; parsed
+  prompt preserves the body verbatim.
+
+#### WP-2C.2 LLM providers (fake + OpenAI)
+
+- **Owns:** `FakeLLMProvider` in `tests/fakes.py`, OpenAI adapter in
+  `recipes/provider.py` (or `recipes/openai_provider.py` if cleaner),
+  `tests/recipes/test_providers.py`.
+- **Goal:** fake provider (canned responses, call recording, failure/delay
+  modes) and an OpenAI-compatible adapter supporting text input and PDF
+  input (file upload), configured from `AppConfig`.
+- **Requirements:** the adapter imports `openai` lazily (`llm` extra);
+  errors map to `ok=False` with a safe message — never echo the API key or
+  full request. Respect `llm_base_url` for compatible endpoints.
+- **Tests:** fake provider behavior (default suite); adapter tests marked
+  `llm` are minimal smoke only.
+
+#### WP-2C.3 Recipe runner + provenance
+
+- **Owns:** `recipes/runner.py`, `tests/recipes/test_runner.py`.
+- **Goal:** implement the 5-step flow in the module docstring, producing a
+  staged output file for `Library.install_artifact` and a `RecipeRecord`.
+- **Requirements:** missing declared input fails fast with a clear error;
+  front matter exactly per ADR-0003; provenance recorded in the returned
+  `RecipeRecord`; output validated non-empty before staging succeeds.
+- **Tests (FakeLLMProvider):** success with front matter asserted, missing
+  transcription input, provider failure, empty response rejected, provenance
+  contains no credential-like config values.
+
+### Track D — Jobs
+
+#### WP-2D.1 Job queue, state machine, events
+
+- **Owns:** `jobs/queue.py`, `jobs/events.py`, `tests/jobs/test_queue.py`.
+- **Goal:** an async in-process `JobQueue`: enqueue -> `Job`, legal state
+  transitions only (illegal transitions raise), subscription-based event bus
+  publishing every transition plus progress messages.
+- **Requirements:** no HTTP, no library imports; job execution is an
+  injected async callable so tests drive it deterministically.
+- **Tests:** transition legality, event ordering, subscriber isolation
+  (slow subscriber cannot block the queue).
+
+#### WP-2D.2 Scheduling policies, cancel, retry
+
+- **Owns:** scheduling in `jobs/queue.py`, `tests/jobs/test_scheduling.py`.
+- **Goal:** ADR-0004 policies: conversion concurrency 1; recipe concurrency
+  N across papers with strict per-paper FIFO of 1; maintenance exclusive.
+  Cancel queued (immediate) and running (cooperative token + process-tree
+  kill hook). Retry re-enqueues a terminal failed/cancelled/interrupted job.
+- **Tests:** two conversions never overlap; recipes for the same paper are
+  strictly sequential while different papers interleave (assert via
+  FakeLLMProvider call log); maintenance excludes others; cancel and retry
+  paths; queue drains cleanly on shutdown.
+
+#### WP-2D.3 Completion validation + startup reconciliation
+
+- **Owns:** `jobs/` glue to `library`, `tests/jobs/test_recovery.py`.
+- **Goal:** (a) a job may only reach `SUCCEEDED` after its completion
+  validator confirms expected artifacts on disk; (b)
+  `reconcile_library(library)` rewrites `paper.json` records stuck in a
+  running state to `interrupted` at startup, per ADR-0004.
+- **Tests:** validator rejects missing/empty artifact → job `FAILED` with a
+  clear error; synthesized "crashed mid-run" library reconciles to
+  `interrupted` and shows as retryable; reconciliation never touches healthy
+  records.
+
+### Track E — Indexes and generated guidance
+
+#### WP-2E.1 Index builders
+
+- **Owns:** `indexes/build.py`, `tests/indexes/test_build.py`.
+- **Goal:** `rebuild_indexes(library)` producing `indexes/titles.md`,
+  `authors.md`, `summaries.md` (from `generated/summary.md` bodies, first
+  line), `status.md` (papers with missing/failed outputs). Format: one line
+  per paper, `<citekey>: <value>`, sorted by citekey, LF endings.
+- **Requirements:** deterministic (byte-identical on unchanged input);
+  written atomically; entries for missing paper dirs dropped; wholly derived
+  from paper content.
+- **Tests:** determinism, staleness repair after deleting a paper dir,
+  empty library produces valid empty indexes, summaries index distinguishes
+  "no summary yet".
+
+#### WP-2E.2 Generated library AGENTS.md + .gitignore
+
+- **Owns:** `indexes/agents_md.py`, `tests/indexes/test_agents_md.py`.
+- **Goal:** generate the library's root `AGENTS.md` (per the module
+  docstring: layout, citekey lookup under `papers/`, source-derived vs
+  LLM-generated distinction, index catalog, `.pp/` is ignorable; ≤ ~60
+  lines) and `.gitignore` (`**/.pp/`, `papers/*/source/`).
+- **Tests:** golden-file comparison; regeneration is deterministic; content
+  mentions `papers/<citekey>/` and the generated/ provenance rule.
+
+---
+
+## Phase 3 — Application services (integration; one implementation for CLI and web)
+
+### WP-3.1 Library services + CLI (`validate`, `reindex`)
+
+- **Owns:** `services/` (library ops), `cli.py` wiring,
+  `tests/services/test_library_services.py`.
+- **Goal:** `create_library`, `open_library`, `validate_library`,
+  `rebuild_indexes` services (thin orchestration over Phase 1/2E), wired to
+  `paper-pipeline validate <path>` and `paper-pipeline reindex <path>`.
+- **Requirements:** reindex also regenerates `AGENTS.md` and `.gitignore`;
+  runs under the maintenance job category when invoked while serving.
+- **Tests:** service-level (no HTTP); CLI exit codes and human-readable
+  output for healthy and problematic libraries.
+
+### WP-3.2 Import services (preview + apply)
+
+- **Owns:** `services/` (import ops), `tests/services/test_import_services.py`.
+- **Goal:** `preview_import(library, export_path) -> ImportPlan` and
+  `apply_import(library, plan) -> ImportReport`. Apply: create paper dirs,
+  copy PDFs into `source/` (staged + atomic), write `paper.json`; refresh
+  replaces Zotero-owned metadata wholesale but never touches processing
+  records or artifacts; plan `problems` entries are skipped and reported.
+- **Requirements:** import never deletes papers; re-running the same apply
+  is idempotent; a failed copy leaves no half-created paper dir.
+- **Tests:** first import, additive re-import, metadata refresh preserving
+  conversion state, missing attachment skip, idempotency, interruption
+  mid-apply leaves the library valid.
+
+### WP-3.3 Processing services (convert, recipes, cancel, retry)
+
+- **Owns:** `services/` (processing ops), `tests/services/test_processing_services.py`.
+- **Goal:** `queue_conversion(library, citekeys)`,
+  `queue_recipe(library, recipe_name, citekeys)`, `cancel_job(id)`,
+  `retry_job(id)`; selection helpers for "all pending". Wires runner +
+  recipes + jobs + storage: mark `paper.json` running → execute → validate →
+  atomic install → terminal record, per ADR-0004 write ordering.
+- **Tests (fakes only):** full conversion and recipe flows through the real
+  queue into a temp library; failure recorded in `paper.json` with log path
+  under `.pp/`; cancel mid-conversion kills the child and records
+  `cancelled`; retry succeeds after transient fake failure.
+
+---
+
+## Phase 4 — Web API and UI
+
+### WP-4.1 Web API + SSE
+
+- **Owns:** `web/app.py`, `web/api.py`, `tests/web/test_api.py`.
+- **Goal:** JSON/fragment routes over services: library open/create/validate/
+  reindex; papers list with filter params; paper detail; import preview and
+  apply; job list; queue/cancel/retry; `GET /events` SSE stream forwarding
+  the job event bus. `paper-pipeline serve` starts uvicorn.
+- **Requirements:** routes contain no business logic; API responses are
+  service models serialized, not ad-hoc dicts; SSE stream survives client
+  disconnect without affecting jobs. The server binds localhost by default.
+- **Tests:** API contract tests with httpx + fakes; SSE delivers transition
+  events; disconnecting a client does not cancel a running job.
+
+### WP-4.2 UI shell + papers list + launch actions
+
+- **Owns:** `web/templates/` (base, papers), `web/static/` (vendored htmx,
+  `app.css`), `tests/web/test_ui_papers.py` (marked `browser`).
+- **Goal:** base layout with navigation and SSE-driven job status strip;
+  papers table with filters (text, conversion state, recipe state), row
+  selection, actions: convert selected, run recipe selected, select-all
+  -pending. Stable URLs: `/`, `/papers`.
+- **Requirements:** selection is the only client-owned state; all data
+  rendering is server-side fragments; designed empty and error states; no
+  inline DOM manipulation outside htmx swaps.
+- **Tests (browser):** load, filter, select, launch (against fakes), empty
+  library state.
+
+### WP-4.3 Import UI
+
+- **Owns:** `web/templates/` (import), `tests/web/test_ui_import.py` (browser).
+- **Goal:** `/import`: pick export path + library, render the ImportPlan
+  preview (additions, refreshes, problems, duplicate candidates), apply with
+  a progress/result report.
+- **Tests (browser):** preview render for a fixture export, apply flow,
+  problems prominently displayed, cancel-before-apply leaves library
+  untouched.
+
+### WP-4.4 Jobs dashboard
+
+- **Owns:** `web/templates/` (jobs), `tests/web/test_ui_jobs.py` (browser).
+- **Goal:** `/jobs`: queued/running/terminal lists updating via SSE,
+  per-job log tail view, cancel and retry buttons, interrupted jobs
+  labeled and retryable.
+- **Tests (browser):** live update on state change, cancel and retry flows,
+  disconnected state (SSE dropped) shows a designed indicator and recovers.
+
+### WP-4.5 Paper detail view
+
+- **Owns:** `web/templates/` (paper), `tests/web/test_ui_paper.py` (browser).
+- **Goal:** `/papers/{citekey}`: metadata, processing status, rendered
+  transcription, `generated/` outputs with their provenance front matter
+  displayed as "LLM-generated" badges, figures gallery, link to source PDF
+  served if present.
+- **Tests (browser):** full paper, unconverted paper (designed empty
+  states), missing-source clone case.
+
+### WP-4.6 Visual regression + designed edge states
+
+- **Owns:** `tests/web/test_visual.py` (browser), snapshot assets.
+- **Goal:** Playwright screenshot baselines for: papers table (filled +
+  empty), paper detail, jobs view (running + failed + interrupted), import
+  preview, and error/disconnected states. Document the snapshot-update
+  command in AGENTS.md's UI row.
+- **Tests:** the snapshots themselves; a documented, deterministic viewport
+  and dataset (seeded fake library) so diffs are meaningful.
+
+---
+
+## Phase 5 — Hardening and release
+
+### WP-5.1 Clean-environment smoke test
+
+- **Owns:** `tests/test_smoke.py` (marked `slow`), CI-ready script.
+- **Goal:** from a clean `uv sync` in a temp checkout: create a library,
+  apply a fixture import, run a fake-converter conversion and fake-provider
+  recipe through the real CLI/services, reindex, validate — using only
+  commands documented in AGENTS.md.
+- **Tests:** the smoke test is the deliverable; it must not depend on
+  extras, network, or GPU.
+
+### WP-5.2 End-to-end golden run (GPU)
+
+- **Owns:** `tests/test_golden_gpu.py` (marked `gpu`), golden assets.
+- **Goal:** convert 2–3 corpus PDFs with real Marker, assert structural
+  expectations (headings present, table/figure counts within tolerance)
+  rather than byte equality; record runtime as a report line.
+- **Tests:** the golden run; skipped cleanly without GPU/extra.
+
+### WP-5.3 Docs polish + release checklist
+
+- **Owns:** `README.md`, `AGENTS.md` final pass, `docs/`.
+- **Goal:** verify every command in AGENTS.md verbatim on a clean machine;
+  fill in anything WPs changed; confirm REFACTOR.md "First Useful Version"
+  bullets are all either delivered or explicitly deferred with a note;
+  update the status board to reflect reality.
+
+---
+
+## Out of scope (do not build, per REFACTOR.md non-goals)
+
+MCP support, agent CLI for reading libraries, semantic/vector search,
+citation graphs, saved searches, cross-paper research workflows, note
+management, v1 migration, live Zotero sync, metadata editing UI, workflow
+DAGs, multi-machine execution, daemon mode, plugin discovery.

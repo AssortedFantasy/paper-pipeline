@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.pyright/
+
+# Test artifacts
+test-results/
+playwright-report/
+tests/fixtures/corpus/*.pdf
+
+# Local configuration and secrets (never committed)
+.env
+.env.*
+
+# v1 reference tree keeps its own environment
+v1/.venv/

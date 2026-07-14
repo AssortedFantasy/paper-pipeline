@@ -1,0 +1,75 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "paper-pipeline"
+version = "2.0.0a0"
+description = "Build portable, agent-searchable paper libraries from Zotero exports."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "jinja2>=3.1",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.4",
+    "rdflib>=7.0",
+]
+
+[project.optional-dependencies]
+# Heavy GPU conversion backend. Never required by the default dev loop.
+marker = [
+    "marker-pdf>=1.0",
+]
+# Remote LLM provider SDKs. Never required by the default dev loop.
+llm = [
+    "openai>=1.50",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "ruff>=0.6",
+    "pyright>=1.1.380",
+    "playwright>=1.47",
+    "pytest-playwright>=0.5",
+]
+
+[project.scripts]
+paper-pipeline = "paper_pipeline.cli:main"
+
+[project.urls]
+Repository = "https://github.com/AssortedFantasy/paper-pipeline"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/paper_pipeline"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+extend-exclude = ["v1"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pyright]
+include = ["src", "tests"]
+exclude = ["v1", ".venv"]
+typeCheckingMode = "standard"
+pythonVersion = "3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# Fast default suite: no GPU, no paid APIs, no real browser.
+addopts = "-m 'not gpu and not llm and not browser'"
+markers = [
+    "gpu: requires a GPU and the 'marker' extra (run explicitly)",
+    "llm: requires real LLM provider credentials (run explicitly)",
+    "browser: requires Playwright browsers (run for UI changes)",
+    "slow: slow but hardware-independent tests",
+]
