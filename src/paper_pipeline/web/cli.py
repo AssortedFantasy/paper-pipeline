@@ -6,6 +6,10 @@ import sys
 import webbrowser
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 def _open_browser(url: str) -> None:
     if os.name == "nt":

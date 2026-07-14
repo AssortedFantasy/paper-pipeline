@@ -12,6 +12,8 @@ function appShell() {
     logLines: [],
     workerRunning: Boolean(initialWorkerState.workerRunning),
     currentCitekey: initialWorkerState.currentCitekey || null,
+    llmWorkerRunning: Boolean(initialWorkerState.llmWorkerRunning),
+    llmCurrentJob: initialWorkerState.llmCurrentJob || null,
     gpu: initialWorkerState.gpu || null,
 
     // ----- filter/sort state -----
@@ -30,6 +32,9 @@ function appShell() {
       page_timeout_seconds: 1800,
       recompute: false,
       no_skipping: false,
+    },
+    llmConfig: {
+      model: 'gpt-5-mini-2025-08-07',
     },
 
     // ----- lifecycle -----
@@ -55,12 +60,19 @@ function appShell() {
       return 'Uses current settings: max ' + this.config.max_pages + ' pages, max ' + this.config.max_size_mb + ' MB, model ' + this.config.model + '.';
     },
 
+    llmCurrentLabel() {
+      if (!this.llmCurrentJob) return 'idle';
+      return this.llmCurrentJob.workflow + ' / ' + this.llmCurrentJob.citekey;
+    },
+
     refreshStatus() {
       fetch('/api/status')
         .then(r => r.json())
         .then(status => {
           this.workerRunning = Boolean(status.worker_running);
           this.currentCitekey = status.current_citekey || null;
+          this.llmWorkerRunning = Boolean(status.llm_worker_running);
+          this.llmCurrentJob = status.llm_current_job || null;
           this.gpu = status.gpu || null;
         })
         .catch(() => {});
@@ -113,6 +125,49 @@ function appShell() {
           this.workerRunning = false;
           this.currentCitekey = null;
           break;
+        case 'workflow_started':
+          this.appendLog('[' + ts + '] \u25B6 ' + d.workflow + ' started: ' + d.citekey);
+          this.updateWorkflowStatus(d.citekey, d.workflow, 'running');
+          this.llmWorkerRunning = true;
+          this.llmCurrentJob = { workflow: d.workflow, citekey: d.citekey };
+          break;
+        case 'workflow_completed':
+          this.appendLog('[' + ts + '] \u2713 ' + d.workflow + ' completed: ' + d.citekey + ' \u2014 ' + d.message);
+          this.updateWorkflowMeta(d.citekey, d.workflow, {
+            status: 'completed',
+            last_run_iso: d.timestamp,
+            error_message: null,
+          });
+          if (this.activeCitekey === d.citekey) {
+            this.openDetail(d.citekey);
+          }
+          break;
+        case 'workflow_failed':
+          this.appendLog('[' + ts + '] \u2717 ' + d.workflow + ' failed: ' + d.citekey + ' \u2014 ' + d.message);
+          this.updateWorkflowMeta(d.citekey, d.workflow, {
+            status: 'failed',
+            last_run_iso: d.timestamp,
+            error_message: d.message,
+          });
+          if (this.activeCitekey === d.citekey) {
+            this.openDetail(d.citekey);
+          }
+          break;
+        case 'workflow_batch_done':
+          this.appendLog('[' + ts + '] \u25A0 LLM batch complete.');
+          this.llmWorkerRunning = false;
+          this.llmCurrentJob = null;
+          break;
+        case 'workflow_batch_cancelled':
+          this.appendLog('[' + ts + '] \u25A0 LLM batch cancelled.');
+          this.llmWorkerRunning = false;
+          this.llmCurrentJob = null;
+          break;
+        case 'workflow_batch_failed':
+          this.appendLog('[' + ts + '] \u2717 LLM batch failed \u2014 ' + d.message);
+          this.llmWorkerRunning = false;
+          this.llmCurrentJob = null;
+          break;
       }
     },
 
@@ -125,6 +180,17 @@ function appShell() {
       const p = this.papers.find(x => x.citation_key === citekey);
       if (!p) return;
       Object.assign(p, patch);
+    },
+
+    updateWorkflowStatus(citekey, workflow, status) {
+      this.updateWorkflowMeta(citekey, workflow, { status });
+    },
+
+    updateWorkflowMeta(citekey, workflow, patch) {
+      const p = this.papers.find(x => x.citation_key === citekey);
+      if (!p) return;
+      const field = workflow + '_workflow';
+      p[field] = Object.assign({}, p[field] || {}, patch);
     },
 
     appendLog(text) {
@@ -267,6 +333,38 @@ function appShell() {
       fetch('/api/transcribe/stop', { method: 'POST' })
         .then(r => r.json())
         .then(() => this.appendLog('[Stop requested]'));
+
+      if (this.llmWorkerRunning) {
+        fetch('/api/workflows/stop', { method: 'POST' })
+          .then(r => r.json())
+          .then(() => this.appendLog('[LLM stop requested]'));
+      }
+    },
+
+    runWorkflow(workflow, citekeys = null) {
+      const keys = citekeys || this.selectedKeys();
+      if (!keys.length) return;
+
+      fetch('/api/workflows/' + workflow, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          citekeys: keys,
+          config: this.llmConfig,
+        }),
+      })
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) {
+          this.appendLog('[Error] ' + data.error);
+          return;
+        }
+        this.llmWorkerRunning = true;
+        this.appendLog('[Started ' + workflow + ' workflow: ' + data.started + ' papers | model ' + data.config.model + ']');
+      })
+      .catch(() => {
+        this.appendLog('[Error] Failed to start ' + workflow + ' workflow.');
+      });
     },
 
     rerunPaper(citekey, forceRecompute = false) {

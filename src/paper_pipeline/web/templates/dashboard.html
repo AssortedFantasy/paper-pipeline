@@ -8,6 +8,9 @@
       <div class="controls-group">
         <button class="btn btn-primary" @click="transcribeSelected()" :disabled="selectedKeys().length === 0">Transcribe Selected</button>
         <button class="btn btn-secondary" @click="transcribeAll()">Transcribe All Pending</button>
+        <button class="btn btn-primary" @click="runWorkflow('intro')" :disabled="selectedKeys().length === 0 || llmWorkerRunning">Run Intro Filter</button>
+        <button class="btn btn-primary" @click="runWorkflow('method')" :disabled="selectedKeys().length === 0 || llmWorkerRunning">Run Method Filter</button>
+        <button class="btn btn-primary" @click="runWorkflow('both')" :disabled="selectedKeys().length === 0 || llmWorkerRunning">Run Both Filters</button>
         <button class="btn btn-danger" @click="stopBatch()">Stop</button>
       </div>
       <div class="controls-group">
@@ -22,6 +25,9 @@
         <label>Timeout (s) <input type="number" x-model.number="config.page_timeout_seconds" min="60" max="7200" class="input-sm"></label>
       </div>
       <div class="controls-group">
+        <label>LLM
+          <input type="text" x-model="llmConfig.model" class="input-sm input-wide">
+        </label>
         <label class="checkbox-label"><input type="checkbox" x-model="config.recompute"> Recompute</label>
         <label class="checkbox-label"><input type="checkbox" x-model="config.no_skipping"> No-skipping</label>
       </div>
@@ -52,6 +58,8 @@
           <th class="col-pages sortable" @click="toggleSort('page_count')" :data-dir="sortCol==='page_count' ? sortDir : null">Pages</th>
           <th class="col-size sortable" @click="toggleSort('size_mb')" :data-dir="sortCol==='size_mb' ? sortDir : null">Size MB</th>
           <th class="col-status sortable" @click="toggleSort('transcription_status')" :data-dir="sortCol==='transcription_status' ? sortDir : null">Status</th>
+          <th class="col-workflow">Intro</th>
+          <th class="col-workflow">Method</th>
           <th class="col-date sortable" @click="toggleSort('last_run_iso')" :data-dir="sortCol==='last_run_iso' ? sortDir : null">Last Run</th>
           <th class="col-actions">Actions</th>
         </tr>
@@ -74,6 +82,16 @@
               <span class="status-badge" :class="'status-' + p.transcription_status"
                     :title="p.error_message || ''"
                     x-text="p.transcription_status"></span>
+            </td>
+            <td class="col-workflow">
+              <span class="status-badge" :class="'status-' + p.intro_workflow.status"
+                    :title="p.intro_workflow.error_message || ''"
+                    x-text="p.intro_workflow.status"></span>
+            </td>
+            <td class="col-workflow">
+              <span class="status-badge" :class="'status-' + p.method_workflow.status"
+                    :title="p.method_workflow.error_message || ''"
+                    x-text="p.method_workflow.status"></span>
             </td>
             <td class="col-date" x-text="p.last_run_iso ? p.last_run_iso.substring(0,16) : '\u2014'"></td>
             <td class="col-actions" @click.stop>

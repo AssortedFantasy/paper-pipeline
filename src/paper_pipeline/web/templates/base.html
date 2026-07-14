@@ -33,6 +33,11 @@
               x-text="workerRunning ? 'Running: ' + (currentCitekey || 'unknown') : 'Idle'">
           {% if worker_running %}Running: {{ current_citekey }}{% else %}Idle{% endif %}
         </span>
+        <span class="header-badge"
+              :class="llmWorkerRunning ? 'badge-running' : 'badge-idle'"
+              x-text="llmWorkerRunning ? ('LLM: ' + llmCurrentLabel()) : 'LLM idle'">
+          {% if llm_worker_running and llm_current_job %}LLM: {{ llm_current_job.workflow }} / {{ llm_current_job.citekey }}{% else %}LLM idle{% endif %}
+        </span>
       </div>
     </header>
 
@@ -61,6 +66,8 @@
     window._workerState = {
       workerRunning: {{ 'true' if worker_running else 'false' }},
       currentCitekey: {{ current_citekey | default(None) | tojson }},
+      llmWorkerRunning: {{ 'true' if llm_worker_running else 'false' }},
+      llmCurrentJob: {{ llm_current_job | default(None) | tojson }},
       gpu: {{ gpu | default(None) | tojson }},
     };
   </script>

@@ -3,6 +3,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from .formatting import format_meta, format_placeholder, write_text
 from .locking import acquire_run_lock, release_run_lock
 from .models import PaperRecord

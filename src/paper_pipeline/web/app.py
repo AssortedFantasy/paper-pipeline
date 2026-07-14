@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from queue import Empty
 
@@ -14,6 +15,7 @@ from ..models import PaperRecord
 from ..rdf_parser import load_records
 from ..runner import get_pdf_page_count
 from ..state import scan_all_status
+from .llm_worker import LlmWorkflowWorker
 from .worker import TranscriptionWorker
 
 DEFAULT_ALLOWED_TYPES = {"conferencePaper", "journalArticle", "preprint"}
@@ -61,6 +63,15 @@ def _normalize_run_config(config: dict | None) -> dict:
     }
 
 
+def _normalize_llm_config(config: dict | None) -> dict:
+    config = config or {}
+    default_model = os.getenv("PAPER_PIPELINE_LLM_MODEL") or "gpt-5-mini-2025-08-07"
+    model = str(config.get("model") or default_model).strip()
+    return {
+        "model": model or default_model,
+    }
+
+
 def create_app(
     workspace_root: Path | None = None,
     rdf_path: Path | None = None,
@@ -84,14 +95,33 @@ def create_app(
     asset_version = _asset_version()
 
     worker = TranscriptionWorker(papers_dir, workspace_root)
+    llm_worker = LlmWorkflowWorker(papers_dir, workspace_root)
 
     def _base_context() -> dict:
         return {
             "gpu": worker.get_gpu_status(),
             "worker_running": worker.is_running,
             "current_citekey": worker.current_citekey,
+            "llm_worker_running": llm_worker.is_running,
+            "llm_current_job": llm_worker.current_job,
             "workspace_root": str(workspace_root),
             "asset_version": asset_version,
+        }
+
+    def _workflow_summary(status, workflow_name: str) -> dict:
+        if status is None:
+            return {
+                "status": "pending",
+                "last_run_iso": None,
+                "error_message": None,
+                "output_path": None,
+            }
+        workflow = status.llm_workflows[workflow_name]
+        return {
+            "status": workflow.status,
+            "last_run_iso": workflow.last_run_iso,
+            "error_message": workflow.error_message,
+            "output_path": workflow.output_path,
         }
 
     def _load_records() -> list[PaperRecord]:
@@ -129,6 +159,8 @@ def create_app(
                     else "pending",
                     "last_run_iso": status.last_run_iso if status else None,
                     "error_message": status.error_message if status else None,
+                    "intro_workflow": _workflow_summary(status, "intro"),
+                    "method_workflow": _workflow_summary(status, "method"),
                 }
             )
         return rows
@@ -213,8 +245,37 @@ def create_app(
             "worker_running": worker.is_running,
             "current_citekey": worker.current_citekey,
             "queued": worker.queued_citekeys,
+            "llm_worker_running": llm_worker.is_running,
+            "llm_current_job": llm_worker.current_job,
+            "llm_queued": llm_worker.queued_jobs,
             "gpu": gpu,
         }
+
+    @app.post("/api/workflows/stop")
+    async def api_stop_workflows():
+        llm_worker.request_stop()
+        return {"stopped": True}
+
+    @app.post("/api/workflows/{workflow_name}")
+    async def api_run_workflow(workflow_name: str, request: Request):
+        body = await request.json()
+        citekeys: list[str] = body.get("citekeys", [])
+        config = _normalize_llm_config(body.get("config"))
+
+        if llm_worker.is_running:
+            return {"error": "An LLM workflow batch is already running.", "started": 0}
+
+        records = _load_records()
+        record_map = {r.citation_key: r for r in records}
+        selected = [record_map[k] for k in citekeys if k in record_map]
+        if not selected:
+            return {"error": "No valid papers were selected.", "started": 0}
+
+        try:
+            count = llm_worker.enqueue(workflow_name, selected, config)
+        except RuntimeError as exc:
+            return {"error": str(exc), "started": 0}
+        return {"started": count, "workflow": workflow_name, "config": config}
 
     @app.post("/api/transcribe/preview")
     async def api_transcribe_preview(request: Request):
@@ -261,20 +322,31 @@ def create_app(
     @app.get("/api/stream")
     async def api_stream():
         q = worker.subscribe()
+        llm_q = llm_worker.subscribe()
 
         async def event_generator():
             try:
                 yield "event: connected\ndata: {}\n\n"
                 while True:
+                    sent_event = False
                     try:
                         event = q.get_nowait()
                         yield event.to_sse()
+                        sent_event = True
                     except Empty:
-                        # Send keepalive
+                        pass
+                    try:
+                        event = llm_q.get_nowait()
+                        yield event.to_sse()
+                        sent_event = True
+                    except Empty:
+                        pass
+                    if not sent_event:
                         yield ": keepalive\n\n"
                     await asyncio.sleep(0.5)
             finally:
                 worker.unsubscribe(q)
+                llm_worker.unsubscribe(llm_q)
 
         return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -286,11 +358,23 @@ def create_app(
 
         paper_dir = papers_dir / citekey
         transcribed_path = paper_dir / "transcribed.md"
+        intro_filtered_path = paper_dir / "intro_filtered.md"
+        method_filtered_path = paper_dir / "method_filtered.md"
         log_path = paper_dir / "nougat_raw" / "nougat.log"
 
         transcribed_content = (
             transcribed_path.read_text(encoding="utf-8")
             if transcribed_path.exists()
+            else ""
+        )
+        intro_filtered_content = (
+            intro_filtered_path.read_text(encoding="utf-8")
+            if intro_filtered_path.exists()
+            else ""
+        )
+        method_filtered_content = (
+            method_filtered_path.read_text(encoding="utf-8")
+            if method_filtered_path.exists()
             else ""
         )
         log_content = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
@@ -311,6 +395,8 @@ def create_app(
             "record": record,
             "citekey": citekey,
             "transcribed_content": transcribed_content,
+            "intro_filtered_content": intro_filtered_content,
+            "method_filtered_content": method_filtered_content,
             "log_content": log_content,
             "page_count": page_count,
             "size_mb": size_mb,

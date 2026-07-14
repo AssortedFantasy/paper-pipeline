@@ -13,6 +13,9 @@
   <div class="detail-actions">
     <button class="btn btn-primary btn-xs" @click="rerunPaper('{{ citekey }}')">Run With Current Settings</button>
     <button class="btn btn-xs" @click="rerunPaper('{{ citekey }}', true)">Force Recompute</button>
+    <button class="btn btn-primary btn-xs" @click="runWorkflow('intro', ['{{ citekey }}'])">Run Intro Filter</button>
+    <button class="btn btn-primary btn-xs" @click="runWorkflow('method', ['{{ citekey }}'])">Run Method Filter</button>
+    <button class="btn btn-primary btn-xs" @click="runWorkflow('both', ['{{ citekey }}'])">Run Both</button>
     <span class="detail-run-summary" x-text="detailRunSummary()"></span>
   </div>
 </div>
@@ -21,6 +24,8 @@
 <div class="detail-tabs">
   <button class="detail-tab" :class="{ active: tab === 'meta' }" @click="tab = 'meta'">Metadata</button>
   <button class="detail-tab" :class="{ active: tab === 'transcript' }" @click="tab = 'transcript'">Transcript</button>
+  <button class="detail-tab" :class="{ active: tab === 'intro' }" @click="tab = 'intro'">Intro Filter</button>
+  <button class="detail-tab" :class="{ active: tab === 'method' }" @click="tab = 'method'">Method Filter</button>
   {% if log_content %}
   <button class="detail-tab" :class="{ active: tab === 'log' }" @click="tab = 'log'">Nougat Log</button>
   {% endif %}
@@ -57,6 +62,48 @@
     {% else %}
     <div class="detail-box"><p class="muted">No transcription available.</p></div>
     {% endif %}
+  </div>
+
+  <div x-show="tab === 'intro'" x-transition>
+    <div class="detail-box">
+      <div class="workflow-meta-row">
+        <span class="status-badge status-{{ status.llm_workflows['intro'].status if status else 'pending' }}">
+          {{ status.llm_workflows['intro'].status if status else 'pending' }}
+        </span>
+        {% if status and status.llm_workflows['intro'].last_run_iso %}
+        <span>{{ status.llm_workflows['intro'].last_run_iso[:16] }}</span>
+        {% endif %}
+      </div>
+      {% if intro_filtered_content %}
+      <pre class="content-pre">{{ intro_filtered_content }}</pre>
+      {% else %}
+      <p class="muted">No intro filter output available.</p>
+      {% endif %}
+      {% if status and status.llm_workflows['intro'].error_message %}
+      <pre class="error-text">{{ status.llm_workflows['intro'].error_message }}</pre>
+      {% endif %}
+    </div>
+  </div>
+
+  <div x-show="tab === 'method'" x-transition>
+    <div class="detail-box">
+      <div class="workflow-meta-row">
+        <span class="status-badge status-{{ status.llm_workflows['method'].status if status else 'pending' }}">
+          {{ status.llm_workflows['method'].status if status else 'pending' }}
+        </span>
+        {% if status and status.llm_workflows['method'].last_run_iso %}
+        <span>{{ status.llm_workflows['method'].last_run_iso[:16] }}</span>
+        {% endif %}
+      </div>
+      {% if method_filtered_content %}
+      <pre class="content-pre">{{ method_filtered_content }}</pre>
+      {% else %}
+      <p class="muted">No method filter output available.</p>
+      {% endif %}
+      {% if status and status.llm_workflows['method'].error_message %}
+      <pre class="error-text">{{ status.llm_workflows['method'].error_message }}</pre>
+      {% endif %}
+    </div>
   </div>
 
   {% if log_content %}

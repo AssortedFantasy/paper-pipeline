@@ -214,6 +214,7 @@ label {
   border-radius: var(--radius);
 }
 select.input-sm { width: auto; }
+.input-wide { width: 92px; }
 
 .checkbox-label {
   font-size: 12px;
@@ -322,6 +323,7 @@ th[data-dir="desc"]::after { content: " \25BC"; font-size: 9px; }
 .col-pages { width: 60px; text-align: right; }
 .col-size { width: 70px; text-align: right; }
 .col-status { width: 90px; }
+.col-workflow { width: 85px; }
 .col-date { width: 140px; font-size: 11px; }
 .col-actions { width: 60px; }
 
@@ -415,6 +417,15 @@ th[data-dir="desc"]::after { content: " \25BC"; font-size: 9px; }
 .detail-run-summary {
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.workflow-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
 }
 
 .detail-content {

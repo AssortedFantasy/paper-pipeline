@@ -23,6 +23,32 @@ class PaperRecord:
 
 
 @dataclass
+class WorkflowStatus:
+    status: str = "pending"  # pending | running | completed | failed
+    last_run_iso: str | None = None
+    error_message: str | None = None
+    output_path: str | None = None
+
+    def to_dict(self) -> dict:
+        return {
+            "status": self.status,
+            "last_run_iso": self.last_run_iso,
+            "error_message": self.error_message,
+            "output_path": self.output_path,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict | None) -> "WorkflowStatus":
+        data = data or {}
+        return cls(
+            status=data.get("status", "pending"),
+            last_run_iso=data.get("last_run_iso"),
+            error_message=data.get("error_message"),
+            output_path=data.get("output_path"),
+        )
+
+
+@dataclass
 class PaperStatus:
     citation_key: str
     page_count: int | None = None
@@ -31,6 +57,14 @@ class PaperStatus:
     last_run_iso: str | None = None
     error_message: str | None = None
     log_path: str | None = None
+    llm_workflows: dict[str, WorkflowStatus] | None = None
+
+    def __post_init__(self) -> None:
+        self.llm_workflows = {
+            "intro": WorkflowStatus(),
+            "method": WorkflowStatus(),
+            **(self.llm_workflows or {}),
+        }
 
     def to_dict(self) -> dict:
         return {
@@ -41,6 +75,10 @@ class PaperStatus:
             "last_run_iso": self.last_run_iso,
             "error_message": self.error_message,
             "log_path": self.log_path,
+            "llm_workflows": {
+                name: workflow.to_dict()
+                for name, workflow in (self.llm_workflows or {}).items()
+            },
         }
 
     @classmethod
@@ -53,6 +91,10 @@ class PaperStatus:
             last_run_iso=data.get("last_run_iso"),
             error_message=data.get("error_message"),
             log_path=data.get("log_path"),
+            llm_workflows={
+                name: WorkflowStatus.from_dict(workflow_data)
+                for name, workflow_data in (data.get("llm_workflows") or {}).items()
+            },
         )
 
 

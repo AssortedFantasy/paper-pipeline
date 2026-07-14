@@ -7,10 +7,19 @@ from pathlib import Path
 from .models import PaperRecord, PaperStatus
 
 STATUS_FILENAME = "status.json"
+WORKFLOW_OUTPUTS = {
+    "intro": "intro_filtered.md",
+    "method": "method_filtered.md",
+}
 
 
 def _status_path(paper_dir: Path) -> Path:
     return paper_dir / STATUS_FILENAME
+
+
+def _workflow_output_path(paper_dir: Path, workflow_name: str) -> Path:
+    filename = WORKFLOW_OUTPUTS[workflow_name]
+    return paper_dir / filename
 
 
 def is_pending_transcription(transcribed_path: Path) -> bool:
@@ -45,6 +54,12 @@ def load_paper_status(paper_dir: Path, citation_key: str) -> PaperStatus:
     transcribed_path = paper_dir / "transcribed.md"
     if transcribed_path.exists() and not is_pending_transcription(transcribed_path):
         status.transcription_status = "completed"
+    for workflow_name in WORKFLOW_OUTPUTS:
+        workflow = status.llm_workflows[workflow_name]
+        output_path = _workflow_output_path(paper_dir, workflow_name)
+        if output_path.exists():
+            workflow.status = "completed"
+            workflow.output_path = str(output_path)
     return status
 
 
@@ -81,6 +96,45 @@ def mark_failed(paper_dir: Path, citation_key: str, error: str) -> PaperStatus:
     return status
 
 
+def mark_workflow_running(
+    paper_dir: Path, citation_key: str, workflow_name: str
+) -> PaperStatus:
+    status = load_paper_status(paper_dir, citation_key)
+    workflow = status.llm_workflows[workflow_name]
+    workflow.status = "running"
+    workflow.last_run_iso = datetime.now(timezone.utc).isoformat()
+    workflow.error_message = None
+    workflow.output_path = str(_workflow_output_path(paper_dir, workflow_name))
+    save_paper_status(paper_dir, status)
+    return status
+
+
+def mark_workflow_completed(
+    paper_dir: Path, citation_key: str, workflow_name: str
+) -> PaperStatus:
+    status = load_paper_status(paper_dir, citation_key)
+    workflow = status.llm_workflows[workflow_name]
+    workflow.status = "completed"
+    workflow.last_run_iso = datetime.now(timezone.utc).isoformat()
+    workflow.error_message = None
+    workflow.output_path = str(_workflow_output_path(paper_dir, workflow_name))
+    save_paper_status(paper_dir, status)
+    return status
+
+
+def mark_workflow_failed(
+    paper_dir: Path, citation_key: str, workflow_name: str, error: str
+) -> PaperStatus:
+    status = load_paper_status(paper_dir, citation_key)
+    workflow = status.llm_workflows[workflow_name]
+    workflow.status = "failed"
+    workflow.last_run_iso = datetime.now(timezone.utc).isoformat()
+    workflow.error_message = error
+    workflow.output_path = str(_workflow_output_path(paper_dir, workflow_name))
+    save_paper_status(paper_dir, status)
+    return status
+
+
 def scan_all_status(
     papers_dir: Path, records: list[PaperRecord]
 ) -> dict[str, PaperStatus]:
@@ -101,6 +155,14 @@ def scan_all_status(
         log_path = paper_dir / "nougat_raw" / "nougat.log"
         if log_path.exists():
             status.log_path = str(log_path)
+
+        for workflow_name in WORKFLOW_OUTPUTS:
+            workflow = status.llm_workflows[workflow_name]
+            output_path = _workflow_output_path(paper_dir, workflow_name)
+            if output_path.exists():
+                workflow.output_path = str(output_path)
+                if workflow.status == "pending":
+                    workflow.status = "completed"
 
         result[record.citation_key] = status
     return result
