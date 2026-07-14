@@ -4,7 +4,7 @@ This is the innermost package. It must not import from any other
 ``paper_pipeline`` subpackage, and it must never import FastAPI, Marker,
 RDF tooling, or LLM SDKs.
 
-Responsibilities (see REFACTOR.md "Library Model and Storage"):
+Responsibilities (ADR-0002):
 
 - The versioned library format and its invariants.
 - Paper identity (citekeys), metadata, and source ownership.

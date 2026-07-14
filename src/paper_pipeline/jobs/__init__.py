@@ -1,6 +1,6 @@
 """Job execution: the single shared operational layer for all heavy work.
 
-Responsibilities (see REFACTOR.md "Jobs and Operations"):
+Responsibilities (ADR-0004):
 
 - Queueing and task state transitions (``model``).
 - Scheduling policies per task category (``queue``): GPU conversion is

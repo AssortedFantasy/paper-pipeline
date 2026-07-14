@@ -29,10 +29,11 @@ WP here.
 | 1.3 | Library validator | 1.1 | todo |
 | 2A.1 | Zotero RDF parsing + fixtures | 0.1 | todo |
 | 2A.2 | Import planning (preview) | 2A.1, 1.1 | todo |
-| 2B.0 | Marker spike + PDF corpus (GATE) | 0.1 | todo |
+| 2B.0 | Marker corpus, pins, runtime characterization | 0.1 | todo |
 | 2B.1 | Fake converter + contract tests | 0.1 | todo |
 | 2B.2 | Child-process conversion runner | 2B.1 | todo |
 | 2B.3 | Marker adapter + GPU smoke test | 2B.0, 2B.2 | todo |
+| 2B.4 | Remote conversion over SSH (conditional) | 2B.3 | conditional |
 | 2C.1 | Recipe template parsing + built-ins | 0.1 | todo |
 | 2C.2 | LLM providers (fake + OpenAI) | 0.1 | todo |
 | 2C.3 | Recipe runner + provenance | 2C.1, 2C.2, 1.2 | todo |
@@ -53,13 +54,14 @@ WP here.
 | 5.1 | Clean-environment smoke test | 3.x, 4.1 | todo |
 | 5.2 | End-to-end golden run (GPU) | 2B.3, 3.3 | todo |
 | 5.3 | Docs polish + release checklist | all | todo |
+| 5.4 | Decommission scaffolding (v1/, REFACTOR.md, PLAN.md) | 5.1–5.3 | todo |
 
 ### Parallelization guide
 
 - After **1.1** lands, tracks **A, B, C, D, E** are mutually independent —
   up to five agents can run concurrently, one per track.
-- **2B.0** (Marker spike) touches no shared code and can start immediately,
-  in parallel with everything.
+- **2B.0** (Marker corpus + pins) touches no shared code and can start
+  immediately, in parallel with everything.
 - Phase 3 WPs are independent of each other; Phase 4 WPs 4.2–4.5 are
   independent of each other after 4.1.
 - File ownership: track A owns `ingest/`, B owns `convert/`, C owns
@@ -187,19 +189,22 @@ plan, sanity tests.
 
 ### Track B — Conversion
 
-#### WP-2B.0 Marker spike + PDF corpus (DECISION GATE)
+#### WP-2B.0 Marker corpus, pins, runtime characterization
 
-- **Owns:** `tests/fixtures/corpus/manifest.json`, a throwaway spike report
-  posted in the PR (not committed as a doc file).
-- **Goal:** REFACTOR.md requires a representative quality and runtime test
-  *before* the Marker implementation is finalized. Assemble the PDF corpus
-  (native text, multi-column, equations, tables, figures, scanned; record
-  source URLs in `manifest.json`), run Marker on it manually on the target
-  Windows/CUDA machine, and report: output quality per class, runtime,
-  VRAM, install friction (torch/CUDA pinning needed in the `marker` extra).
-- **Outcome:** go/no-go on Marker and the exact dependency pins for the
-  `marker` extra. **If no-go, stop track B and escalate — ADR-0001 must be
-  amended with an alternative backend.**
+- **Owns:** `tests/fixtures/corpus/manifest.json`, `marker` extra pins in
+  `pyproject.toml`, a short report posted in the PR (not committed as a doc
+  file).
+- **Goal:** Marker quality has already been informally validated on one
+  paper and looks good; this WP broadens that to a representative corpus and
+  nails down the environment. Assemble the PDF corpus (native text,
+  multi-column, equations, tables, figures, scanned; record source URLs in
+  `manifest.json`), run Marker across it on the target GPU machine, and
+  report: per-class quality notes, runtime per paper, VRAM peak, and the
+  exact torch/CUDA pinning the `marker` extra needs (v1 required a cu128
+  index on Windows).
+- **Outcome:** committed corpus manifest + committed extra pins. Only
+  escalate (ADR-0001 amendment) if a whole document class fails badly —
+  full no-go is considered unlikely.
 
 #### WP-2B.1 Fake converter + contract tests
 
@@ -227,14 +232,33 @@ plan, sanity tests.
 
 #### WP-2B.3 Marker adapter + GPU smoke test
 
-- **Owns:** `convert/marker.py`, `marker` extra pins in `pyproject.toml`,
-  `tests/convert/test_marker_gpu.py` (marked `gpu`).
+- **Owns:** `convert/marker.py`, `tests/convert/test_marker_gpu.py`
+  (marked `gpu`).
 - **Goal:** Marker adapter per the module docstring, using the pins decided
   in WP-2B.0; normalize Marker output (markdown, images, metadata) into
   `ConversionResult`; capture backend version.
 - **Tests:** `gpu`-marked smoke test converting one small corpus PDF
   end-to-end through the runner, asserting non-empty transcription and
   figure handling; skipped cleanly when extra/GPU absent.
+
+#### WP-2B.4 Remote conversion over SSH (conditional)
+
+- **Status:** conditional — build only when the owner asks for it; requires
+  a small ADR first.
+- **Owns:** `convert/remote.py`, `tests/convert/test_remote.py`, ADR-0005.
+- **Goal:** run Marker on a remote GPU host (e.g. `ssh noesis`, Ubuntu +
+  3090) instead of a local child process. The converter contract already
+  supports this shape: a remote runner copies `request.pdf_path` to the
+  host, runs the same child-process entry point there, and syncs results
+  back into `request.staging_dir`; validation and atomic install are
+  unchanged. The job queue still sees one `CONVERSION` category at
+  concurrency 1 — this is a remote *backend*, not distributed processing.
+- **Requirements:** host/alias comes from `AppConfig` (never stored in the
+  library); cancellation kills the SSH client *and* the remote process
+  (`ssh -tt` or a remote pidfile + kill); a dead connection maps to
+  `ok=False` with a clear error, never a hang past timeout.
+- **Tests:** default-suite tests fake the transport (local "remote" via
+  subprocess); an opt-in marked test exercises a real host if configured.
 
 ### Track C — Recipes
 
@@ -482,6 +506,22 @@ plan, sanity tests.
   fill in anything WPs changed; confirm REFACTOR.md "First Useful Version"
   bullets are all either delivered or explicitly deferred with a note;
   update the status board to reflect reality.
+
+### WP-5.4 Decommission scaffolding
+
+- **Owns:** repository root cleanup. **Requires explicit owner sign-off
+  before deleting anything.**
+- **Goal:** the repo's transitional artifacts exist only to build v2;
+  keeping them past completion is tech debt. After WP-5.3:
+  1. Migrate any still-binding requirement statements from REFACTOR.md into
+     AGENTS.md or a new ADR (most are already covered by ADRs 0001–0004).
+  2. Delete `v1/` and `REFACTOR.md`.
+  3. Delete PLAN.md (git history is the archive).
+  4. Scrub transient references from the codebase: `rg -l "REFACTOR|PLAN\.md|WP-[0-9]|v1/" src tests docs README.md AGENTS.md`
+     must come back clean afterwards (ADR history sections excepted).
+  5. Update AGENTS.md's sources-of-truth table to its permanent form.
+- **Tests:** full required-checks pass after deletion; the `rg` sweep above
+  is the acceptance check.
 
 ---
 

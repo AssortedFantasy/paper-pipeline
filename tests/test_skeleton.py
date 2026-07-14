@@ -40,6 +40,7 @@ def test_layout_constants() -> None:
 
 def test_healthz() -> None:
     from fastapi.testclient import TestClient
+
     from paper_pipeline.web.app import create_app
 
     client = TestClient(create_app())

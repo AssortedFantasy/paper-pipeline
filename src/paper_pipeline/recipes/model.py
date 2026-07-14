@@ -12,7 +12,7 @@ A recipe is a Markdown file with YAML front matter (ADR-0003):
     Format them as a bulleted list.
     Output only the contributions.
 
-Parsing and validation implemented by WP-2C.1 (see PLAN.md).
+Parsing and validation implemented by WP-2C.1.
 """
 
 from dataclasses import dataclass

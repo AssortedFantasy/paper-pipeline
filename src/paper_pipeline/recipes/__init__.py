@@ -1,6 +1,6 @@
 """Enrichment recipes: compact LLM-generated Markdown artifacts per paper.
 
-Responsibilities (see REFACTOR.md "Analysis and Enrichment Recipes"):
+Responsibilities:
 
 - Load and validate recipe definitions (``model``).
 - Provide the LLM provider contract and adapters (``provider``).

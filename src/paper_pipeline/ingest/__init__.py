@@ -1,6 +1,6 @@
 """Zotero ingestion: parse RDF exports and plan repeatable imports.
 
-Responsibilities (see REFACTOR.md "Zotero Ingestion"):
+Responsibilities:
 
 - Parse Zotero RDF exports and locate exported attachments.
 - Normalize Zotero-specific data into ``ImportRecord`` objects using the

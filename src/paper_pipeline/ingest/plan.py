@@ -1,6 +1,6 @@
 """Import planning: compare an export snapshot with the current library.
 
-Implemented by WP-2A.2 (see PLAN.md). Produces an ``ImportPlan``:
+Implemented by WP-2A.2. Produces an ``ImportPlan``:
 
 - ``additions``: records whose citekey is not in the library.
 - ``refreshes``: records whose citekey exists; metadata will be replaced.

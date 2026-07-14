@@ -1,4 +1,4 @@
-"""FastAPI application factory. Routes implemented by WP-4.1 (see PLAN.md)."""
+"""FastAPI application factory. Routes implemented by WP-4.1."""
 
 from fastapi import FastAPI
 

@@ -1,6 +1,6 @@
 """Index generation: concise, rebuildable, agent-oriented text files.
 
-Responsibilities (see REFACTOR.md "Agent-Oriented Indexes and Retrieval"):
+Responsibilities:
 
 - Read canonical paper content (``paper.json`` files and generated outputs).
 - Produce the ``indexes/`` files, the library's root ``AGENTS.md``, and its

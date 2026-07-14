@@ -1,1 +1,1 @@
-"""Index builders. Implemented by WP-2E.1 (see PLAN.md)."""
+"""Index builders. Implemented by WP-2E.1."""

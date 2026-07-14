@@ -1,6 +1,6 @@
 """Application configuration.
 
-Responsibilities (see REFACTOR.md "Configuration and Secrets"):
+Responsibilities:
 
 - Load user-level application settings from environment variables and an
   optional user config file (``PAPER_PIPELINE_*`` env vars take precedence).
@@ -10,7 +10,7 @@ Responsibilities (see REFACTOR.md "Configuration and Secrets"):
 
 Libraries carry no configuration. Prefer sensible defaults over new settings.
 
-Implemented by WP-0.2 (see PLAN.md).
+Implemented by WP-0.2.
 """
 
 from pydantic_settings import BaseSettings, SettingsConfigDict

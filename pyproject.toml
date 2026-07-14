@@ -59,6 +59,9 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.pyright]
 include = ["src", "tests"]
 exclude = ["v1", ".venv"]
+# "standard", not "strict": rdflib and marker-pdf are poorly typed, and
+# pyright cannot scope strictness per package. Revisit at WP-5.3 once the
+# well-typed core (library/, jobs/) exists to measure the cost on.
 typeCheckingMode = "standard"
 pythonVersion = "3.12"
 

@@ -1,9 +1,9 @@
 """Application services: the single implementation of user-level operations.
 
 Both the web API and the CLI call these functions; business rules live here
-and nowhere above (see REFACTOR.md "Application Services").
+and nowhere above (see AGENTS.md architecture rules).
 
-Operations (implemented by WP-3.1..3.3, see PLAN.md):
+Operations (implemented by WP-3.1..3.3):
 
 - ``create_library`` / ``open_library`` / ``validate_library``
 - ``preview_import(library, export_path) -> ImportPlan``

@@ -15,13 +15,19 @@ workspace, not a search service, not a note manager.
 
 ## Sources of truth
 
-| Question | Where to look |
-| --- | --- |
-| What should the product do? | `REFACTOR.md` (requirements; do not contradict it) |
-| What work exists and in what order? | `PLAN.md` (work packages) |
-| How were contested decisions settled? | `docs/adr/` |
-| How do I operate in this repo? | This file |
-| Old implementation | `v1/` — **reference only. Never import from it, never modify it, never copy its patterns uncritically.** |
+| Question | Where to look | Lifetime |
+| --- | --- | --- |
+| What should the product do? | `REFACTOR.md` (requirements; do not contradict it) | scaffolding — deleted at WP-5.4 |
+| What work exists and in what order? | `PLAN.md` (work packages) | scaffolding — deleted at WP-5.4 |
+| How were contested decisions settled? | `docs/adr/` | permanent |
+| How do I operate in this repo? | This file | permanent |
+| Old implementation | `v1/` — **reference only. Never import from it, never modify it, never copy its patterns uncritically.** | scaffolding — deleted at WP-5.4 |
+
+**Scaffolding rule:** `REFACTOR.md`, `PLAN.md`, and `v1/` exist only to build
+v2 and will be deleted when the plan completes (WP-5.4). Do not reference
+them from source code or docstrings — permanent references may only target
+`AGENTS.md` or `docs/adr/`. Transient `WP-x.y` markers in docstrings are
+allowed during development and are scrubbed at WP-5.4.
 
 If REFACTOR.md and code disagree, REFACTOR.md wins. If you need a decision
 that is not covered, write an ADR proposal rather than improvising a

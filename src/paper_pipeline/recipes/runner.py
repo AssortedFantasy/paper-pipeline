@@ -1,6 +1,6 @@
 """Recipe execution: resolve input, call provider, validate, add provenance.
 
-Implemented by WP-2C.3 (see PLAN.md). For one (paper, recipe) pair:
+Implemented by WP-2C.3. For one (paper, recipe) pair:
 
 1. Resolve the declared input (transcription text or source PDF); fail
    fast with a clear error if it is missing.

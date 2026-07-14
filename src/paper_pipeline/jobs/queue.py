@@ -1,6 +1,6 @@
 """Job queue and scheduler.
 
-Implemented by WP-2D.1/2D.2 (see PLAN.md). Enforces the scheduling policies:
+Implemented by WP-2D.1/2D.2. Enforces the scheduling policies:
 
 - ``CONVERSION``: global concurrency 1 (configurable, default 1).
 - ``RECIPE``: up to ``llm_concurrency`` jobs across papers, but never more

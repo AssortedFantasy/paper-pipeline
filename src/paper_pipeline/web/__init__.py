@@ -4,7 +4,7 @@ Approach (ADR-0001): server-rendered Jinja2 templates progressively enhanced
 with htmx; job progress streams over Server-Sent Events. No SPA framework,
 no client-side paper/job database.
 
-Rules (see REFACTOR.md "Browser UI and UX"):
+Rules:
 
 - Routes translate HTTP <-> service calls; no business logic in routes,
   templates, or JavaScript.

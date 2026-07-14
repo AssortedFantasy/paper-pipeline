@@ -1,6 +1,6 @@
 """Fake implementations of external contracts for the fast test suite.
 
-Expanded by the work packages that need them (see PLAN.md):
+Expanded by the work packages that need them:
 
 - ``FakeConverter``: implements ``convert.contract.Converter``. Writes a tiny
   deterministic transcription and optional figure files into the staging

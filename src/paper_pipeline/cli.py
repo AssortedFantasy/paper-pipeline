@@ -1,7 +1,7 @@
 """Command-line entry point.
 
 Thin argument parsing over application services — no business logic here.
-Subcommands are implemented alongside their services (see PLAN.md):
+Subcommands are implemented alongside their services:
 
 - ``serve``     : run the web dashboard (WP-4.1)
 - ``doctor``    : environment/health checks with actionable errors (WP-0.2)
@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         parser.print_help()
         return 0
-    print(f"'{args.command}' is not implemented yet; see PLAN.md.", file=sys.stderr)
+    print(f"'{args.command}' is not implemented yet.", file=sys.stderr)
     return 2
 
 

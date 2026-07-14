@@ -1,6 +1,6 @@
 """Document conversion: PDF -> Markdown through a replaceable converter contract.
 
-Responsibilities (see REFACTOR.md "Document Conversion"):
+Responsibilities:
 
 - A small converter contract expressed in product terms (``contract``).
 - Launching converters in fresh child processes so GPU memory and backend
