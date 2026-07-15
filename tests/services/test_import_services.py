@@ -23,13 +23,21 @@ from paper_pipeline.services.runtime import PaperSession, RuntimeRegistry
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "zotero"
 
 
-def planned(tmp_path: Path, citekey: str, *, title: str = "Title", body: bytes = b"pdf"):
+def planned(
+    tmp_path: Path,
+    citekey: str,
+    *,
+    title: str = "Title",
+    body: bytes = b"pdf",
+    expected_source_sha256: str | None = None,
+):
     attachment = tmp_path / f"{citekey}.pdf"
     attachment.write_bytes(body)
     return PlannedImport(
         metadata=PaperMetadata(citekey=citekey, title=title),
         attachment_path=attachment,
         attachment_sha256=hashlib.sha256(body).hexdigest(),
+        expected_source_sha256=expected_source_sha256,
     )
 
 
@@ -103,6 +111,7 @@ async def test_metadata_refresh_preserves_artifact_provenance(tmp_path: Path) ->
     await seed(runtime, record)
     refreshed = item.model_copy(deep=True)
     refreshed.metadata.title = "Corrected"
+    refreshed.expected_source_sha256 = item.attachment_sha256
 
     report = await apply_import(runtime, ImportPlan(refreshes=[refreshed]))
 
@@ -128,7 +137,12 @@ async def test_explicit_replacement_makes_outputs_stale_without_deleting_them(
         transcription_sha256=sha256_file(transcription),
     )
     await seed(runtime, record)
-    replacement = planned(tmp_path, "Replace2024", body=b"new")
+    replacement = planned(
+        tmp_path,
+        "Replace2024",
+        body=b"new",
+        expected_source_sha256=old.attachment_sha256,
+    )
 
     report = await apply_import(runtime, ImportPlan(source_replacements=[replacement]))
 
@@ -146,6 +160,7 @@ async def test_missing_attachment_is_skipped_without_a_job(tmp_path: Path) -> No
         metadata=PaperMetadata(citekey="Missing2024", title="Missing"),
         attachment_path=None,
         attachment_sha256=None,
+        expected_source_sha256=None,
     )
 
     report = await apply_import(runtime, ImportPlan(additions=[item]))
@@ -224,6 +239,7 @@ async def test_import_cannot_overlap_conversion_for_same_citekey(tmp_path: Path)
     await started.wait()
     refresh = initial.model_copy(deep=True)
     refresh.metadata.title = "New"
+    refresh.expected_source_sha256 = initial.attachment_sha256
     applying = asyncio.create_task(apply_import(runtime, ImportPlan(refreshes=[refresh])))
     await asyncio.sleep(0)
 
@@ -233,3 +249,49 @@ async def test_import_cannot_overlap_conversion_for_same_citekey(tmp_path: Path)
 
     assert report.refreshed == ["Lane2024"]
     assert (await read(runtime, "Lane2024")).metadata.title == "New"
+
+
+async def test_duplicate_plan_is_rejected_before_any_job_is_enqueued(tmp_path: Path) -> None:
+    runtime = RuntimeRegistry().create(tmp_path / "library")
+    addition = planned(tmp_path, "Duplicate2024")
+    refresh = addition.model_copy(deep=True)
+    refresh.expected_source_sha256 = refresh.attachment_sha256
+
+    with pytest.raises(ValueError, match="more than once"):
+        await apply_import(
+            runtime,
+            ImportPlan(additions=[addition], refreshes=[refresh]),
+        )
+
+    assert runtime.queue.list_jobs() == []
+    assert not (runtime.root / "papers" / "Duplicate2024").exists()
+
+
+async def test_stale_source_replacement_cannot_overwrite_intervening_source(
+    tmp_path: Path,
+) -> None:
+    runtime = RuntimeRegistry().create(tmp_path / "library")
+    original = planned(tmp_path, "Cas2024", body=b"original")
+    await apply_import(runtime, ImportPlan(additions=[original]))
+    stale = planned(
+        tmp_path,
+        "Cas2024",
+        body=b"stale proposal",
+        expected_source_sha256=original.attachment_sha256,
+    )
+    intervening = planned(
+        tmp_path,
+        "Cas2024",
+        body=b"intervening",
+        expected_source_sha256=original.attachment_sha256,
+    )
+    applied = await apply_import(runtime, ImportPlan(source_replacements=[intervening]))
+    assert applied.replaced == ["Cas2024"]
+
+    rejected = await apply_import(runtime, ImportPlan(source_replacements=[stale]))
+
+    assert "Cas2024" in rejected.failed
+    current = await read(runtime, "Cas2024")
+    assert current.source_sha256 == intervening.attachment_sha256
+    assert current.source_pdf is not None
+    assert (runtime.root / current.source_pdf).read_bytes() == b"intervening"

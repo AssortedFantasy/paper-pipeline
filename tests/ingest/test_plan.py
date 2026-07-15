@@ -90,6 +90,7 @@ def test_changed_pdf_is_explicit_source_replacement(library: Library, tmp_path: 
     plan = build_import_plan(library, [incoming])
 
     assert [item.metadata.citekey for item in plan.source_replacements] == ["Changed2024"]
+    assert plan.source_replacements[0].expected_source_sha256 == "old-hash"
     assert plan.refreshes == []
 
 

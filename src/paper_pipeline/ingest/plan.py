@@ -34,13 +34,22 @@ class PlannedImport(BaseModel):
     metadata: PaperMetadata
     attachment_path: Path | None
     attachment_sha256: str | None
+    # Source identity observed during preview. None means the paper did not
+    # exist yet or existed without a recorded source.
+    expected_source_sha256: str | None
 
     @classmethod
-    def from_record(cls, record: ImportRecord) -> PlannedImport:
+    def from_record(
+        cls,
+        record: ImportRecord,
+        *,
+        expected_source_sha256: str | None,
+    ) -> PlannedImport:
         return cls(
             metadata=record.metadata,
             attachment_path=record.attachment_path,
             attachment_sha256=record.attachment_sha256,
+            expected_source_sha256=expected_source_sha256,
         )
 
 
@@ -96,8 +105,11 @@ def build_import_plan(library: Library, records: list[ImportRecord]) -> ImportPl
             continue
         actionable.append(record)
 
-        planned = PlannedImport.from_record(record)
         current = existing.get(citekey)
+        planned = PlannedImport.from_record(
+            record,
+            expected_source_sha256=current.source_sha256 if current is not None else None,
+        )
         if current is None:
             plan.additions.append(planned)
         elif record.attachment_sha256 == current.source_sha256:

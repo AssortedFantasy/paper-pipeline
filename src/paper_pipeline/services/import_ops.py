@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,9 +18,11 @@ from paper_pipeline.jobs.model import Job, JobKind, JobState
 from paper_pipeline.jobs.queue import CancellationToken
 from paper_pipeline.library.model import PaperRecord
 from paper_pipeline.library.paths import FORMAT_VERSION, PAPER_FILE, PAPERS_DIR, SOURCE_DIR
+from paper_pipeline.library.storage import validate_citekey
 from paper_pipeline.services.runtime import LibraryRuntime, LibrarySession, PaperSession
 
 ImportAction = Literal["addition", "refresh", "source_replacement"]
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 class ImportJobResult(BaseModel):
@@ -78,31 +81,19 @@ async def apply_import(runtime: LibraryRuntime, plan: ImportPlan) -> ImportRepor
     """
     report = ImportReport(skipped=list(plan.problems))
     scheduled: list[tuple[Job, ImportAction]] = []
-    seen: set[str] = set()
+    prepared = _prevalidate_plan(plan, report)
 
-    action_groups: tuple[tuple[ImportAction, list[PlannedImport]], ...] = (
-        ("addition", plan.additions),
-        ("refresh", plan.refreshes),
-        ("source_replacement", plan.source_replacements),
-    )
-    for action, items in action_groups:
-        for item in items:
-            citekey = item.metadata.citekey
-            if citekey in seen:
-                raise ValueError(f"import plan contains citekey more than once: {citekey}")
-            seen.add(citekey)
-            if item.attachment_path is None or item.attachment_sha256 is None:
-                report.skipped.append(f"{citekey}: missing PDF attachment")
-                continue
-            worker = _import_worker(item.model_copy(deep=True), action)
-            job = await runtime.enqueue_paper(
-                citekey,
-                JobKind.IMPORT,
-                f"import:{action}",
-                worker,
-                meta={"action": action},
-            )
-            scheduled.append((job, action))
+    for action, item in prepared:
+        citekey = item.metadata.citekey
+        worker = _import_worker(item.model_copy(deep=True), action)
+        job = await runtime.enqueue_paper(
+            citekey,
+            JobKind.IMPORT,
+            f"import:{action}",
+            worker,
+            meta={"action": action},
+        )
+        scheduled.append((job, action))
 
     for job, action in scheduled:
         terminal = await runtime.queue.wait(job.id)
@@ -128,6 +119,47 @@ async def apply_import(runtime: LibraryRuntime, plan: ImportPlan) -> ImportRepor
     return report
 
 
+def _prevalidate_plan(
+    plan: ImportPlan,
+    report: ImportReport,
+) -> list[tuple[ImportAction, PlannedImport]]:
+    """Validate the complete acceptance payload before any job is enqueued."""
+    prepared: list[tuple[ImportAction, PlannedImport]] = []
+    seen: set[str] = set()
+    action_groups: tuple[tuple[ImportAction, list[PlannedImport]], ...] = (
+        ("addition", plan.additions),
+        ("refresh", plan.refreshes),
+        ("source_replacement", plan.source_replacements),
+    )
+    for action, items in action_groups:
+        for item in items:
+            citekey = item.metadata.citekey
+            validate_citekey(citekey)
+            if citekey in seen:
+                raise ValueError(f"import plan contains citekey more than once: {citekey}")
+            seen.add(citekey)
+
+            if item.attachment_path is None or item.attachment_sha256 is None:
+                report.skipped.append(f"{citekey}: missing PDF attachment")
+                continue
+            if not _SHA256.fullmatch(item.attachment_sha256):
+                raise ValueError(f"import plan has invalid attachment hash for {citekey}")
+            if item.expected_source_sha256 is not None and not _SHA256.fullmatch(
+                item.expected_source_sha256
+            ):
+                raise ValueError(f"import plan has invalid expected source hash for {citekey}")
+            if action == "addition" and item.expected_source_sha256 is not None:
+                raise ValueError(f"addition {citekey!r} unexpectedly refers to an existing source")
+            if action == "refresh" and (item.expected_source_sha256 != item.attachment_sha256):
+                raise ValueError(f"refresh {citekey!r} does not preserve the previewed source")
+            if action == "source_replacement" and (
+                item.expected_source_sha256 == item.attachment_sha256
+            ):
+                raise ValueError(f"source replacement {citekey!r} does not change the source")
+            prepared.append((action, item))
+    return prepared
+
+
 def _import_worker(item: PlannedImport, action: ImportAction):  # type: ignore[no-untyped-def]
     async def worker(session: PaperSession, job: Job, token: CancellationToken) -> None:
         del job
@@ -136,10 +168,28 @@ def _import_worker(item: PlannedImport, action: ImportAction):  # type: ignore[n
 
         if action == "refresh":
             current = session.read_record()
-            if current.source_sha256 != item.attachment_sha256:
-                raise ValueError("import preview is stale; source replacement was not accepted")
-            _refresh_metadata(session, current, item)
+            if current.source_sha256 != item.expected_source_sha256:
+                raise ValueError("import preview is stale; source changed after preview")
+            if current.metadata != item.metadata:
+                if not token.begin_commit():
+                    raise asyncio.CancelledError
+                _refresh_metadata(session, current, item)
             return
+
+        current = _read_if_present(session)
+        if action == "addition":
+            if current is not None and current.source_sha256 not in (
+                None,
+                item.attachment_sha256,
+            ):
+                raise ValueError(
+                    "import preview is stale; addition now requires source replacement"
+                )
+        elif current is None or current.source_sha256 not in (
+            item.expected_source_sha256,
+            item.attachment_sha256,
+        ):
+            raise ValueError("import preview is stale; source changed after preview")
 
         stage = session.stage_dir()
         staged_source = stage / "source.pdf"
@@ -150,19 +200,8 @@ def _import_worker(item: PlannedImport, action: ImportAction):  # type: ignore[n
             if token.is_set():
                 raise asyncio.CancelledError
 
-            current = _read_if_present(session)
-            if (
-                action == "addition"
-                and current is not None
-                and current.source_sha256
-                not in (
-                    None,
-                    item.attachment_sha256,
-                )
-            ):
-                raise ValueError(
-                    "import preview is stale; addition now requires source replacement"
-                )
+            if not token.begin_commit():
+                raise asyncio.CancelledError
 
             # Create a valid metadata-only record only after the source has been copied
             # and validated in disposable staging. If interruption follows, validation
