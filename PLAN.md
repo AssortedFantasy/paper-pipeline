@@ -31,7 +31,7 @@ WP here.
 | 1.3 | Library validator | 1.1 | done |
 | 2A.1 | Zotero RDF parsing + fixtures | 0.3 | done |
 | 2A.2 | Import planning (preview) | 2A.1, 1.1 | done |
-| 2B.0 | Marker corpus, pins, runtime characterization | 0.1 | todo |
+| 2B.0 | Marker corpus, pins, runtime characterization | 0.1 | in-progress |
 | 2B.1 | Fake converter + contract tests | 0.1 | done |
 | 2B.2 | Child-process conversion runner | 2B.1 | done |
 | 2B.3 | Marker adapter + GPU smoke test | 2B.0, 2B.2 | todo |
@@ -40,14 +40,14 @@ WP here.
 | 2C.2 | LLM providers (fake + OpenAI) | 0.3 | done |
 | 2C.3 | Recipe runner + provenance | 2C.1, 2C.2, 1.2 | done |
 | 2D.1 | Job queue, state machine, events | 0.3 | done |
-| 2D.2 | Scheduling policies, cancel, retry | 2D.1 | todo |
-| 2D.3 | Attempt markers + completion validation | 2D.2, 1.1 | todo |
+| 2D.2 | Scheduling policies, cancel, retry | 2D.1 | done |
+| 2D.3 | Attempt markers + completion validation | 2D.2, 1.1 | done |
 | 2E.1 | Index builders | 1.1 | done |
 | 2E.2 | Generated library AGENTS.md + .gitignore | 1.1 | done |
-| 3.0 | Library runtime registry + paper-session boundary | 1.2, 2D.3 | todo |
-| 3.1 | Library services + CLI (`validate`, `reindex`) | 3.0, 1.3, 2E.1, 2E.2 | todo |
-| 3.2 | Import services (preview + apply) | 3.0, 2A.2 | todo |
-| 3.3 | Processing services (convert, recipes, cancel, retry) | 3.0, 2B.2, 2C.3 | todo |
+| 3.0 | Library runtime registry + paper-session boundary | 1.2, 2D.3 | done |
+| 3.1 | Library services + CLI (`validate`, `reindex`) | 3.0, 1.3, 2E.1, 2E.2 | done |
+| 3.2 | Import services (preview + apply) | 3.0, 2A.2 | done |
+| 3.3 | Processing services (convert, recipes, cancel, retry) | 3.0, 2B.2, 2C.3 | done |
 | 4.1 | Web API + SSE | 3.1, 3.2, 3.3 | todo |
 | 4.2 | UI shell + papers list + launch actions | 4.1 | todo |
 | 4.3 | Import UI (preview/apply) | 4.1 | todo |
