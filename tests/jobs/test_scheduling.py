@@ -244,6 +244,26 @@ async def test_cancel_running_job_sets_token_and_calls_kill_hook() -> None:
     assert result.error == "job cancelled"
 
 
+async def test_cancel_is_rejected_after_worker_begins_durable_commit() -> None:
+    queue = JobQueue()
+    committing = asyncio.Event()
+    release = asyncio.Event()
+
+    async def worker(job: Job, token: CancellationToken) -> None:
+        del job
+        assert token.begin_commit() is True
+        committing.set()
+        await release.wait()
+
+    job = await queue.enqueue_paper("library", "paper", JobKind.CONVERSION, "convert", worker)
+    await committing.wait()
+
+    assert await queue.cancel(job.id) is False
+    release.set()
+
+    assert (await queue.wait(job.id)).state is JobState.SUCCEEDED
+
+
 async def test_retry_creates_fresh_job_and_preserves_old_terminal_job() -> None:
     queue = JobQueue()
     attempts = 0

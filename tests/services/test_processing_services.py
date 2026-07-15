@@ -1,16 +1,20 @@
 """End-to-end processing service tests using only fake external edges."""
 
 import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from tests.fakes import FakeLLMProvider
 
 from paper_pipeline.convert.runner import ConverterSpec
-from paper_pipeline.jobs.model import Job, JobKind, JobState
+from paper_pipeline.jobs.model import Job, JobKind, JobScope, JobState
 from paper_pipeline.jobs.queue import CancellationToken
+from paper_pipeline.jobs.recovery import InterruptedAttempt
 from paper_pipeline.library.model import AttemptState, PaperMetadata, PaperRecord
 from paper_pipeline.library.paths import FORMAT_VERSION
 from paper_pipeline.library.storage import sha256_file
+from paper_pipeline.recipes.model import RecipeDefinition
 from paper_pipeline.services.processing import (
     cancel_job,
     pending_conversion_citekeys,
@@ -144,6 +148,9 @@ async def test_failed_rerun_preserves_last_good_conversion_and_records_log(
         )
     )[0]
     assert (await runtime.queue.wait(failed.id)).state is JobState.FAILED
+    failed_record = await _read(runtime)
+    assert failed_record.conversion.last_attempt is not None
+    assert failed_record.conversion.last_attempt.log_path is not None
 
     after = await _read(runtime)
     assert after.conversion.transcription_sha256 == original_hash
@@ -189,6 +196,9 @@ async def test_retry_succeeds_after_missing_source_is_restored(tmp_path: Path) -
         )
     )[0]
     assert (await runtime.queue.wait(failed.id)).state is JobState.FAILED
+    failed_record = await _read(runtime)
+    assert failed_record.conversion.last_attempt is not None
+    assert failed_record.conversion.last_attempt.log_path is not None
 
     async def restore(session: PaperSession, job: Job, token: CancellationToken) -> None:
         del job, token
@@ -210,6 +220,87 @@ async def test_pending_selection_uses_recorded_input_hashes(tmp_path: Path) -> N
     await _seed(runtime)
     assert await pending_conversion_citekeys(runtime) == ["Smith2024"]
     assert await pending_recipe_citekeys(runtime, "summary") == ["Smith2024"]
+
+
+async def test_pending_selection_detects_tampered_output(tmp_path: Path) -> None:
+    runtime = await _runtime(tmp_path)
+    await _seed(runtime)
+    conversion = (
+        await queue_conversion(
+            runtime,
+            ["Smith2024"],
+            converter_spec=ConverterSpec(FAKE_CONVERTER),
+            timeout_seconds=5,
+        )
+    )[0]
+    await runtime.queue.wait(conversion.id)
+    assert await pending_conversion_citekeys(runtime) == []
+
+    transcription = runtime.root / "papers" / "Smith2024" / "transcription.md"
+    transcription.write_text("tampered", encoding="utf-8")
+
+    assert await pending_conversion_citekeys(runtime) == ["Smith2024"]
+
+
+async def test_job_control_rejects_a_job_from_another_runtime(tmp_path: Path) -> None:
+    registry = RuntimeRegistry()
+    first = registry.create(tmp_path / "first")
+    second = registry.create(tmp_path / "second")
+
+    async def fail(session: PaperSession, job: Job, token: CancellationToken) -> None:
+        del session, job, token
+        raise RuntimeError("failure")
+
+    job = await first.enqueue_paper("Smith2024", JobKind.IMPORT, "fail", fail)
+    await first.queue.wait(job.id)
+
+    with pytest.raises(ValueError, match="different library"):
+        await cancel_job(second, job.id)
+    with pytest.raises(ValueError, match="different library"):
+        await retry_job(second, job.id)
+
+
+async def test_retry_reconstructs_interrupted_conversion(tmp_path: Path) -> None:
+    runtime = await _runtime(tmp_path)
+    await _seed(runtime)
+    runtime.interrupted_attempts = (
+        InterruptedAttempt(
+            job_id="interrupted-1",
+            target="papers/Smith2024",
+            operation="convert",
+            kind=JobKind.CONVERSION,
+            scope=JobScope.PAPER,
+            started_at=datetime(2026, 1, 1, tzinfo=UTC),
+        ),
+    )
+
+    retried = await retry_job(
+        runtime,
+        "interrupted-1",
+        converter_spec=ConverterSpec(FAKE_CONVERTER),
+        timeout_seconds=5,
+    )
+
+    assert retried.meta["retry_of"] == "interrupted-1"
+    assert runtime.interrupted_attempts == ()
+    assert (await runtime.queue.wait(retried.id)).state is JobState.SUCCEEDED
+
+
+async def test_recipe_batch_rejects_duplicate_output_destinations(tmp_path: Path) -> None:
+    runtime = await _runtime(tmp_path)
+    recipes = {
+        "one": RecipeDefinition("one", 1, "transcription", "same.md", "One."),
+        "two": RecipeDefinition("two", 1, "transcription", "SAME.md", "Two."),
+    }
+
+    with pytest.raises(ValueError, match="same output filename"):
+        await queue_recipes(
+            runtime,
+            ["one", "two"],
+            ["Smith2024"],
+            provider_name="fake",
+            recipes=recipes,
+        )
 
 
 async def test_recipe_failure_records_attempt_and_operational_log(tmp_path: Path) -> None:

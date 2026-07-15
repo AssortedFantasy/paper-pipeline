@@ -91,17 +91,31 @@ class RecoveryHooks:
 class AttemptMarkerStore:
     """Atomic JSON files in a caller-supplied ``.pp/attempts`` directory."""
 
-    def __init__(self, attempts_dir: Path) -> None:
+    def __init__(self, attempts_dir: Path, *, managed_root: Path | None = None) -> None:
         self.attempts_dir = attempts_dir
+        self.managed_root = (managed_root or attempts_dir.parent.parent).resolve()
+
+    def _ensure_safe_path(self) -> None:
+        try:
+            relative = self.attempts_dir.relative_to(self.managed_root)
+        except ValueError as error:
+            raise ValueError(
+                "attempt marker directory must stay inside its managed root"
+            ) from error
+        current = self.managed_root
+        for part in relative.parts:
+            current /= part
+            if current.is_symlink():
+                raise ValueError("attempt marker path must not contain symlinks")
+        if not self.attempts_dir.resolve().is_relative_to(self.managed_root):
+            raise ValueError("attempt marker directory resolves outside its managed root")
 
     def create(self, marker: AttemptMarker) -> None:
         """Atomically install one marker without overwriting an existing attempt."""
         _validate_marker(marker)
-        if self.attempts_dir.is_symlink():
-            raise ValueError("attempt marker directory must not be a symlink")
+        self._ensure_safe_path()
         self.attempts_dir.mkdir(parents=True, exist_ok=True)
-        if self.attempts_dir.is_symlink():
-            raise ValueError("attempt marker directory must not be a symlink")
+        self._ensure_safe_path()
         destination = self._path(marker.job_id)
         if destination.exists():
             raise FileExistsError(f"attempt marker already exists: {marker.job_id}")
@@ -127,10 +141,12 @@ class AttemptMarkerStore:
 
     def remove(self, job_id: str) -> None:
         """Remove a marker idempotently after durable terminal recording."""
+        self._ensure_safe_path()
         self._path(job_id).unlink(missing_ok=True)
 
     def scan(self) -> list[AttemptMarker]:
         """Read valid markers; corrupt operational hints are ignored."""
+        self._ensure_safe_path()
         if not self.attempts_dir.is_dir():
             return []
         markers: list[AttemptMarker] = []

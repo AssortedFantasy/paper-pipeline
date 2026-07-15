@@ -57,8 +57,23 @@ def test_marker_store_rejects_symlinked_attempt_directory(tmp_path: Path) -> Non
     except OSError as error:
         pytest.skip(f"directory symlinks unavailable: {error}")
 
-    with pytest.raises(ValueError, match="must not be a symlink"):
+    with pytest.raises(ValueError, match="must not contain symlinks"):
         AttemptMarkerStore(attempts).create(marker())
+
+    assert list(outside.iterdir()) == []
+
+
+def test_marker_store_rejects_symlinked_operational_ancestor(tmp_path: Path) -> None:
+    outside = tmp_path / "outside-operational"
+    outside.mkdir()
+    operational = tmp_path / ".pp"
+    try:
+        operational.symlink_to(outside, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlinks unavailable: {error}")
+
+    with pytest.raises(ValueError, match="must not contain symlinks"):
+        marker_store(tmp_path).create(marker())
 
     assert list(outside.iterdir()) == []
 

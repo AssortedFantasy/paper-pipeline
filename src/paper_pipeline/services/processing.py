@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import cast
 
 from paper_pipeline.convert.contract import ConversionRequest, ConversionResult
@@ -19,7 +20,7 @@ from paper_pipeline.library.model import (
     RecipeRecord,
 )
 from paper_pipeline.library.paths import PAPERS_DIR
-from paper_pipeline.library.storage import conversion_is_fresh, recipe_is_fresh
+from paper_pipeline.library.storage import conversion_is_fresh, recipe_is_fresh, sha256_file
 from paper_pipeline.recipes.model import RecipeDefinition, load_builtin_recipes
 from paper_pipeline.recipes.provider import LLMProvider
 from paper_pipeline.recipes.runner import RecipeRunResult, run_recipe
@@ -68,33 +69,42 @@ async def queue_conversion(
             state.result = None
             state.artifacts.clear()
             state.log_path = None
-            record = session.read_record()
-            if record.source_pdf is None or record.source_sha256 is None:
-                raise ProcessingError(f"paper {session.citekey!r} has no usable source PDF")
-            source = session.root_path(record.source_pdf)
-            if not source.is_file():
-                raise ProcessingError(f"paper {session.citekey!r} source PDF is missing")
-            state.source_sha256 = record.source_sha256
-            stage = session.stage_dir()
-            request = ConversionRequest(
-                pdf_path=source,
-                staging_dir=stage,
-                timeout_seconds=timeout_seconds,
-            )
             try:
-                result = await asyncio.to_thread(
-                    run_conversion,
-                    converter_spec,
-                    request,
-                    cancel_event=token,
+                record = session.read_record()
+                if record.source_pdf is None or record.source_sha256 is None:
+                    raise ProcessingError(f"paper {session.citekey!r} has no usable source PDF")
+                source = _safe_input_path(session, record.source_pdf)
+                state.source_sha256 = record.source_sha256
+                stage = session.stage_dir()
+                request = ConversionRequest(
+                    pdf_path=source,
+                    staging_dir=stage,
+                    timeout_seconds=timeout_seconds,
                 )
-                state.result = result
-                if not result.ok:
-                    state.log_path = _install_conversion_log(session, job, result)
-                    raise ProcessingError(result.error or "conversion failed")
-                state.artifacts = session.install_conversion_bundle(stage)
-            finally:
-                shutil.rmtree(stage, ignore_errors=True)
+                try:
+                    result = await asyncio.to_thread(
+                        run_conversion,
+                        converter_spec,
+                        request,
+                        cancel_event=token,
+                    )
+                    state.result = result
+                    if not result.ok:
+                        state.log_path = _install_conversion_log(session, job, result)
+                        raise ProcessingError(result.error or "conversion failed")
+                    if not token.begin_commit():
+                        raise asyncio.CancelledError
+                    state.artifacts = session.install_conversion_bundle(stage)
+                finally:
+                    shutil.rmtree(stage, ignore_errors=True)
+            except Exception as error:
+                if state.log_path is None:
+                    state.log_path = _install_text_log(
+                        session,
+                        f"conversion-{job.id}.log",
+                        f"{type(error).__name__}: {error}",
+                    )
+                raise
 
         def validate(
             session: PaperSession,
@@ -160,6 +170,15 @@ async def queue_recipes(
             selected.append(definitions[name])
         except KeyError as error:
             raise ValueError(f"unknown recipe: {name}") from error
+    outputs: dict[str, str] = {}
+    for recipe in selected:
+        collision = outputs.get(recipe.output.casefold())
+        if collision is not None:
+            raise ValueError(
+                f"recipes {collision!r} and {recipe.name!r} declare the same output "
+                f"filename: {recipe.output}"
+            )
+        outputs[recipe.output.casefold()] = recipe.name
     provider = cast(LLMProvider, runtime.provider(provider_name))
     jobs: list[Job] = []
     for citekey in citekeys:
@@ -191,6 +210,8 @@ async def queue_recipes(
                     )
                     staged_results.append((recipe, result))
                 for recipe, result in staged_results:
+                    if not token.begin_commit():
+                        raise asyncio.CancelledError
                     state.active_recipe = recipe.name
                     session.install_artifact(result.staged_path, result.destination)
                     state.results[recipe.name] = result
@@ -263,19 +284,96 @@ async def queue_recipes(
 
 
 async def cancel_job(runtime: LibraryRuntime, job_id: str) -> bool:
+    _runtime_job(runtime, job_id)
     return await runtime.queue.cancel(job_id)
 
 
-async def retry_job(runtime: LibraryRuntime, job_id: str) -> Job:
-    return await runtime.queue.retry(job_id)
+async def retry_job(
+    runtime: LibraryRuntime,
+    job_id: str,
+    *,
+    converter_spec: ConverterSpec | None = None,
+    timeout_seconds: int | None = None,
+    provider_name: str = "openai",
+    model: str = "",
+    recipes: dict[str, RecipeDefinition] | None = None,
+) -> Job:
+    """Retry a live failure or reconstruct a startup-interrupted operation."""
+    existing = runtime.queue.get(job_id)
+    if existing is not None:
+        _runtime_job(runtime, job_id)
+        return await runtime.queue.retry(job_id)
+
+    interrupted = runtime.interrupted(job_id)
+    if interrupted is None:
+        raise KeyError(f"unknown job: {job_id}")
+    target_parts = interrupted.target.split("/")
+    if len(target_parts) != 2 or target_parts[0] != PAPERS_DIR:
+        raise ValueError("interrupted paper target is invalid")
+    citekey = target_parts[1]
+    if interrupted.kind is JobKind.CONVERSION and interrupted.operation == "convert":
+        if converter_spec is None or timeout_seconds is None:
+            raise ValueError("retrying interrupted conversion requires converter settings")
+        replacement = (
+            await queue_conversion(
+                runtime,
+                [citekey],
+                converter_spec=converter_spec,
+                timeout_seconds=timeout_seconds,
+            )
+        )[0]
+    elif interrupted.kind is JobKind.RECIPE and interrupted.operation.startswith("recipes:"):
+        names = [name for name in interrupted.operation.removeprefix("recipes:").split(",") if name]
+        if not names:
+            raise ValueError("interrupted recipe operation declares no recipes")
+        replacement = (
+            await queue_recipes(
+                runtime,
+                names,
+                [citekey],
+                provider_name=provider_name,
+                model=model,
+                recipes=recipes,
+            )
+        )[0]
+    else:
+        raise ValueError(f"interrupted operation is not reconstructable: {interrupted.operation}")
+    replacement.meta["retry_of"] = job_id
+    runtime.acknowledge_interrupted(job_id)
+    return replacement
 
 
 async def pending_conversion_citekeys(runtime: LibraryRuntime) -> list[str]:
-    return await _select(runtime, lambda record: not conversion_is_fresh(record))
+    return await _select(
+        runtime,
+        lambda record: (
+            not conversion_is_fresh(record)
+            or record.conversion.transcription_sha256 is None
+            or not _safe_hashed_file(
+                runtime.root,
+                f"{PAPERS_DIR}/{record.metadata.citekey}/transcription.md",
+                record.conversion.transcription_sha256,
+            )
+        ),
+    )
 
 
 async def pending_recipe_citekeys(runtime: LibraryRuntime, recipe_name: str) -> list[str]:
-    return await _select(runtime, lambda record: not recipe_is_fresh(record, recipe_name))
+    def pending(record):  # type: ignore[no-untyped-def]
+        recipe = record.recipes.get(recipe_name)
+        return (
+            not recipe_is_fresh(record, recipe_name)
+            or recipe is None
+            or recipe.output_artifact is None
+            or recipe.output_sha256 is None
+            or not _safe_hashed_file(
+                runtime.root,
+                recipe.output_artifact,
+                recipe.output_sha256,
+            )
+        )
+
+    return await _select(runtime, pending)
 
 
 async def _select(runtime: LibraryRuntime, predicate) -> list[str]:  # type: ignore[no-untyped-def]
@@ -333,3 +431,47 @@ def _install_text_log(session: PaperSession, filename: str, text: str) -> str:
     finally:
         shutil.rmtree(stage, ignore_errors=True)
     return relative
+
+
+def _runtime_job(runtime: LibraryRuntime, job_id: str) -> Job:
+    job = runtime.queue.get(job_id)
+    if job is None:
+        raise KeyError(f"unknown job: {job_id}")
+    if job.library_key != runtime.library_key:
+        raise ValueError("job belongs to a different library")
+    return job
+
+
+def _safe_input_path(session: PaperSession, relative: str) -> Path:
+    path = session.root_path(relative)
+    root = session.root.resolve()
+    current = root
+    for part in path.relative_to(root).parts:
+        current /= part
+        if current.is_symlink():
+            raise ProcessingError(f"paper input must not contain symlinks: {relative}")
+    try:
+        resolved = path.resolve(strict=True)
+    except FileNotFoundError as error:
+        raise ProcessingError(f"paper {session.citekey!r} source PDF is missing") from error
+    if not resolved.is_relative_to(root) or not resolved.is_file():
+        raise ProcessingError(f"paper input is outside the library or is not a file: {relative}")
+    return resolved
+
+
+def _safe_hashed_file(root: Path, relative: str, expected_sha256: str) -> bool:
+    try:
+        path = root.joinpath(*relative.split("/"))
+        current = root.resolve()
+        for part in path.relative_to(root).parts:
+            current /= part
+            if current.is_symlink():
+                return False
+        resolved = path.resolve(strict=True)
+        return (
+            resolved.is_relative_to(root.resolve())
+            and resolved.is_file()
+            and sha256_file(resolved) == expected_sha256
+        )
+    except (OSError, ValueError):
+        return False

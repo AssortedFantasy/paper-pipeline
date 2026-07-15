@@ -128,6 +128,25 @@ def test_missing_transcription_fails_before_provider_call(library: Library) -> N
     assert provider.calls == []
 
 
+def test_symlinked_transcription_is_rejected_before_provider_call(
+    library: Library, tmp_path: Path
+) -> None:
+    transcription = library.root / "papers" / "Smith2024" / "transcription.md"
+    external = tmp_path / "external.md"
+    external.write_text("external private text", encoding="utf-8")
+    transcription.unlink()
+    try:
+        transcription.symlink_to(external)
+    except OSError as error:
+        pytest.skip(f"symlink creation is unavailable: {error}")
+    provider = FakeLLMProvider()
+
+    with pytest.raises(RecipeRunError, match="must not contain symlinks"):
+        run_recipe(library, "Smith2024", summary_recipe(), provider)
+
+    assert provider.calls == []
+
+
 def test_provider_failure_produces_no_staged_output(library: Library) -> None:
     provider = FakeLLMProvider(fail=True, failure_message="safe provider failure")
 

@@ -157,20 +157,32 @@ def _resolve_input(
         if source_pdf is None:
             raise RecipeRunError(f"paper {citekey!r} has no source PDF for recipe {recipe.name!r}")
         source_parts = PurePosixPath(source_pdf).parts
-        input_path = library.root.joinpath(*source_parts).resolve()
-        source_root = (paper_root / "source").resolve()
+        input_path = library.root.joinpath(*source_parts)
+        source_root = paper_root / "source"
         if not input_path.is_relative_to(source_root):
             raise RecipeRunError(
                 f"paper {citekey!r} source PDF is outside its dedicated source directory"
             )
         input_artifact = input_path.relative_to(library.root).as_posix()
 
-    if not input_path.is_file():
+    root = library.root.resolve()
+    current = root
+    for part in input_path.relative_to(root).parts:
+        current /= part
+        if current.is_symlink():
+            raise RecipeRunError(
+                f"recipe input for paper {citekey!r} must not contain symlinks: {input_artifact}"
+            )
+    try:
+        resolved_input = input_path.resolve(strict=True)
+    except FileNotFoundError:
+        resolved_input = input_path
+    if not resolved_input.is_relative_to(root) or not resolved_input.is_file():
         raise RecipeRunError(
             f"missing {recipe.input} input for recipe {recipe.name!r} on paper {citekey!r}: "
             f"{input_artifact}"
         )
-    return input_path, input_artifact
+    return resolved_input, input_artifact
 
 
 def _render_output(

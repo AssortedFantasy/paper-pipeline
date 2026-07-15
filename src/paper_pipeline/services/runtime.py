@@ -162,7 +162,10 @@ class LibraryRuntime:
         self.library_key = library_key
         self.root = library.root
         self.providers = MappingProxyType(dict(providers))
-        self._marker_store = AttemptMarkerStore(library.operational_dir() / ATTEMPTS_DIR)
+        self._marker_store = AttemptMarkerStore(
+            library.operational_dir() / ATTEMPTS_DIR,
+            managed_root=library.root,
+        )
         self.interrupted_attempts: tuple[InterruptedAttempt, ...] = tuple(
             reconcile_attempts(self._marker_store, self._terminal_attempt_exists)
         )
@@ -173,6 +176,22 @@ class LibraryRuntime:
             return self.providers[name]
         except KeyError as error:
             raise KeyError(f"provider is not configured: {name}") from error
+
+    def interrupted(self, attempt_id: str) -> InterruptedAttempt | None:
+        """Return one startup-synthesized interrupted attempt by ID."""
+        return next(
+            (attempt for attempt in self.interrupted_attempts if attempt.job_id == attempt_id),
+            None,
+        )
+
+    def acknowledge_interrupted(self, attempt_id: str) -> None:
+        """Remove an interrupted hint after a replacement job is enqueued."""
+        if self.interrupted(attempt_id) is None:
+            raise KeyError(f"unknown interrupted attempt: {attempt_id}")
+        self._marker_store.remove(attempt_id)
+        self.interrupted_attempts = tuple(
+            attempt for attempt in self.interrupted_attempts if attempt.job_id != attempt_id
+        )
 
     async def enqueue_paper(
         self,

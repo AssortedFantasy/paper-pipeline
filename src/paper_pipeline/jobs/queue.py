@@ -45,6 +45,7 @@ class CancellationToken:
 
     def __init__(self) -> None:
         self._event = asyncio.Event()
+        self._commit_started = False
 
     def is_set(self) -> bool:
         """Return whether cancellation has been requested."""
@@ -54,8 +55,23 @@ class CancellationToken:
         """Wait until cancellation is requested."""
         await self._event.wait()
 
-    def _cancel(self) -> None:
+    def begin_commit(self) -> bool:
+        """Close cancellation before a worker starts its durable commit.
+
+        Returns ``False`` when cancellation already won the race. Once this
+        returns ``True``, later cancellation requests are rejected so a
+        successfully committed artifact cannot be reported as cancelled.
+        """
+        if self._event.is_set():
+            return False
+        self._commit_started = True
+        return True
+
+    def _cancel(self) -> bool:
+        if self._commit_started:
+            return False
         self._event.set()
+        return True
 
 
 @dataclass(frozen=True)
@@ -268,7 +284,8 @@ class JobQueue:
         token = self._tokens[job_id]
         if token.is_set():
             return False
-        token._cancel()
+        if not token._cancel():
+            return False
         task = self._tasks[job_id]
         if job.state is JobState.QUEUED:
             self._transition(job, JobState.CANCELLED, error="job cancelled before start")
