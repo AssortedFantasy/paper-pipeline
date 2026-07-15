@@ -1,0 +1,147 @@
+from __future__ import annotations
+
+import hashlib
+from pathlib import Path
+
+import pytest
+
+from paper_pipeline.library.model import PaperMetadata, PaperRecord
+from paper_pipeline.library.paths import FORMAT_VERSION
+from paper_pipeline.library.storage import Library, create_library, sha256_file
+from paper_pipeline.recipes.model import RecipeDefinition, RecipeInput
+from paper_pipeline.recipes.runner import RecipeRunError, run_recipe
+from tests.fakes import FakeLLMProvider
+
+
+@pytest.fixture
+def library(tmp_path: Path) -> Library:
+    result = create_library(tmp_path / "library")
+    result.write_paper(
+        PaperRecord(
+            format_version=FORMAT_VERSION,
+            metadata=PaperMetadata(citekey="Smith2024", title="Test paper"),
+            source_pdf="papers/Smith2024/source/paper.pdf",
+        )
+    )
+    paper_root = result.root / "papers" / "Smith2024"
+    (paper_root / "source").mkdir()
+    (paper_root / "source" / "paper.pdf").write_bytes(b"%PDF-1.4 fake paper")
+    (paper_root / "transcription.md").write_text(
+        "# Paper\n\nTranscribed content.\n", encoding="utf-8"
+    )
+    return result
+
+
+def summary_recipe(*, input_kind: RecipeInput = "transcription") -> RecipeDefinition:
+    return RecipeDefinition(
+        name="summary",
+        version=2,
+        input=input_kind,
+        output="summary.md",
+        prompt="Summarize this paper.",
+    )
+
+
+def test_success_stages_exact_front_matter_and_provenance(library: Library) -> None:
+    provider = FakeLLMProvider(response="- Main result\n- Limitation")
+    recipe = summary_recipe()
+
+    result = run_recipe(library, "Smith2024", recipe, provider, model="test-model")
+
+    transcription = library.root / "papers" / "Smith2024" / "transcription.md"
+    input_hash = sha256_file(transcription)
+    created = result.record.completed_at
+    assert created is not None
+    expected = (
+        "---\n"
+        "generated_by: paper-pipeline\n"
+        "recipe: summary\n"
+        "recipe_version: 2\n"
+        "provider: fake\n"
+        "model: test-model\n"
+        "input: papers/Smith2024/transcription.md\n"
+        f"input_sha256: {input_hash}\n"
+        f"created: {created.isoformat().replace('+00:00', 'Z')}\n"
+        "---\n"
+        "- Main result\n"
+        "- Limitation\n"
+    )
+    assert result.staged_path.read_text(encoding="utf-8") == expected
+    assert result.destination == "papers/Smith2024/generated/summary.md"
+    assert result.record.recipe_version == 2
+    assert result.record.provider == "fake"
+    assert result.record.model == "test-model"
+    assert result.record.input_artifact == "papers/Smith2024/transcription.md"
+    assert result.record.input_sha256 == input_hash
+    assert result.record.output_sha256 == hashlib.sha256(expected.encode()).hexdigest()
+    assert provider.calls[0].text_input == transcription.read_text(encoding="utf-8")
+    assert provider.calls[0].input_sha256 == input_hash
+
+    installed_hash = library.install_artifact(result.staged_path, result.destination)
+    assert installed_hash == result.record.output_sha256
+
+
+def test_pdf_input_uses_source_path_and_hash(library: Library) -> None:
+    provider = FakeLLMProvider()
+
+    result = run_recipe(
+        library,
+        "Smith2024",
+        summary_recipe(input_kind="pdf"),
+        provider,
+        model="test-model",
+    )
+
+    source = library.root / "papers" / "Smith2024" / "source" / "paper.pdf"
+    assert provider.calls[0].pdf_input == source
+    assert provider.calls[0].text_input is None
+    assert provider.calls[0].input_sha256 == sha256_file(source)
+    assert result.record.input_artifact == "papers/Smith2024/source/paper.pdf"
+    assert "input: papers/Smith2024/source/paper.pdf\n" in result.staged_path.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_missing_transcription_fails_before_provider_call(library: Library) -> None:
+    (library.root / "papers" / "Smith2024" / "transcription.md").unlink()
+    provider = FakeLLMProvider()
+
+    with pytest.raises(RecipeRunError, match=r"missing transcription.*summary.*Smith2024"):
+        run_recipe(library, "Smith2024", summary_recipe(), provider)
+
+    assert provider.calls == []
+
+
+def test_provider_failure_produces_no_staged_output(library: Library) -> None:
+    provider = FakeLLMProvider(fail=True, failure_message="safe provider failure")
+
+    with pytest.raises(RecipeRunError, match="safe provider failure"):
+        run_recipe(library, "Smith2024", summary_recipe(), provider)
+
+    assert list((library.root / ".pp" / "tmp").iterdir()) == []
+
+
+@pytest.mark.parametrize("response", ["", " ", "\n\t"])
+def test_empty_provider_response_is_rejected(library: Library, response: str) -> None:
+    provider = FakeLLMProvider(response=response)
+
+    with pytest.raises(RecipeRunError, match="empty response"):
+        run_recipe(library, "Smith2024", summary_recipe(), provider)
+
+    assert list((library.root / ".pp" / "tmp").iterdir()) == []
+
+
+def test_provenance_excludes_credentials_and_input_content(library: Library) -> None:
+    secret = "sk-secret-value"
+    private_input = "private transcription contents"
+    transcription = library.root / "papers" / "Smith2024" / "transcription.md"
+    transcription.write_text(private_input, encoding="utf-8")
+    provider = FakeLLMProvider(response="Safe output")
+    provider.__dict__["api_key"] = secret
+
+    result = run_recipe(library, "Smith2024", summary_recipe(), provider, model="safe-model")
+
+    serialized = result.record.model_dump_json() + result.staged_path.read_text(encoding="utf-8")
+    assert secret not in serialized
+    assert private_input not in serialized
+    assert "Summarize this paper." not in serialized

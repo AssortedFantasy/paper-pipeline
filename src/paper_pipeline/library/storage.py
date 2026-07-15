@@ -353,6 +353,18 @@ def _validate_paper_record(record: PaperRecord, *, expected_citekey: str) -> Non
     for field, value in _record_paths(record):
         if value is not None:
             _validate_relative_posix_path(value, field=field)
+    expected_input_root = ("papers", expected_citekey)
+    for recipe_name, recipe in record.recipes.items():
+        if recipe.input_artifact is None:
+            continue
+        parts = PurePosixPath(recipe.input_artifact).parts
+        if parts[:2] != expected_input_root or (
+            parts[2:] != ("transcription.md",) and parts[2:3] != ("source",)
+        ):
+            raise ValueError(
+                f"recipes.{recipe_name}.input_artifact must reference this paper's "
+                "library-relative transcription or source path"
+            )
 
 
 def _validate_relative_posix_path(value: str, *, field: str) -> None:

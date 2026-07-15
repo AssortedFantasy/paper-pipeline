@@ -125,6 +125,21 @@ def test_bibliographic_text_is_not_treated_as_a_path(library_root: Path) -> None
     assert library.read_paper("Smith2024") == record
 
 
+def test_recipe_input_must_be_library_relative_and_scoped_to_its_paper(
+    library_root: Path,
+) -> None:
+    library = create_library(library_root)
+    record = make_record()
+    record.recipes["summary"] = RecipeRecord(input_artifact="transcription.md")
+
+    with pytest.raises(ValueError, match="this paper's library-relative"):
+        library.write_paper(record)
+
+    record.recipes["summary"] = RecipeRecord(input_artifact="papers/Other2024/transcription.md")
+    with pytest.raises(ValueError, match="this paper's library-relative"):
+        library.write_paper(record)
+
+
 def test_atomic_write_failure_preserves_previous_record(
     library_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

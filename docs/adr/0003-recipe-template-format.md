@@ -1,6 +1,6 @@
 # ADR-0003: Recipe template format
 
-Status: Accepted (2026-07-14)
+Status: Accepted, amended (2026-07-15)
 
 ## Context
 
@@ -39,7 +39,7 @@ recipe: contributions
 recipe_version: 1
 provider: openai
 model: gpt-5
-input: transcription.md
+input: papers/smith2024/transcription.md
 input_sha256: <sha256-of-transcription>
 created: 2026-07-14T12:00:00Z
 ---
@@ -48,6 +48,12 @@ created: 2026-07-14T12:00:00Z
 
 - Provenance never includes credentials, API endpoints, or raw provider
   payloads. `paper.json` records the same provenance in its `recipes` map.
+- The `input` path in generated front matter and `paper.json` is always a
+  library-relative POSIX path (`papers/<citekey>/transcription.md` or
+  `papers/<citekey>/source/<file>.pdf`), consistent with ADR-0002. The original
+  paper-relative example was clarified before v2 library production. This does
+  not change the serialized schema, so format version 1 remains appropriate;
+  storage compatibility tests enforce the clarified invariant.
 
 ## Consequences
 

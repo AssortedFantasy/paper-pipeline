@@ -90,7 +90,8 @@ class RecipeRecord(BaseModel):
     recipe_version: int | None = None
     provider: str | None = None
     model: str | None = None
-    input_artifact: str | None = None  # e.g. "transcription.md" or "source/<file>.pdf"
+    # Library-relative path to the consumed PDF or transcription.
+    input_artifact: str | None = None
     input_sha256: str | None = None
     output_sha256: str | None = None
     completed_at: datetime | None = None
