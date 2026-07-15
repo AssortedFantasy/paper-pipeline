@@ -4,8 +4,7 @@ Status: Accepted (2026-07-14)
 
 ## Context
 
-REFACTOR.md deferred concrete backend/frontend technology choices. The
-product is personal local software, extended primarily by agents, with hard
+The product is personal local software, extended primarily by agents, with hard
 requirements on testability, a fast GPU-free dev loop, and a UI whose state
 has one explicit owner.
 
@@ -39,4 +38,5 @@ has one explicit owner.
 - If the dashboard ever needs rich client interactivity beyond htmx's reach,
   that is a new ADR, not an incremental drift into inline JS.
 - Marker's CUDA/torch pinning on Windows is handled inside the `marker`
-  extra and verified by WP-2B.0; core development never needs it.
+  extra and verified by the representative converter corpus; core development
+  never needs it.

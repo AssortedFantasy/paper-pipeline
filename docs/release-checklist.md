@@ -9,9 +9,10 @@ offline release gates.
 
 **No known first-useful-release product blockers remain.** Direct dashboard
 library lifecycle and maintenance controls and selected-batch retry are now
-delivered with browser coverage. Release still requires owner sign-off, the
-explicitly approved scaffolding cleanup, and the final applicable checks after
-that cleanup.
+delivered with browser coverage. The owner approved removal of the transitional
+implementation artifacts after preserving its two PDF-analysis prompts as
+packaged recipes, moving the license to the repository root, and relocating
+the credential file outside the repository.
 
 Local Marker/OCR execution on the target laptop is explicitly deferred by
 owner safety direction. The three-document, SHA-verified structural golden
@@ -68,7 +69,7 @@ gate. The real-SSH smoke likewise remains an optional environment-gated check.
 
 | Requirement | Status and evidence |
 | --- | --- |
-| Built-in summary and contribution extraction | Delivered as packaged `summary` and `contributions` recipes. |
+| Built-in analysis recipes | Delivered as packaged `summary`, `contributions`, `intro`, and `method` recipes; the latter two preserve the v1 PDF-native review prompts. |
 | Run over one or selected papers | Delivered by services/API/dashboard selection. |
 | Simple template defining input and prompt | Delivered as Markdown plus validated YAML front matter. |
 | Predictable Markdown output per paper | Delivered under `papers/<citekey>/generated/`. |
@@ -150,7 +151,7 @@ complete.
 - [x] Fresh default `uv sync` plus `uv run python scripts/smoke.py`: recorded
   by the clean-environment work, 1 smoke test passed; no optional extras.
 - [x] Offline formatting, lint, type checking, and default tests: covered by
-  the work-package verification; rerun after final cleanup.
+  the implementation verification; rerun after artifact removal.
 - [x] Browser suite and committed visual baselines: covered by the UI work;
   lifecycle, maintenance, and selected-batch retry fixes include browser tests.
 - [x] Supplied real-world RDF slice: two papers from the owner-provided
@@ -168,5 +169,6 @@ complete.
 - [x] Confirmed no real corpus PDFs, credentials, `.pp/`, or temporary output
   are in the release commits; only the established tiny RDF test-fixture PDFs
   are tracked.
-- [ ] Complete the explicitly approved scaffolding cleanup and rerun all
-  applicable checks before tagging.
+- [x] All applicable checks passed after the approved transitional-artifact
+  removal: formatting, lint, type checking, default tests, browser tests,
+  visual baselines, lock verification, and the fake end-to-end smoke.

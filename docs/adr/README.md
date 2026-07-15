@@ -1,8 +1,8 @@
 # Architecture Decision Records
 
-Durable implementation decisions for Paper Pipeline v2. REFACTOR.md defines
-*what* the product does; ADRs define *how*, where the choice is not obvious
-and would be expensive to relitigate.
+Durable implementation decisions for Paper Pipeline v2. `README.md`,
+`AGENTS.md`, and the release checklist define product behavior; ADRs define
+*how* where a choice is not obvious and would be expensive to relitigate.
 
 ## Rules
 

@@ -17,6 +17,6 @@ Rules:
   designed, not accidental.
 - Closing the browser must not affect server-side jobs.
 
-Modules: ``app`` (FastAPI factory), ``api`` (JSON + fragment routes),
-``templates/`` and ``static/`` (client). Implemented by WP-4.x.
+Modules: ``app`` (FastAPI factory), ``api`` (JSON + fragment routes), and
+``templates/`` and ``static/`` (client).
 """

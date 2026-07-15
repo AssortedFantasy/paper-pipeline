@@ -3,7 +3,7 @@
 Both the web API and the CLI call these functions; business rules live here
 and nowhere above (see AGENTS.md architecture rules).
 
-Operations (implemented by WP-3.1..3.3):
+Operations:
 
 - ``create_library`` / ``open_library`` / ``validate_library``
 - ``preview_import(runtime, export_path) -> ImportPlan``

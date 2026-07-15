@@ -1,7 +1,7 @@
 """Versioned LLM provider contract.
 
 The default dev loop and test suite use a fake provider; the OpenAI-compatible
-adapter (WP-2C.2) requires the ``llm`` extra and real credentials, and is only
+adapter requires the ``llm`` extra and real credentials, and is only
 exercised by tests marked ``llm``.
 """
 

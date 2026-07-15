@@ -4,11 +4,9 @@ Status: Accepted, amended (2026-07-15)
 
 ## Context
 
-REFACTOR.md sketches citekey directories directly at the library root and
-defers the exact layout. It requires: citekey as paper identity, source PDFs
-always included, relative paths, clear essential/derived/disposable
-classification, and durable per-paper processing status for interruption
-recovery.
+The library needs citekey-based paper identity, included source PDFs, relative
+paths, clear essential/derived/disposable classification, and durable
+per-paper processing status for interruption recovery.
 
 ## Decision
 
@@ -31,8 +29,7 @@ recovery.
 
 Key choices:
 
-1. **Papers live under `papers/`, not at the library root.** This deviates
-   from the REFACTOR.md sketch. Rationale: citekeys share a namespace with
+1. **Papers live under `papers/`, not at the library root.** Citekeys share a namespace with
    nothing — no collision with `indexes/`, `.pp/`, or future reserved names;
    the generated `.gitignore` stays trivial (`**/.pp/`,
    `papers/*/source/`); and agent lookup is still one predictable hop
@@ -75,7 +72,7 @@ Key choices:
 - The generated AGENTS.md must state the `papers/<citekey>/` convention
   since it differs from the flat sketch some may expect.
 - Deleting a paper directory manually leaves stale index lines; the
-  validator reports this and `reindex` repairs it (per REFACTOR.md).
+  validator reports this and `reindex` repairs it.
 - A Git clone lacks `source/` PDFs; the validator classifies this as "not
   reprocessable", not an error.
 - Re-importing identical PDF bytes is a metadata-only refresh. Different bytes

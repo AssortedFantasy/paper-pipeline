@@ -4,8 +4,8 @@ Status: Accepted, amended (2026-07-15)
 
 ## Context
 
-REFACTOR.md requires recipes to be simple templates declaring input, output,
-and prompt, with recorded provenance and a deferred concrete syntax.
+Recipes need to be simple templates declaring input, output, and prompt, with
+recorded provenance and a concrete, inspectable syntax.
 
 ## Decision
 

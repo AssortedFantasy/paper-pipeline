@@ -17,8 +17,6 @@ listed in `corpus/manifest.json` with a source URL or provenance note so any
 developer can re-download it. Tests that require the corpus must skip with a
 clear message when a file is missing, not fail.
 
-Populated by WP-2B.0.
-
 The explicit GPU golden test uses the `native-text`, `tables`, and `figures`
 entries. Set `PAPER_PIPELINE_GOLDEN_NATIVE_TEXT_PDF`,
 `PAPER_PIPELINE_GOLDEN_TABLES_PDF`, and
@@ -30,4 +28,4 @@ documented GPU test command. Structural bounds live in
 
 Small, hand-trimmed Zotero RDF exports (RDF file + `files/` attachments using
 tiny dummy PDFs) used by ingestion tests. These are committed — keep them
-minimal. Populated by WP-2A.1.
+minimal.

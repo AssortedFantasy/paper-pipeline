@@ -4,7 +4,7 @@ Status: Accepted, amended (2026-07-15)
 
 ## Context
 
-REFACTOR.md requires one shared job system, isolated conversion processes,
+Paper Pipeline requires one shared job system, isolated conversion processes,
 provider-cache-friendly recipe scheduling, browser-independent execution, and
 conservative recovery. Atomic file writes alone do not prevent two operations
 from reading the same `paper.json` and overwriting each other's changes.

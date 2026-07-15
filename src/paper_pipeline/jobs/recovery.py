@@ -1,7 +1,8 @@
 """Disposable attempt markers and injected completion validation.
 
-This module deliberately knows nothing about library models. WP-3.0 supplies
-callbacks that translate :class:`TerminalOutcome` into durable paper records.
+This module deliberately knows nothing about library models. Application
+services supply callbacks that translate :class:`TerminalOutcome` into durable
+paper records.
 """
 
 from __future__ import annotations

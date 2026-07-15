@@ -114,6 +114,10 @@ def test_papers_load_filter_select_and_launch(page: Page, ui_server: str, tmp_pa
     expect(page.get_by_role("heading", name="Papers", exact=True)).to_be_visible()
     expect(page.locator("tbody tr")).to_have_count(5)
     expect(page.locator("script[src*='htmx.min.js']")).to_have_count(1)
+    expect(page.get_by_label("Recipe").locator("option")).to_have_count(4)
+    assert page.get_by_label("Recipe").locator("option").evaluate_all(
+        "options => options.map(option => option.value)"
+    ) == ["summary", "contributions", "intro", "method"]
 
     page.get_by_placeholder("Title, author, or citekey").fill("journal")
     expect(page.locator("tbody tr")).to_have_count(1)

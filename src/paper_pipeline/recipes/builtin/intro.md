@@ -1,3 +1,9 @@
+---
+name: intro
+version: 1
+input: pdf
+output: intro_filtered.md
+---
 Role: Expert Scientific & Technical Reviewer.
 
 Task: Analyze the Introduction and Background sections of the provided text. Extract the foundational context, the specific problem definition, the authors' technical motivation, the state of prior art, and high-signal citations.

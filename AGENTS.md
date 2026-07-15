@@ -13,25 +13,34 @@ outputs, and small text indexes that agents can search with `rg`.
 that builds it. Paper Pipeline is a library builder — not a research
 workspace, not a search service, not a note manager.
 
+## Product scope
+
+- Paper Pipeline is personal, local software. Hosted, commercial, and
+  multi-tenant operation and migration of the former implementation's database
+  are out of scope.
+- Zotero RDF is a repeatable one-way import, not live or two-way sync. Later
+  imports retain papers absent from the new export. Citekey is identity; an
+  upstream citekey change creates a new paper and has no rename tracking.
+- The filesystem is the agent reading interface. Paper Pipeline does not
+  support agent-authored notes, metadata or note editing, or manual authoring
+  workflows. Citation remains external (for example, BibTeX/LaTeX by citekey);
+  the library defines no citation or evidence-reference format.
+- Do not add an MCP or library-reading CLI, semantic/vector search, citation
+  graphs, saved searches, cross-paper research workflows, workflow DAGs,
+  daemon mode, plugin discovery, or multi-machine execution. The accepted
+  single user-controlled SSH conversion host is the sole remote-execution
+  exception.
+
 ## Sources of truth
 
 | Question | Where to look | Lifetime |
 | --- | --- | --- |
-| What should the product do? | `REFACTOR.md` (requirements; do not contradict it) | scaffolding — deleted at WP-5.4 |
-| What work exists and in what order? | `PLAN.md` (work packages) | scaffolding — deleted at WP-5.4 |
+| What should the product do? | `README.md`, this file, and `docs/release-checklist.md` | permanent |
 | How were contested decisions settled? | `docs/adr/` | permanent |
 | How do I operate in this repo? | This file | permanent |
-| Old implementation | `v1/` — **reference only. Never import from it, never modify it, never copy its patterns uncritically.** | scaffolding — deleted at WP-5.4 |
 
-**Scaffolding rule:** `REFACTOR.md`, `PLAN.md`, and `v1/` exist only to build
-v2 and will be deleted when the plan completes (WP-5.4). Do not reference
-them from source code or docstrings — permanent references may only target
-`AGENTS.md` or `docs/adr/`. Transient `WP-x.y` markers in docstrings are
-allowed during development and are scrubbed at WP-5.4.
-
-If REFACTOR.md and code disagree, REFACTOR.md wins. If you need a decision
-that is not covered, write an ADR proposal rather than improvising a
-convention.
+If a durable product decision is not covered, write an ADR proposal rather
+than improvising a convention.
 
 ## Commands
 
@@ -169,24 +178,21 @@ Run these and ensure they pass before considering work done:
 
 ## Definition of done
 
-A work package is done when:
+A change is done when:
 
-1. Scope matches PLAN.md — nothing missing, nothing extra.
-2. All required checks above pass locally, from a clean `uv sync`.
+1. Its requested scope is complete without unrelated expansion.
+2. All applicable checks above pass locally from the intended dependency profile.
 3. New behavior is covered by tests in the correct marker category.
-4. Success was verified from durable artifacts (files on disk), not logs.
+4. Success is verified from durable artifacts (files on disk), not logs.
 5. Versioned contract changes include the ADR, format-version review, and
    compatibility-test updates they require.
-6. PLAN.md's status column for the work package is updated.
-7. No stray files: temp outputs, real PDFs, or credentials are not committed.
+6. No stray files, real corpus PDFs, credentials, or operational output are committed.
 
 ## Working style
 
-- Small, reviewable increments; one work package per branch/PR unless
-  PLAN.md says otherwise.
-- Do not create documentation files beyond what a work package specifies.
+- Small, reviewable increments with one coherent concern per branch/PR.
+- Do not create documentation files without a concrete maintenance need.
 - Do not add configuration options, plugins, or abstractions for
-  hypothetical futures — REFACTOR.md's principle: complexity must earn its
-  place.
+  hypothetical futures — complexity must earn its place.
 - When blocked by an ambiguity, prefer the smallest decision consistent with
-  REFACTOR.md, record it in the PR description, and flag it for review.
+  the durable product rules, record it in the PR description, and flag it for review.

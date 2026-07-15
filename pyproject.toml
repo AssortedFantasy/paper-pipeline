@@ -62,17 +62,16 @@ packages = ["src/paper_pipeline"]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
-extend-exclude = ["v1"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.pyright]
 include = ["src", "tests"]
-exclude = ["v1", ".venv"]
+exclude = [".venv"]
 # "standard", not "strict": rdflib and marker-pdf are poorly typed, and
-# pyright cannot scope strictness per package. Revisit at WP-5.3 once the
-# well-typed core (library/, jobs/) exists to measure the cost on.
+# pyright cannot scope strictness per package; standard mode avoids letting
+# poorly typed external edges dictate the checking policy for the core.
 typeCheckingMode = "standard"
 pythonVersion = "3.12"
 

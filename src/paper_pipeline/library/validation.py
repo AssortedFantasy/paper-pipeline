@@ -1,6 +1,6 @@
 """Library validation: report actionable problems, never auto-destroy data.
 
-Implemented by WP-1.3. Checks include:
+Checks include:
 
 - ``library.json`` present, readable, and a supported format version.
 - Every ``papers/<citekey>/`` has a valid ``paper.json`` whose citekey

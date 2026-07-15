@@ -3,10 +3,10 @@
 Thin argument parsing over application services — no business logic here.
 Subcommands are implemented alongside their services:
 
-- ``serve``     : run the web dashboard (WP-4.1)
-- ``doctor``    : environment/health checks with actionable errors (WP-0.2)
-- ``validate``  : validate a library (WP-3.1)
-- ``reindex``   : rebuild indexes, AGENTS.md, .gitignore (WP-3.1)
+- ``serve``     : run the web dashboard
+- ``doctor``    : environment/health checks with actionable errors
+- ``validate``  : validate a library
+- ``reindex``   : rebuild indexes, AGENTS.md, .gitignore
 """
 
 import argparse

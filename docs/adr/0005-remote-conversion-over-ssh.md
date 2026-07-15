@@ -4,7 +4,8 @@ Status: Accepted (2026-07-15)
 
 ## Context
 
-WP-2B.0 found local Marker conversion unsuitable for the target laptop. The
+Representative runtime characterization found local Marker conversion
+unsuitable for the target laptop. The
 owner has a GPU server reachable through an existing SSH alias. Remote
 conversion is an optional converter backend, not a distributed scheduler: the
 existing job queue still owns global conversion concurrency, paper lanes,

@@ -12,10 +12,9 @@ workspace.
 
 ## Release status
 
-The v2 implementation is a release candidate awaiting final owner sign-off and
-scaffolding cleanup. Core storage, RDF import, conversion orchestration,
-recipes, indexes, the web API, and the operational dashboard are implemented
-and covered by offline and browser tests. The
+The first useful v2 release includes core storage, RDF import, conversion
+orchestration, recipes, indexes, the web API, and the operational dashboard,
+covered by offline and browser tests. The
 [release checklist](docs/release-checklist.md) records acceptance evidence and
 the explicitly deferred external workflows.
 
@@ -23,9 +22,6 @@ Local GPU/OCR execution on the target laptop is prohibited by owner safety
 direction. The SHA-verified three-document Marker golden suite remains
 available for an approved stronger or remote machine, but is not an offline
 release blocker.
-
-The transitional `REFACTOR.md`, `PLAN.md`, and `v1/` tree remain development
-scaffolding until the final cleanup work receives explicit owner sign-off.
 
 ## Requirements and installation
 
@@ -150,5 +146,3 @@ Browser, GPU, and real-provider tests are explicit workflows. See
 | [AGENTS.md](AGENTS.md) | Development commands, invariants, and required checks |
 | [docs/adr/](docs/adr/) | Durable architecture decisions |
 | [docs/release-checklist.md](docs/release-checklist.md) | Delivered requirements, deferrals, and release gates |
-| [REFACTOR.md](REFACTOR.md) | Transitional product-requirement scaffolding |
-| [PLAN.md](PLAN.md) | Transitional implementation-plan scaffolding |

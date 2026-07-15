@@ -19,6 +19,3 @@ tests/fixtures/corpus/*.pdf
 # Local configuration and secrets (never committed)
 .env
 .env.*
-
-# v1 reference tree keeps its own environment
-v1/.venv/

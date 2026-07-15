@@ -1,6 +1,6 @@
 """Import planning: compare an export snapshot with the current library.
 
-Implemented by WP-2A.2. Produces an ``ImportPlan``:
+Produces an ``ImportPlan``:
 
 - ``additions``: records whose citekey is not in the library.
 - ``refreshes``: records whose citekey exists and source hash is unchanged;

@@ -1,6 +1,6 @@
 """Library storage: create/open libraries, read/write papers, atomic installs.
 
-Implemented by WP-1.1/1.2. Key invariants:
+Key invariants:
 
 - All writes are atomic: write to a temp file/dir under the library's
   ``.pp/tmp`` area, validate, then rename into place.

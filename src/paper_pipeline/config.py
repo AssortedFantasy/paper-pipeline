@@ -9,8 +9,6 @@ Responsibilities:
   library, into logs stored in a library, or into recipe provenance.
 
 Libraries carry no configuration. Prefer sensible defaults over new settings.
-
-Implemented by WP-0.2.
 """
 
 from pathlib import Path

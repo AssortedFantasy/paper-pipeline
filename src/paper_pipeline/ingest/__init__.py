@@ -20,6 +20,6 @@ Rules:
 
 Modules:
 
-- ``rdf``: RDF/XML parsing -> ``ImportRecord`` list (WP-2A.1).
-- ``plan``: snapshot comparison -> ``ImportPlan`` of adds/refreshes/problems (WP-2A.2).
+- ``rdf``: RDF/XML parsing -> ``ImportRecord`` list.
+- ``plan``: snapshot comparison -> ``ImportPlan`` of adds/refreshes/problems.
 """
