@@ -24,9 +24,9 @@ has one explicit owner.
   WebSockets are not needed.
 - **rdflib** for Zotero RDF/XML parsing.
 - **Marker** (`marker-pdf`) as the first conversion backend, behind the
-  frozen converter contract, installed via the optional `marker` extra.
+  versioned converter contract, installed via the optional `marker` extra.
 - **OpenAI SDK** (OpenAI-compatible endpoints) as the first LLM provider,
-  behind the frozen provider contract, via the optional `llm` extra.
+  behind the versioned provider contract, via the optional `llm` extra.
 - **pytest** (+ pytest-asyncio, httpx) for tests; **Playwright** for browser
   and visual-regression tests; **ruff** for format+lint; **pyright**
   (standard mode) for type checking.

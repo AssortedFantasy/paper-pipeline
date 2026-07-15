@@ -42,15 +42,25 @@ All commands run from the repository root. Use `uv`, never bare `pip`.
 | Setup (core + dev tools) | `uv sync` |
 | Setup with Marker/GPU | `uv sync --extra marker` |
 | Setup with LLM SDK | `uv sync --extra llm` |
+| Install browser runtime | `uv run playwright install chromium` |
 | Format | `uv run ruff format .` |
 | Lint (fix) | `uv run ruff check --fix .` |
 | Type check | `uv run pyright` |
-| Fast tests (default) | `uv run pytest` |
+| Default tests (offline) | `uv run pytest` |
 | Clean-environment smoke | `uv run python scripts/smoke.py` |
-| Browser/UI tests | `uv run pytest -m browser` (after `uv run playwright install chromium`) |
+| Browser/UI tests | `uv run pytest -m browser` |
+| Update visual baselines | `uv run pytest -m browser tests/web/test_visual.py --update-snapshots` |
 | GPU/Marker tests | `uv run pytest -m gpu` (explicit only; needs `marker` extra + GPU) |
 | Real-LLM tests | `uv run pytest -m llm` (explicit only; needs credentials; costs money) |
-| CLI | `uv run paper-pipeline <serve|doctor|validate|reindex>` |
+| Start dashboard | `uv run paper-pipeline serve` |
+| Environment diagnostics | `uv run paper-pipeline doctor` |
+| Validate library | `uv run paper-pipeline validate <library>` |
+| Rebuild indexes | `uv run paper-pipeline reindex <library>` |
+
+Replace `<library>` with the library directory. The GPU suite uses local,
+SHA-verified corpus paths documented in `tests/fixtures/README.md`; never add
+the PDFs to the repository. Real-provider tests read
+`PAPER_PIPELINE_LLM_API_KEY` and `PAPER_PIPELINE_LLM_MODEL` and may spend money.
 
 The default `uv run pytest` must always pass with **no GPU, no network, no
 credentials, and no extras installed**. Never move a test that needs those
@@ -154,7 +164,7 @@ Run these and ensure they pass before considering work done:
 | Conversion / jobs | Above + child-process failure/timeout/cancellation tests with the fake converter |
 | Recipes / providers | Above + fake-provider tests incl. provenance and per-paper sequencing |
 | Web API | Above + API contract tests |
-| UI (templates/static/routes) | Above + `uv run pytest -m browser` incl. visual regression snapshots; update baselines with `uv run pytest -m browser tests/web/test_visual.py --update-snapshots` |
+| UI (templates/static/routes) | Above + `uv run pytest -m browser` incl. visual regression snapshots; update baselines only after intentional review with the command above |
 | Dependencies (`pyproject.toml`) | Above + confirm default `uv sync` stays GPU-free + `uv lock` committed |
 
 ## Definition of done

@@ -31,11 +31,11 @@ WP here.
 | 1.3 | Library validator | 1.1 | done |
 | 2A.1 | Zotero RDF parsing + fixtures | 0.3 | done |
 | 2A.2 | Import planning (preview) | 2A.1, 1.1 | done |
-| 2B.0 | Marker corpus, pins, runtime characterization | 0.1 | in-progress |
+| 2B.0 | Marker corpus, pins, runtime characterization | 0.1 | done |
 | 2B.1 | Fake converter + contract tests | 0.1 | done |
 | 2B.2 | Child-process conversion runner | 2B.1 | done |
-| 2B.3 | Marker adapter + GPU smoke test | 2B.0, 2B.2 | todo |
-| 2B.4 | Remote conversion over SSH (conditional) | 2B.3 | conditional |
+| 2B.3 | Marker adapter + GPU smoke test | 2B.0, 2B.2 | done |
+| 2B.4 | Remote conversion over SSH (conditional) | 2B.3 | done |
 | 2C.1 | Recipe template parsing + built-ins | 0.3 | done |
 | 2C.2 | LLM providers (fake + OpenAI) | 0.3 | done |
 | 2C.3 | Recipe runner + provenance | 2C.1, 2C.2, 1.2 | done |
@@ -48,15 +48,15 @@ WP here.
 | 3.1 | Library services + CLI (`validate`, `reindex`) | 3.0, 1.3, 2E.1, 2E.2 | done |
 | 3.2 | Import services (preview + apply) | 3.0, 2A.2 | done |
 | 3.3 | Processing services (convert, recipes, cancel, retry) | 3.0, 2B.2, 2C.3 | done |
-| 4.1 | Web API + SSE | 3.1, 3.2, 3.3 | todo |
-| 4.2 | UI shell + papers list + launch actions | 4.1 | todo |
-| 4.3 | Import UI (preview/apply) | 4.1 | todo |
-| 4.4 | Jobs dashboard | 4.1 | todo |
-| 4.5 | Paper detail view | 4.1 | todo |
-| 4.6 | Visual regression + designed edge states | 4.2–4.5 | todo |
-| 5.1 | Clean-environment smoke test | 3.x, 4.1 | todo |
-| 5.2 | End-to-end golden run (GPU) | 2B.3, 3.3 | todo |
-| 5.3 | Docs polish + release checklist | all | todo |
+| 4.1 | Web API + SSE | 3.1, 3.2, 3.3 | done |
+| 4.2 | UI shell + papers list + launch actions | 4.1 | done |
+| 4.3 | Import UI (preview/apply) | 4.1 | done |
+| 4.4 | Jobs dashboard | 4.1 | done |
+| 4.5 | Paper detail view | 4.1 | done |
+| 4.6 | Visual regression + designed edge states | 4.2–4.5 | done |
+| 5.1 | Clean-environment smoke test | 3.x, 4.1 | done |
+| 5.2 | End-to-end golden run (GPU) | 2B.3, 3.3 | done |
+| 5.3 | Docs polish + release checklist | all | done |
 | 5.4 | Decommission scaffolding (v1/, REFACTOR.md, PLAN.md) | 5.1–5.3 | todo |
 
 ### Parallelization guide
