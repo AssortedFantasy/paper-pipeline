@@ -33,8 +33,11 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import tempfile
+import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from pydantic import ValidationError
@@ -59,6 +62,8 @@ _WINDOWS_RESERVED_NAMES = {
     *(f"COM{number}" for number in range(1, 10)),
     *(f"LPT{number}" for number in range(1, 10)),
 }
+_PROCESS_STARTED_AT = time.time()
+ArtifactValidator = Callable[[Path], None]
 
 
 def validate_citekey(citekey: str) -> None:
@@ -156,6 +161,114 @@ class Library:
         destination_dir = paper_dir(self.root, citekey)
         destination_dir.mkdir(parents=True, exist_ok=True)
         _atomic_write_json(self.root, destination_dir / PAPER_FILE, record)
+
+    def stage_dir(self) -> Path:
+        """Create a fresh staging directory on the library filesystem."""
+        temp_root = self.operational_dir() / "tmp"
+        temp_root.mkdir(parents=True, exist_ok=True)
+        return Path(tempfile.mkdtemp(prefix=f"{os.getpid()}-", dir=temp_root))
+
+    def clean_stale_staging(self) -> list[Path]:
+        """Remove staging directories that predate this process.
+
+        Only children of ``.pp/tmp`` are considered, and installed library
+        content is therefore outside the cleanup boundary.
+        """
+        temp_root = self.operational_dir() / "tmp"
+        removed: list[Path] = []
+        for candidate in temp_root.iterdir():
+            try:
+                is_stale_dir = (
+                    candidate.is_dir() and candidate.stat().st_mtime < _PROCESS_STARTED_AT
+                )
+            except FileNotFoundError:
+                continue
+            if is_stale_dir:
+                shutil.rmtree(candidate)
+                removed.append(candidate)
+        return removed
+
+    def install_artifact(
+        self,
+        staged_path: Path,
+        destination: str | PurePosixPath,
+        *,
+        validate: ArtifactValidator | None = None,
+    ) -> str:
+        """Validate and atomically install one staged file, returning its SHA-256."""
+        staged_path = staged_path.resolve()
+        _require_staged_file(self.root, staged_path)
+        relative_destination = _coerce_relative_destination(destination)
+        destination_path = self.root.joinpath(*relative_destination.parts)
+        if validate is not None:
+            validate(staged_path)
+        artifact_hash = sha256_file(staged_path)
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(staged_path, destination_path)
+        return artifact_hash
+
+    def install_conversion_bundle(
+        self,
+        citekey: str,
+        staging_dir: Path,
+        *,
+        validate: ArtifactValidator | None = None,
+    ) -> dict[str, str]:
+        """Install a staged transcription and optional figures as one declared bundle.
+
+        Validation and hashing finish before installed content is touched. Ordinary
+        exceptions roll back to the previous bundle. A process-ending interruption
+        may leave new bytes with old metadata, which the returned/stored hashes make
+        detectable during validation.
+        """
+        validate_citekey(citekey)
+        staging_dir = staging_dir.resolve()
+        _require_staging_dir(self.root, staging_dir)
+        _validate_conversion_stage(staging_dir)
+        if validate is not None:
+            validate(staging_dir)
+
+        transcription = staging_dir / "transcription.md"
+        figures = staging_dir / "figures"
+        paper_root = paper_dir(self.root, citekey)
+        if not paper_root.is_dir():
+            raise FileNotFoundError(f"Paper {citekey!r} does not exist")
+
+        hashes = {
+            f"papers/{citekey}/transcription.md": sha256_file(transcription),
+            **{
+                f"papers/{citekey}/figures/{figure.relative_to(figures).as_posix()}": sha256_file(
+                    figure
+                )
+                for figure in sorted(figures.rglob("*"))
+                if figure.is_file()
+            },
+        }
+        backup = self.stage_dir()
+        installed: list[Path] = []
+        backed_up: list[tuple[Path, Path]] = []
+        targets = [
+            (transcription, paper_root / "transcription.md", backup / "transcription.md"),
+            (figures if figures.is_dir() else None, paper_root / "figures", backup / "figures"),
+        ]
+        try:
+            for source, destination, prior in targets:
+                if destination.exists():
+                    os.replace(destination, prior)
+                    backed_up.append((prior, destination))
+                if source is not None:
+                    os.replace(source, destination)
+                    installed.append(destination)
+        except BaseException:
+            for path in reversed(installed):
+                _remove_path(path)
+            for prior, destination in reversed(backed_up):
+                if prior.exists():
+                    os.replace(prior, destination)
+            raise
+        finally:
+            shutil.rmtree(backup, ignore_errors=True)
+        return hashes
 
 
 def create_library(root: Path, name: str = "") -> Library:
@@ -256,6 +369,44 @@ def _validate_relative_posix_path(value: str, *, field: str) -> None:
         raise ValueError(f"{field} must be a POSIX path relative to the library: {value!r}")
     if str(posix_path) != value or value == ".":
         raise ValueError(f"{field} is not a normalized POSIX path: {value!r}")
+
+
+def _coerce_relative_destination(value: str | PurePosixPath) -> PurePosixPath:
+    text = str(value)
+    _validate_relative_posix_path(text, field="artifact destination")
+    return PurePosixPath(text)
+
+
+def _require_staging_dir(root: Path, path: Path) -> None:
+    temp_root = (root / OPERATIONAL_DIR / "tmp").resolve()
+    if not path.is_dir() or not path.is_relative_to(temp_root) or path == temp_root:
+        raise ValueError("staging directory must be a child of the library .pp/tmp directory")
+
+
+def _require_staged_file(root: Path, path: Path) -> None:
+    temp_root = (root / OPERATIONAL_DIR / "tmp").resolve()
+    if not path.is_file() or not path.is_relative_to(temp_root):
+        raise ValueError("artifact must be a staged file inside the library .pp/tmp directory")
+
+
+def _validate_conversion_stage(staging_dir: Path) -> None:
+    allowed = {"transcription.md", "figures"}
+    unexpected = sorted(path.name for path in staging_dir.iterdir() if path.name not in allowed)
+    if unexpected:
+        raise ValueError(f"conversion staging directory contains undeclared entries: {unexpected}")
+    transcription = staging_dir / "transcription.md"
+    if not transcription.is_file() or transcription.stat().st_size == 0:
+        raise ValueError("conversion bundle requires a non-empty transcription.md")
+    figures = staging_dir / "figures"
+    if figures.exists() and not figures.is_dir():
+        raise ValueError("conversion bundle figures entry must be a directory")
+
+
+def _remove_path(path: Path) -> None:
+    if path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink(missing_ok=True)
 
 
 def _atomic_write_json(root: Path, destination: Path, model: LibraryInfo | PaperRecord) -> None:
