@@ -72,6 +72,17 @@ def test_open_rejects_newer_format_with_upgrade_action(library_root: Path) -> No
         open_library(library_root)
 
 
+def test_open_rejects_older_format_with_rebuild_action(library_root: Path) -> None:
+    create_library(library_root)
+    info_path = library_root / "library.json"
+    info = json.loads(info_path.read_text(encoding="utf-8"))
+    info["format_version"] = FORMAT_VERSION - 1
+    info_path.write_text(json.dumps(info), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"older.*rebuild.*Zotero RDF"):
+        open_library(library_root)
+
+
 @pytest.mark.parametrize(
     "citekey",
     ["", "bad/key", "bad key", ".hidden", "trailing.", "CON", "con.txt", "LPT9"],

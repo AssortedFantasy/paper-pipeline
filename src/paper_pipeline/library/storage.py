@@ -318,7 +318,7 @@ def open_library(root: Path) -> Library:
     if version < FORMAT_VERSION:
         raise ValueError(
             f"Library format version {version} is older than supported version "
-            f"{FORMAT_VERSION}; migrate it with a compatible Paper Pipeline version"
+            f"{FORMAT_VERSION}; rebuild the library from its Zotero RDF export"
         )
     try:
         info = LibraryInfo.model_validate(raw)
