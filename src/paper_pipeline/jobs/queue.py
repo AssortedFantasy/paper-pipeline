@@ -3,14 +3,28 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+import contextlib
+import inspect
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import cast
 from uuid import uuid4
 
 from paper_pipeline.jobs.events import EventBus, JobEventKind
 from paper_pipeline.jobs.model import Job, JobKind, JobScope, JobState
+from paper_pipeline.jobs.recovery import (
+    AttemptMarker,
+    CompletionResult,
+    RecoveryHooks,
+    TerminalOutcome,
+)
 
 type JobWorker = Callable[[Job], Awaitable[None]]
+type CancellableJobWorker = Callable[[Job, "CancellationToken"], Awaitable[None]]
+type Worker = JobWorker | CancellableJobWorker
+type KillHook = Callable[[], Awaitable[None] | None]
 
 _LEGAL_TRANSITIONS: dict[JobState, frozenset[JobState]] = {
     JobState.QUEUED: frozenset({JobState.RUNNING, JobState.CANCELLED}),
@@ -24,6 +38,80 @@ _LEGAL_TRANSITIONS: dict[JobState, frozenset[JobState]] = {
 
 class InvalidJobTransition(ValueError):
     """Raised when code attempts a state transition outside the live lifecycle."""
+
+
+class CancellationToken:
+    """Cooperative cancellation signal passed to workers that accept it."""
+
+    def __init__(self) -> None:
+        self._event = asyncio.Event()
+
+    def is_set(self) -> bool:
+        """Return whether cancellation has been requested."""
+        return self._event.is_set()
+
+    async def wait(self) -> None:
+        """Wait until cancellation is requested."""
+        await self._event.wait()
+
+    def _cancel(self) -> None:
+        self._event.set()
+
+
+@dataclass(frozen=True)
+class _JobDefinition:
+    library_key: str
+    citekey: str | None
+    kind: JobKind
+    scope: JobScope
+    label: str
+    worker: Worker
+    meta: dict[str, str]
+    kill_hook: KillHook | None
+    recovery: RecoveryHooks | None
+
+
+class _LibraryBarrier:
+    """Writer-preferring barrier between paper lanes and library writes."""
+
+    def __init__(self) -> None:
+        self._condition = asyncio.Condition()
+        self._active_papers = 0
+        self._writer_active = False
+        self._waiting_writers = 0
+
+    @asynccontextmanager
+    async def paper(self) -> AsyncIterator[None]:
+        async with self._condition:
+            await self._condition.wait_for(
+                lambda: not self._writer_active and self._waiting_writers == 0
+            )
+            self._active_papers += 1
+        try:
+            yield
+        finally:
+            async with self._condition:
+                self._active_papers -= 1
+                self._condition.notify_all()
+
+    @asynccontextmanager
+    async def write(self) -> AsyncIterator[None]:
+        async with self._condition:
+            self._waiting_writers += 1
+            try:
+                await self._condition.wait_for(
+                    lambda: self._active_papers == 0 and not self._writer_active
+                )
+                self._writer_active = True
+            finally:
+                self._waiting_writers -= 1
+                self._condition.notify_all()
+        try:
+            yield
+        finally:
+            async with self._condition:
+                self._writer_active = False
+                self._condition.notify_all()
 
 
 def transition_job(
@@ -49,11 +137,19 @@ def transition_job(
 class JobQueue:
     """Own live jobs, paper lanes, and ordered event publication."""
 
-    def __init__(self, *, events: EventBus | None = None) -> None:
+    def __init__(self, *, llm_concurrency: int = 4, events: EventBus | None = None) -> None:
+        if llm_concurrency < 1:
+            raise ValueError("llm_concurrency must be at least 1")
         self.events = events or EventBus()
         self._jobs: dict[str, Job] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._paper_lanes: dict[tuple[str, str], asyncio.Lock] = {}
+        self._library_barriers: dict[str, _LibraryBarrier] = {}
+        self._conversion_slots = asyncio.Semaphore(1)
+        self._recipe_slots = asyncio.Semaphore(llm_concurrency)
+        self._tokens: dict[str, CancellationToken] = {}
+        self._definitions: dict[str, _JobDefinition] = {}
+        self._closed = False
 
     async def enqueue_paper(
         self,
@@ -61,13 +157,16 @@ class JobQueue:
         citekey: str,
         kind: JobKind,
         label: str,
-        worker: JobWorker,
+        worker: Worker,
         *,
         meta: dict[str, str] | None = None,
+        kill_hook: KillHook | None = None,
+        recovery: RecoveryHooks | None = None,
     ) -> Job:
         """Enqueue work that acquires its paper lane before invoking ``worker``."""
         if not citekey:
             raise ValueError("citekey must not be empty for a paper job")
+        self._ensure_open()
         job = self._new_job(
             library_key=library_key,
             citekey=citekey,
@@ -75,9 +174,13 @@ class JobQueue:
             scope=JobScope.PAPER,
             label=label,
             meta=meta,
+            worker=worker,
+            kill_hook=kill_hook,
+            recovery=recovery,
         )
         lane = self._paper_lanes.setdefault((library_key, citekey), asyncio.Lock())
-        self._start(job, worker, lane=lane)
+        barrier = self._library_barriers.setdefault(library_key, _LibraryBarrier())
+        self._start(job, worker, lane=lane, barrier=barrier)
         return job
 
     async def enqueue_library_read(
@@ -85,11 +188,14 @@ class JobQueue:
         library_key: str,
         kind: JobKind,
         label: str,
-        worker: JobWorker,
+        worker: Worker,
         *,
         meta: dict[str, str] | None = None,
+        kill_hook: KillHook | None = None,
+        recovery: RecoveryHooks | None = None,
     ) -> Job:
         """Enqueue explicitly read-only library work."""
+        self._ensure_open()
         job = self._new_job(
             library_key=library_key,
             citekey=None,
@@ -97,6 +203,9 @@ class JobQueue:
             scope=JobScope.LIBRARY_READ,
             label=label,
             meta=meta,
+            worker=worker,
+            kill_hook=kill_hook,
+            recovery=recovery,
         )
         self._start(job, worker)
         return job
@@ -106,11 +215,14 @@ class JobQueue:
         library_key: str,
         kind: JobKind,
         label: str,
-        worker: JobWorker,
+        worker: Worker,
         *,
         meta: dict[str, str] | None = None,
+        kill_hook: KillHook | None = None,
+        recovery: RecoveryHooks | None = None,
     ) -> Job:
         """Enqueue mutating library work through the dedicated write API."""
+        self._ensure_open()
         job = self._new_job(
             library_key=library_key,
             citekey=None,
@@ -118,8 +230,12 @@ class JobQueue:
             scope=JobScope.LIBRARY_WRITE,
             label=label,
             meta=meta,
+            worker=worker,
+            kill_hook=kill_hook,
+            recovery=recovery,
         )
-        self._start(job, worker)
+        barrier = self._library_barriers.setdefault(library_key, _LibraryBarrier())
+        self._start(job, worker, barrier=barrier)
         return job
 
     def get(self, job_id: str) -> Job | None:
@@ -133,14 +249,100 @@ class JobQueue:
     async def wait(self, job_id: str) -> Job:
         """Wait until one job reaches a terminal state."""
         job = self._jobs[job_id]
-        await asyncio.shield(self._tasks[job_id])
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.shield(self._tasks[job_id])
         return job
 
     async def join(self) -> None:
         """Wait for all jobs that are currently enqueued."""
         tasks = tuple(self._tasks.values())
         if tasks:
-            await asyncio.gather(*(asyncio.shield(task) for task in tasks))
+            await asyncio.gather(*(asyncio.shield(task) for task in tasks), return_exceptions=True)
+
+    async def cancel(self, job_id: str) -> bool:
+        """Cancel queued work immediately or signal a running worker."""
+        job = self._jobs[job_id]
+        if job.state.is_terminal:
+            return False
+
+        token = self._tokens[job_id]
+        if token.is_set():
+            return False
+        token._cancel()
+        task = self._tasks[job_id]
+        if job.state is JobState.QUEUED:
+            self._transition(job, JobState.CANCELLED, error="job cancelled before start")
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            return True
+
+        kill_hook = self._definitions[job_id].kill_hook
+        if kill_hook is not None:
+            try:
+                hook_result = kill_hook()
+                if inspect.isawaitable(hook_result):
+                    await hook_result
+            except Exception:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+        return True
+
+    async def retry(self, job_id: str) -> Job:
+        """Create a fresh job from a failed or cancelled job's definition."""
+        original = self._jobs[job_id]
+        if original.state not in {JobState.FAILED, JobState.CANCELLED}:
+            raise ValueError("only failed or cancelled jobs can be retried")
+        definition = self._definitions[job_id]
+        meta = {**definition.meta, "retry_of": original.id}
+        if definition.scope is JobScope.PAPER:
+            assert definition.citekey is not None
+            return await self.enqueue_paper(
+                definition.library_key,
+                definition.citekey,
+                definition.kind,
+                definition.label,
+                definition.worker,
+                meta=meta,
+                kill_hook=definition.kill_hook,
+                recovery=definition.recovery,
+            )
+        if definition.scope is JobScope.LIBRARY_READ:
+            return await self.enqueue_library_read(
+                definition.library_key,
+                definition.kind,
+                definition.label,
+                definition.worker,
+                meta=meta,
+                kill_hook=definition.kill_hook,
+                recovery=definition.recovery,
+            )
+        return await self.enqueue_library_write(
+            definition.library_key,
+            definition.kind,
+            definition.label,
+            definition.worker,
+            meta=meta,
+            kill_hook=definition.kill_hook,
+            recovery=definition.recovery,
+        )
+
+    async def shutdown(self, *, grace_seconds: float = 1.0) -> None:
+        """Stop accepting jobs and leave no queue-owned tasks running."""
+        if grace_seconds < 0:
+            raise ValueError("grace_seconds must not be negative")
+        self._closed = True
+        for job in tuple(self._jobs.values()):
+            if not job.state.is_terminal:
+                await self.cancel(job.id)
+
+        pending = [task for task in self._tasks.values() if not task.done()]
+        if pending:
+            _, still_pending = await asyncio.wait(pending, timeout=grace_seconds)
+            for task in still_pending:
+                task.cancel()
+            await asyncio.gather(*still_pending, return_exceptions=True)
 
     def publish_progress(self, job_id: str, message: str) -> None:
         """Publish an informational event without changing job state."""
@@ -162,6 +364,9 @@ class JobQueue:
         scope: JobScope,
         label: str,
         meta: dict[str, str] | None,
+        worker: Worker,
+        kill_hook: KillHook | None,
+        recovery: RecoveryHooks | None,
     ) -> Job:
         job = Job(
             id=str(uuid4()),
@@ -174,12 +379,31 @@ class JobQueue:
             meta=dict(meta or {}),
         )
         self._jobs[job.id] = job
+        self._tokens[job.id] = CancellationToken()
+        self._definitions[job.id] = _JobDefinition(
+            library_key=library_key,
+            citekey=citekey,
+            kind=kind,
+            scope=scope,
+            label=label,
+            worker=worker,
+            meta=dict(meta or {}),
+            kill_hook=kill_hook,
+            recovery=recovery,
+        )
         self._publish_state(job)
         return job
 
-    def _start(self, job: Job, worker: JobWorker, *, lane: asyncio.Lock | None = None) -> None:
+    def _start(
+        self,
+        job: Job,
+        worker: Worker,
+        *,
+        lane: asyncio.Lock | None = None,
+        barrier: _LibraryBarrier | None = None,
+    ) -> None:
         task = asyncio.create_task(
-            self._run(job, worker, lane=lane),
+            self._run(job, worker, lane=lane, barrier=barrier),
             name=f"paper-pipeline-job-{job.id}",
         )
         self._tasks[job.id] = task
@@ -187,27 +411,139 @@ class JobQueue:
     async def _run(
         self,
         job: Job,
-        worker: JobWorker,
+        worker: Worker,
         *,
         lane: asyncio.Lock | None,
+        barrier: _LibraryBarrier | None,
     ) -> None:
+        token = self._tokens[job.id]
         try:
-            if lane is None:
-                await self._invoke(job, worker)
+            if job.scope is JobScope.LIBRARY_WRITE:
+                assert barrier is not None
+                async with barrier.write():
+                    await self._invoke(job, worker, token)
+            elif lane is not None:
+                assert barrier is not None
+                async with lane, self._kind_slot(job.kind), barrier.paper():
+                    await self._invoke(job, worker, token)
             else:
-                async with lane:
-                    await self._invoke(job, worker)
+                await self._invoke(job, worker, token)
         except asyncio.CancelledError:
             if not job.state.is_terminal:
-                self._transition(job, JobState.CANCELLED, error="job task cancelled")
+                await self._finish_guarded(
+                    job,
+                    JobState.CANCELLED,
+                    error="job task cancelled",
+                )
         except Exception as exc:
             if not job.state.is_terminal:
-                self._transition(job, JobState.FAILED, error=f"{type(exc).__name__}: {exc}")
+                if token.is_set():
+                    await self._finish_guarded(job, JobState.CANCELLED, error="job cancelled")
+                else:
+                    await self._finish_guarded(
+                        job,
+                        JobState.FAILED,
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
 
-    async def _invoke(self, job: Job, worker: JobWorker) -> None:
+    async def _invoke(self, job: Job, worker: Worker, token: CancellationToken) -> None:
         self._transition(job, JobState.RUNNING)
-        await worker(job)
-        self._transition(job, JobState.SUCCEEDED)
+        recovery = self._definitions[job.id].recovery
+        if recovery is not None:
+            recovery.marker_store.create(
+                AttemptMarker(
+                    job_id=job.id,
+                    target=recovery.target,
+                    operation=recovery.operation,
+                    kind=job.kind,
+                    scope=job.scope,
+                    started_at=job.started_at or datetime.now(UTC),
+                )
+            )
+        if _accepts_cancellation_token(worker):
+            cancellable_worker = cast(CancellableJobWorker, worker)
+            await cancellable_worker(job, token)
+        else:
+            ordinary_worker = cast(JobWorker, worker)
+            await ordinary_worker(job)
+        if token.is_set():
+            await self._finish_guarded(job, JobState.CANCELLED, error="job cancelled")
+            return
+
+        completion = CompletionResult()
+        if recovery is not None and recovery.validate_completion is not None:
+            validation = recovery.validate_completion()
+            completion = await validation if inspect.isawaitable(validation) else validation
+        await self._finish_guarded(
+            job,
+            JobState.SUCCEEDED,
+            error=None,
+            completion=completion,
+        )
+
+    async def _finish_guarded(
+        self,
+        job: Job,
+        state: JobState,
+        *,
+        error: str | None,
+        completion: CompletionResult | None = None,
+    ) -> None:
+        try:
+            await self._finish(job, state, error=error, completion=completion)
+        except Exception as completion_error:
+            if not job.state.is_terminal:
+                self._transition(
+                    job,
+                    JobState.FAILED,
+                    error=(
+                        f"{error + '; ' if error else ''}terminal recording failed: "
+                        f"{type(completion_error).__name__}: {completion_error}"
+                    ),
+                )
+
+    async def _finish(
+        self,
+        job: Job,
+        state: JobState,
+        *,
+        error: str | None,
+        completion: CompletionResult | None,
+    ) -> None:
+        recovery = self._definitions[job.id].recovery
+        if recovery is not None:
+            if recovery.record_terminal is not None:
+                recorded = recovery.record_terminal(
+                    TerminalOutcome(
+                        attempt_id=job.id,
+                        state=state,
+                        started_at=job.started_at or datetime.now(UTC),
+                        finished_at=datetime.now(UTC),
+                        error=error,
+                        artifact_hashes=dict((completion or CompletionResult()).artifact_hashes),
+                    )
+                )
+                if inspect.isawaitable(recorded):
+                    await recorded
+            recovery.marker_store.remove(job.id)
+        self._transition(job, state, error=error)
+
+    @asynccontextmanager
+    async def _kind_slot(self, kind: JobKind) -> AsyncIterator[None]:
+        semaphore = None
+        if kind is JobKind.CONVERSION:
+            semaphore = self._conversion_slots
+        elif kind is JobKind.RECIPE:
+            semaphore = self._recipe_slots
+        if semaphore is None:
+            yield
+        else:
+            async with semaphore:
+                yield
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("job queue is shut down")
 
     def _transition(
         self,
@@ -226,3 +562,17 @@ class JobQueue:
             state=job.state,
             error=job.error,
         )
+
+
+def _accepts_cancellation_token(worker: Worker) -> bool:
+    parameters = inspect.signature(worker).parameters.values()
+    positional = 0
+    for parameter in parameters:
+        if parameter.kind is inspect.Parameter.VAR_POSITIONAL:
+            return True
+        if parameter.kind in {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        }:
+            positional += 1
+    return positional >= 2
