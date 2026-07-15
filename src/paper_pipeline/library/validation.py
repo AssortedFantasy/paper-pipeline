@@ -23,7 +23,15 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from paper_pipeline.library.paths import GENERATED_DIR, INDEXES_DIR, PAPERS_DIR, TRANSCRIPTION_FILE
+from paper_pipeline.library.paths import (
+    FIGURES_DIR,
+    INDEXES_DIR,
+    OPERATIONAL_DIR,
+    PAPER_FILE,
+    PAPERS_DIR,
+    SOURCE_DIR,
+    TRANSCRIPTION_FILE,
+)
 from paper_pipeline.library.storage import (
     Library,
     conversion_is_fresh,
@@ -244,35 +252,24 @@ def _validate_paper(library: Library, record, report: ValidationReport) -> None:
                 citekey,
             )
 
-    generated_root = paper_root / GENERATED_DIR
-    if generated_root.is_symlink():
+    allowed_names = {
+        PAPER_FILE.casefold(),
+        SOURCE_DIR.casefold(),
+        TRANSCRIPTION_FILE.casefold(),
+        FIGURES_DIR.casefold(),
+        OPERATIONAL_DIR.casefold(),
+        *(PurePosixPath(path).name.casefold() for path in recorded_outputs),
+    }
+    for entry in sorted(paper_root.iterdir(), key=lambda path: path.name.casefold()):
+        if entry.name.casefold() in allowed_names:
+            continue
         _add(
             report,
             "error",
-            "The generated directory must not be a symlink.",
-            "Replace it with a real directory inside the paper directory.",
+            f"Unexpected unrecorded entry in paper directory: {entry.name!r}.",
+            "Remove the entry or install recipe output through Paper Pipeline.",
             citekey,
         )
-    elif generated_root.is_dir():
-        for generated in sorted(generated_root.iterdir()):
-            if generated.is_symlink() or generated.is_dir() or generated.suffix != ".md":
-                _add(
-                    report,
-                    "error",
-                    f"Unexpected entry in generated directory: {generated.name!r}.",
-                    "Keep only validated top-level Markdown recipe outputs in generated/.",
-                    citekey,
-                )
-                continue
-            relative = generated.relative_to(library.root).as_posix()
-            if relative not in recorded_outputs:
-                _add(
-                    report,
-                    "error",
-                    f"Generated artifact {generated.name!r} has no recipe provenance record.",
-                    "Remove the unvalidated file or rerun its recipe through Paper Pipeline.",
-                    citekey,
-                )
 
 
 def _check_recorded_artifact(

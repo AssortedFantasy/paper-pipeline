@@ -44,7 +44,7 @@ def test_create_open_and_paper_round_trip(library_root: Path) -> None:
 
     reopened = open_library(library_root)
     assert reopened.info.name == "Thesis"
-    assert reopened.info.format_version == 1
+    assert reopened.info.format_version == FORMAT_VERSION
     assert reopened.read_paper("Smith2024") == record
     assert reopened.list_papers() == ([record], [])
     assert (library_root / "papers").is_dir()
@@ -118,7 +118,7 @@ def test_all_path_typed_fields_require_relative_posix_paths(
     "source_pdf",
     [
         "papers/Other2024/source/paper.pdf",
-        "papers/Smith2024/generated/not-a-source.pdf",
+        "papers/Smith2024/not-a-source.pdf",
         "papers/Smith2024/source/nested/paper.pdf",
     ],
 )
@@ -158,10 +158,12 @@ def test_recipe_input_must_be_library_relative_and_scoped_to_its_paper(
     with pytest.raises(ValueError, match="this paper's library-relative"):
         library.write_paper(record)
 
-    record.recipes["summary"] = RecipeRecord(
-        output_artifact="papers/Other2024/generated/summary.md"
-    )
-    with pytest.raises(ValueError, match="this paper's generated directory"):
+    record.recipes["summary"] = RecipeRecord(output_artifact="papers/Other2024/summary.md")
+    with pytest.raises(ValueError, match="this paper's directory"):
+        library.write_paper(record)
+
+    record.recipes["summary"] = RecipeRecord(output_artifact="papers/Smith2024/transcription.md")
+    with pytest.raises(ValueError, match="reserved paper filename"):
         library.write_paper(record)
 
     record.recipes["summary"] = RecipeRecord(input_artifact="papers/Other2024/transcription.md")
@@ -176,25 +178,26 @@ def test_recipe_output_filename_is_not_inferred_from_recipe_name(
     record = make_record()
     record.recipes["custom"] = RecipeRecord(
         input_artifact="papers/Smith2024/transcription.md",
-        output_artifact="papers/Smith2024/generated/different-name.md",
+        output_artifact="papers/Smith2024/different-name.md",
         output_sha256="output-hash",
     )
 
     library.write_paper(record)
 
     assert library.read_paper("Smith2024").recipes["custom"].output_artifact == (
-        "papers/Smith2024/generated/different-name.md"
+        "papers/Smith2024/different-name.md"
     )
 
 
-def test_format_one_recipe_record_without_output_artifact_still_loads() -> None:
-    legacy_json = (
-        '{"format_version":1,"metadata":{"citekey":"Smith2024","title":"Legacy"},'
+def test_recipe_record_without_output_artifact_still_loads() -> None:
+    serialized = (
+        f'{{"format_version":{FORMAT_VERSION},'
+        '"metadata":{"citekey":"Smith2024","title":"Incomplete"},'
         '"recipes":{"summary":{"input_artifact":'
         '"papers/Smith2024/transcription.md","output_sha256":"old-hash"}}}'
     )
 
-    record = PaperRecord.model_validate_json(legacy_json)
+    record = PaperRecord.model_validate_json(serialized)
 
     assert record.recipes["summary"].output_artifact is None
 

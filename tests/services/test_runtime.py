@@ -214,7 +214,7 @@ async def test_library_read_session_has_no_storage_mutation_capability(tmp_path:
 async def test_runtime_wires_recovery_callbacks_inside_paper_lane(tmp_path: Path) -> None:
     runtime = RuntimeRegistry().create(tmp_path / "library")
     await seed(runtime, record())
-    artifact_relative = "papers/Smith2024/generated/test.md"
+    artifact_relative = "papers/Smith2024/test.md"
     outcomes: list[TerminalOutcome] = []
 
     async def worker(session: PaperSession, job: Job, token: CancellationToken) -> None:

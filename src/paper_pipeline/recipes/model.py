@@ -6,7 +6,7 @@ A recipe is a Markdown file with YAML front matter (ADR-0003):
     name: contributions
     version: 1
     input: transcription        # "transcription" or "pdf"
-    output: contributions.md    # filename inside the paper's generated/ dir
+    output: contributions.md    # filename inside the paper directory
     ---
     Extract the key contributions in this paper.
     Format them as a bulleted list.
@@ -25,6 +25,8 @@ from typing import Literal
 import yaml
 from yaml.nodes import MappingNode, ScalarNode
 
+from paper_pipeline.library.paths import RESERVED_PAPER_NAMES
+
 RecipeInput = Literal["transcription", "pdf"]
 
 
@@ -35,7 +37,7 @@ class RecipeDefinition:
     name: str
     version: int
     input: RecipeInput
-    output: str  # filename inside generated/, must end in .md
+    output: str  # flat filename inside the paper directory; must end in .md
     prompt: str
 
 
@@ -88,6 +90,8 @@ def parse_recipe(text: str) -> RecipeDefinition:
         or output in (".", "..")
     ):
         raise ValueError("recipe field 'output' must be a bare .md filename")
+    if output.casefold() in {name.casefold() for name in RESERVED_PAPER_NAMES}:
+        raise ValueError("recipe field 'output' collides with a reserved paper filename")
 
     if not prompt.strip():
         raise ValueError("recipe prompt body must be non-empty")

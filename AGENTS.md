@@ -120,9 +120,10 @@ Three kinds of state — keep them distinct:
    `source/`, `transcription.md`, `figures/`. Never regenerated or replaced
    silently. Explicit reruns/source replacement install atomically; import
    never deletes papers merely because they disappeared from a later export.
-2. **Derived content** (rebuildable): `indexes/`, library `AGENTS.md`,
-   library `.gitignore`, `generated/*`. Must be deterministically
-   rebuildable from library content; deleting them loses nothing permanent.
+2. **Derived content** (rebuildable): `indexes/`, library `AGENTS.md`, library
+   `.gitignore`, and recipe outputs declared in `paper.json`. Must be
+   deterministically rebuildable from library content; deleting them loses
+   nothing permanent.
 3. **Operational state** (disposable): everything under any `.pp/`
    directory — logs, staging temp dirs, diagnostics. Deleting every `.pp/`
    must always be safe.
@@ -154,7 +155,7 @@ Hard rules:
   one paper lane** so the provider can reuse the same input context. Do not
   "optimize" this away.
 - Never mark work successful from terminal output. Validate the expected
-  artifacts on disk (non-empty `transcription.md`, declared `generated/`
+  artifacts on disk (non-empty `transcription.md`, declared flat recipe
   file) before recording success.
 - Do not run real Marker or real LLM calls in the default dev loop or in
   unmarked tests. Use `tests/fakes.py`.

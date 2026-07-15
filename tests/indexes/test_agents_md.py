@@ -33,10 +33,10 @@ product; no running application or external database is needed to read them.
 - `source/` contains the original PDF. It is essential source content but is
   ignored by Git, so a clone may be readable without being reprocessable.
 - `transcription.md` and `figures/` are source-derived converter outputs.
-- `generated/` contains LLM-generated recipe outputs, not source text. Each
-  Markdown file begins with provenance identifying its recipe, model, input,
-  input hash, and creation time.
-- `paper.json` records hashes used to determine whether outputs are current.
+- Other top-level Markdown files (for example `summary.md`) are LLM-generated
+  recipe outputs. Their content contains only the useful result.
+- `paper.json` identifies generated files and records their provenance, token
+  usage, spend, and hashes used to determine whether outputs are current.
 
 ## Operational files
 
@@ -52,7 +52,7 @@ def test_generated_agents_md_matches_golden_content() -> None:
     assert content == EXPECTED_AGENTS_MD
     assert content.startswith("# Paper Library Guide\n")
     assert "`papers/<citekey>/`" in content
-    assert "`generated/` contains LLM-generated recipe outputs" in content
+    assert "Other top-level Markdown files" in content
     assert "provenance" in content
     assert "`.pp/`" in content
     assert all(name in content for name in ("titles.md", "authors.md", "summaries.md", "status.md"))

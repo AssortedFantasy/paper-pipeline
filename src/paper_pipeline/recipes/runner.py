@@ -6,9 +6,8 @@ For one (paper, recipe) pair:
    fast with a clear error if it is missing.
 2. Call the configured provider.
 3. Validate the result (non-empty, plausibly Markdown).
-4. Prepend YAML front matter provenance (recipe name/version, provider,
-   model, created timestamp, input artifact — never credentials).
-5. Return the staged output for atomic installation into ``generated/``.
+4. Return the recipe body unchanged for atomic installation beside
+   ``transcription.md``. Provenance and usage live only in ``paper.json``.
 
 Scheduling and same-paper recipe batching for provider cache reuse are the job
 layer's responsibility, not this module's.
@@ -107,15 +106,7 @@ def run_recipe(
         raise RecipeRunError("provider and model identities must each fit on one line")
 
     completed_at = datetime.now(UTC).replace(microsecond=0)
-    content = _render_output(
-        recipe=recipe,
-        provider=provider_name,
-        model=provider_model,
-        input_artifact=input_artifact,
-        input_sha256=input_sha256,
-        completed_at=completed_at,
-        body=body,
-    )
+    content = f"{body}\n"
     staging_dir = library.stage_dir()
     staged_path = staging_dir / recipe.output
     try:
@@ -129,15 +120,19 @@ def run_recipe(
 
     return RecipeRunResult(
         staged_path=staged_path,
-        destination=f"{PAPERS_DIR}/{citekey}/generated/{recipe.output}",
+        destination=f"{PAPERS_DIR}/{citekey}/{recipe.output}",
         record=RecipeRecord(
             recipe_version=recipe.version,
             provider=provider_name,
             model=provider_model,
             input_artifact=input_artifact,
             input_sha256=input_sha256,
-            output_artifact=f"{PAPERS_DIR}/{citekey}/generated/{recipe.output}",
+            output_artifact=f"{PAPERS_DIR}/{citekey}/{recipe.output}",
             output_sha256=output_sha256,
+            prompt_tokens=provider_result.prompt_tokens,
+            cached_tokens=provider_result.cached_tokens,
+            completion_tokens=provider_result.completion_tokens,
+            cost_usd=provider_result.cost_usd,
             completed_at=completed_at,
         ),
     )
@@ -183,29 +178,3 @@ def _resolve_input(
             f"{input_artifact}"
         )
     return resolved_input, input_artifact
-
-
-def _render_output(
-    *,
-    recipe: RecipeDefinition,
-    provider: str,
-    model: str,
-    input_artifact: str,
-    input_sha256: str,
-    completed_at: datetime,
-    body: str,
-) -> str:
-    created = completed_at.isoformat().replace("+00:00", "Z")
-    return (
-        "---\n"
-        "generated_by: paper-pipeline\n"
-        f"recipe: {recipe.name}\n"
-        f"recipe_version: {recipe.version}\n"
-        f"provider: {provider}\n"
-        f"model: {model}\n"
-        f"input: {input_artifact}\n"
-        f"input_sha256: {input_sha256}\n"
-        f"created: {created}\n"
-        "---\n"
-        f"{body}\n"
-    )

@@ -105,7 +105,7 @@ async def test_metadata_refresh_preserves_artifact_provenance(tmp_path: Path) ->
     record.recipes["summary"] = RecipeRecord(
         input_artifact="papers/Refresh2024/transcription.md",
         input_sha256="transcription-hash",
-        output_artifact="papers/Refresh2024/generated/summary.md",
+        output_artifact="papers/Refresh2024/summary.md",
         output_sha256="summary-hash",
     )
     await seed(runtime, record)

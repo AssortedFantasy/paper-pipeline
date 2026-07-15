@@ -9,7 +9,8 @@ Responsibilities:
 
 Recipes describe work; they never implement queueing, HTTP, or storage.
 Built-in recipe templates ship with the application in ``builtin/``, not
-with libraries. Outputs land in each paper's ``generated/`` directory with
-YAML front matter provenance (ADR-0003). Credentials never appear in
+with libraries. Outputs land directly in each paper directory; provenance and
+usage live in ``paper.json`` rather than output frontmatter (ADR-0003).
+Credentials never appear in
 outputs, provenance, or logs.
 """

@@ -1,8 +1,4 @@
-"""OpenAI-compatible LLM provider adapter.
-
-The optional ``openai`` SDK is imported only when a real client is first
-needed, so importing Paper Pipeline never requires the ``llm`` extra.
-"""
+"""OpenAI-compatible LLM provider adapter with usage and spend accounting."""
 
 from __future__ import annotations
 
@@ -12,6 +8,20 @@ from typing import Any
 
 from paper_pipeline.config import AppConfig
 from paper_pipeline.recipes.provider import ProviderRequest, ProviderResult
+
+# Standard-processing USD per million tokens. GPT-5.6 uncached input is billed
+# as a cache write at 1.25x; cached reads retain the 90% discount. Snapshot
+# suffixes inherit their family's rates. Keep this deliberately small and fail
+# visibly for unknown pricing instead of silently reporting a false zero cost.
+_PRICING: tuple[tuple[str, float, float, float, float], ...] = (
+    ("gpt-5.6-sol", 5.0, 0.5, 30.0, 1.25),
+    ("gpt-5.6-terra", 2.5, 0.25, 15.0, 1.25),
+    ("gpt-5.6-luna", 1.0, 0.1, 6.0, 1.25),
+    ("gpt-5.6", 5.0, 0.5, 30.0, 1.25),
+    ("gpt-5.5", 5.0, 0.5, 30.0, 1.0),
+    ("gpt-5.4", 2.5, 0.25, 15.0, 1.0),
+    ("gpt-5", 1.25, 0.125, 10.0, 1.0),
+)
 
 
 class OpenAIProvider:
@@ -42,14 +52,27 @@ class OpenAIProvider:
                 model=model,
                 input=[{"role": "user", "content": content}],
             )
+            prompt_tokens, cached_tokens, completion_tokens = _usage(response)
+            cost_usd = _cost_usd(
+                model,
+                prompt_tokens=prompt_tokens,
+                cached_tokens=cached_tokens,
+                completion_tokens=completion_tokens,
+            )
             return ProviderResult(
                 ok=True,
                 text=getattr(response, "output_text", "") or "",
                 provider=self.name,
                 model=model,
+                prompt_tokens=prompt_tokens,
+                cached_tokens=cached_tokens,
+                completion_tokens=completion_tokens,
+                cost_usd=cost_usd,
             )
         except ModuleNotFoundError:
-            return self._failure(model, "OpenAI provider unavailable; install the 'llm' extra")
+            return self._failure(model, "OpenAI provider unavailable; reinstall Paper Pipeline")
+        except ValueError as error:
+            return self._failure(model, str(error))
         except Exception:
             return self._failure(
                 model,
@@ -104,3 +127,53 @@ class OpenAIProvider:
             model=model,
             error=message,
         )
+
+
+def _usage(response: Any) -> tuple[int, int, int]:
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        raise ValueError("OpenAI response contained no token usage")
+    prompt = _nonnegative_int(getattr(usage, "input_tokens", None), "input tokens")
+    completion = _nonnegative_int(getattr(usage, "output_tokens", None), "output tokens")
+    details = getattr(usage, "input_tokens_details", None)
+    cached = _nonnegative_int(getattr(details, "cached_tokens", 0), "cached tokens")
+    if cached > prompt:
+        raise ValueError("OpenAI response reported more cached tokens than input tokens")
+    return prompt, cached, completion
+
+
+def _nonnegative_int(value: Any, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"OpenAI response contained invalid {label}")
+    return value
+
+
+def _cost_usd(
+    model: str,
+    *,
+    prompt_tokens: int,
+    cached_tokens: int,
+    completion_tokens: int,
+) -> float:
+    normalized = model.casefold()
+    pricing = next(
+        (
+            rates
+            for prefix, *rates in _PRICING
+            if normalized == prefix or normalized.startswith(prefix + "-")
+        ),
+        None,
+    )
+    if pricing is None:
+        raise ValueError(f"OpenAI pricing is not known for model {model!r}")
+    input_rate, cached_rate, output_rate, cache_write_multiplier = pricing
+    uncached_tokens = prompt_tokens - cached_tokens
+    long_context = normalized.startswith("gpt-5.6") and prompt_tokens > 272_000
+    input_multiplier = 2.0 if long_context else 1.0
+    output_multiplier = 1.5 if long_context else 1.0
+    total = (
+        uncached_tokens * input_rate * cache_write_multiplier * input_multiplier
+        + cached_tokens * cached_rate * input_multiplier
+        + completion_tokens * output_rate * output_multiplier
+    ) / 1_000_000
+    return round(total, 10)

@@ -46,21 +46,19 @@ def test_rebuild_is_sorted_lf_only_and_deterministic(library_root: Path) -> None
     assert all(b"\r\n" not in content for content in first.values())
 
 
-def test_summary_uses_first_body_line_after_front_matter(library_root: Path) -> None:
+def test_summary_uses_first_output_line(library_root: Path) -> None:
     library = create_library(library_root)
     record = _record("Alpha2024", "First")
     library.write_paper(record)
-    generated = library_root / "papers" / "Alpha2024" / "generated"
-    generated.mkdir()
-    summary = generated / "summary.md"
+    summary = library_root / "papers" / "Alpha2024" / "summary.md"
     summary.write_text(
-        "---\nrecipe: summary\n---\n\nOne sentence TLDR.\nMore detail.\n",
+        "One sentence TLDR.\nMore detail.\n",
         encoding="utf-8",
     )
     record.recipes["summary"] = RecipeRecord(
         input_artifact="papers/Alpha2024/transcription.md",
         input_sha256="input-hash",
-        output_artifact="papers/Alpha2024/generated/summary.md",
+        output_artifact="papers/Alpha2024/summary.md",
         output_sha256=sha256_file(summary),
     )
     library.write_paper(record)
@@ -98,15 +96,14 @@ def test_status_derives_missing_stale_and_ready_states(library_root: Path) -> No
     stale.recipes["summary"] = RecipeRecord(
         input_artifact="papers/Stale2024/transcription.md",
         input_sha256="old-transcription",
-        output_artifact="papers/Stale2024/generated/summary.md",
+        output_artifact="papers/Stale2024/summary.md",
         output_sha256="summary-hash",
     )
     stale_root = library_root / "papers" / "Stale2024"
     (stale_root / "source").mkdir(parents=True)
     (stale_root / "source" / "paper.pdf").write_bytes(b"source")
     (stale_root / "transcription.md").write_text("text", encoding="utf-8")
-    (stale_root / "generated").mkdir()
-    stale_summary = stale_root / "generated" / "summary.md"
+    stale_summary = stale_root / "summary.md"
     stale_summary.write_text("summary", encoding="utf-8")
     stale.recipes["summary"].output_sha256 = sha256_file(stale_summary)
     library.write_paper(stale)
@@ -124,13 +121,12 @@ def test_status_derives_missing_stale_and_ready_states(library_root: Path) -> No
         source_sha256=ready.source_sha256,
         transcription_sha256=sha256_file(transcription),
     )
-    (ready_root / "generated").mkdir()
-    summary = ready_root / "generated" / "summary.md"
+    summary = ready_root / "summary.md"
     summary.write_text("summary", encoding="utf-8")
     ready.recipes["summary"] = RecipeRecord(
         input_artifact="papers/Ready2024/transcription.md",
         input_sha256=ready.conversion.transcription_sha256,
-        output_artifact="papers/Ready2024/generated/summary.md",
+        output_artifact="papers/Ready2024/summary.md",
         output_sha256=sha256_file(summary),
     )
     library.write_paper(ready)
@@ -147,9 +143,7 @@ def test_unrecorded_or_hash_mismatched_summary_is_not_indexed(library_root: Path
     library = create_library(library_root)
     record = _record("Alpha2024", "First")
     library.write_paper(record)
-    generated = library_root / "papers" / "Alpha2024" / "generated"
-    generated.mkdir()
-    summary = generated / "summary.md"
+    summary = library_root / "papers" / "Alpha2024" / "summary.md"
     summary.write_text("unrecorded summary", encoding="utf-8")
 
     rebuild_indexes(library)
@@ -159,7 +153,7 @@ def test_unrecorded_or_hash_mismatched_summary_is_not_indexed(library_root: Path
     record.recipes["summary"] = RecipeRecord(
         input_artifact="papers/Alpha2024/transcription.md",
         input_sha256="input",
-        output_artifact="papers/Alpha2024/generated/summary.md",
+        output_artifact="papers/Alpha2024/summary.md",
         output_sha256="wrong-hash",
     )
     library.write_paper(record)
@@ -170,8 +164,7 @@ def test_unrecorded_or_hash_mismatched_summary_is_not_indexed(library_root: Path
 def test_symlinked_summary_is_not_indexed(library_root: Path, tmp_path: Path) -> None:
     library = create_library(library_root)
     record = _record("Alpha2024", "First")
-    generated = library_root / "papers" / "Alpha2024" / "generated"
-    generated.mkdir(parents=True)
+    generated = library_root / "papers" / "Alpha2024"
     outside = tmp_path / "outside-summary.md"
     outside.write_text("outside summary", encoding="utf-8")
     summary = generated / "summary.md"
@@ -182,7 +175,7 @@ def test_symlinked_summary_is_not_indexed(library_root: Path, tmp_path: Path) ->
     record.recipes["summary"] = RecipeRecord(
         input_artifact="papers/Alpha2024/transcription.md",
         input_sha256="input",
-        output_artifact="papers/Alpha2024/generated/summary.md",
+        output_artifact="papers/Alpha2024/summary.md",
         output_sha256=sha256_file(outside),
     )
     library.write_paper(record)

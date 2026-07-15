@@ -94,7 +94,7 @@ def recipe_is_fresh(record: PaperRecord, recipe_name: str) -> bool:
     """Return whether recipe provenance matches its current declared input.
 
     Input artifact paths may be library-relative or paper-relative. Their basename
-    identifies the two input kinds supported by the version-1 contract.
+    identifies the two input kinds supported by the current contract.
     """
     recipe = record.recipes.get(recipe_name)
     if recipe is None or recipe.input_artifact is None or recipe.input_sha256 is None:
@@ -280,7 +280,7 @@ class Library:
 
 
 def create_library(root: Path, name: str = "") -> Library:
-    """Create a format-version 1 library, refusing any non-empty directory."""
+    """Create a current-format library, refusing any non-empty directory."""
     root = root.resolve()
     if root.exists() and not root.is_dir():
         raise ValueError(f"Library root is not a directory: {root}")
@@ -383,13 +383,19 @@ def _validate_paper_record(record: PaperRecord, *, expected_citekey: str) -> Non
         if recipe.output_artifact is not None:
             output_parts = PurePosixPath(recipe.output_artifact).parts
             if (
-                output_parts[:3] != ("papers", expected_citekey, "generated")
-                or len(output_parts) != 4
+                output_parts[:2] != ("papers", expected_citekey)
+                or len(output_parts) != 3
                 or not output_parts[-1].endswith(".md")
             ):
                 raise ValueError(
                     f"recipes.{recipe_name}.output_artifact must be a library-relative "
-                    "Markdown file in this paper's generated directory"
+                    "Markdown file in this paper's directory"
+                )
+            from paper_pipeline.library.paths import RESERVED_PAPER_NAMES
+
+            if output_parts[-1].casefold() in {name.casefold() for name in RESERVED_PAPER_NAMES}:
+                raise ValueError(
+                    f"recipes.{recipe_name}.output_artifact collides with a reserved paper filename"
                 )
 
 

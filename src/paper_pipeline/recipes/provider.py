@@ -1,8 +1,7 @@
 """Versioned LLM provider contract.
 
-The default dev loop and test suite use a fake provider; the OpenAI-compatible
-adapter requires the ``llm`` extra and real credentials, and is only
-exercised by tests marked ``llm``.
+The default dev loop and test suite use a fake provider. Real calls require
+credentials and are only exercised by tests marked ``llm``.
 """
 
 from dataclasses import dataclass
@@ -30,6 +29,10 @@ class ProviderResult:
     text: str = ""
     provider: str = ""
     model: str = ""
+    prompt_tokens: int = 0
+    cached_tokens: int = 0
+    completion_tokens: int = 0
+    cost_usd: float = 0.0
     error: str | None = None
 
 

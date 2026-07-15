@@ -32,7 +32,14 @@ class RecordingResponses:
         self.calls.append(kwargs)
         if self.error is not None:
             raise self.error
-        return SimpleNamespace(output_text="Generated response")
+        return SimpleNamespace(
+            output_text="Generated response",
+            usage=SimpleNamespace(
+                input_tokens=1_000,
+                input_tokens_details=SimpleNamespace(cached_tokens=800),
+                output_tokens=100,
+            ),
+        )
 
 
 class RecordingClient:
@@ -86,6 +93,12 @@ def test_openai_text_request_uses_responses_api() -> None:
 
     assert result.ok
     assert result.text == "Generated response"
+    assert result.prompt_tokens == 1_000
+    assert result.cached_tokens == 800
+    assert result.completion_tokens == 100
+    # Luna: 200 cache-write tokens at 1.25x $1/MTok, 800 cached at
+    # $0.10/MTok, and 100 output at $6/MTok.
+    assert result.cost_usd == 0.00093
     assert client.responses.calls == [
         {
             "model": "gpt-5.6-luna",
@@ -233,7 +246,43 @@ def test_openai_missing_optional_sdk_is_actionable(monkeypatch: pytest.MonkeyPat
     result = OpenAIProvider(config()).generate(ProviderRequest(prompt="Prompt", text_input="Input"))
 
     assert not result.ok
-    assert result.error == "OpenAI provider unavailable; install the 'llm' extra"
+    assert result.error == "OpenAI provider unavailable; reinstall Paper Pipeline"
+
+
+def test_openai_rejects_missing_usage_and_unknown_pricing() -> None:
+    missing_usage = RecordingClient()
+    missing_usage.responses.create = lambda **_kwargs: SimpleNamespace(output_text="text")
+    result = OpenAIProvider(config(), client=missing_usage).generate(
+        ProviderRequest(prompt="Prompt", text_input="Input")
+    )
+    assert not result.ok
+    assert result.error == "OpenAI response contained no token usage"
+
+    unknown = OpenAIProvider(config(llm_model="compatible-model"), client=RecordingClient())
+    result = unknown.generate(ProviderRequest(prompt="Prompt", text_input="Input"))
+    assert not result.ok
+    assert result.error == "OpenAI pricing is not known for model 'compatible-model'"
+
+
+def test_gpt_56_cost_includes_long_context_and_cache_write_multipliers() -> None:
+    client = RecordingClient()
+    client.responses.create = lambda **_kwargs: SimpleNamespace(
+        output_text="text",
+        usage=SimpleNamespace(
+            input_tokens=300_000,
+            input_tokens_details=SimpleNamespace(cached_tokens=200_000),
+            output_tokens=1_000,
+        ),
+    )
+
+    result = OpenAIProvider(config(), client=client).generate(
+        ProviderRequest(prompt="Prompt", text_input="Input")
+    )
+
+    # Luna long-context request: writes 100k * $1 * 1.25 * 2,
+    # reads 200k * $0.10 * 2, output 1k * $6 * 1.5.
+    assert result.ok
+    assert result.cost_usd == 0.299
 
 
 @pytest.mark.llm

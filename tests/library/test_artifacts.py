@@ -43,11 +43,11 @@ def test_install_single_artifact_validates_hashes_and_replaces(library_root: Pat
 
     digest = library.install_artifact(
         first,
-        "papers/Smith2024/generated/summary.md",
+        "papers/Smith2024/summary.md",
         validate=validated.append,
     )
 
-    destination = library_root / "papers" / "Smith2024" / "generated" / "summary.md"
+    destination = library_root / "papers" / "Smith2024" / "summary.md"
     assert destination.read_text(encoding="utf-8") == "first"
     assert digest == sha256_file(destination)
     assert validated == [first.resolve()]
@@ -55,7 +55,7 @@ def test_install_single_artifact_validates_hashes_and_replaces(library_root: Pat
     replacement_stage = library.stage_dir()
     replacement = replacement_stage / "summary.md"
     replacement.write_text("replacement", encoding="utf-8")
-    library.install_artifact(replacement, "papers/Smith2024/generated/summary.md")
+    library.install_artifact(replacement, "papers/Smith2024/summary.md")
     assert destination.read_text(encoding="utf-8") == "replacement"
 
 
@@ -67,7 +67,7 @@ def test_single_artifact_rejects_paths_outside_staging_and_library(
     outside.write_text("no", encoding="utf-8")
 
     with pytest.raises(ValueError, match="staged file"):
-        library.install_artifact(outside, "papers/Smith2024/generated/no.md")
+        library.install_artifact(outside, "papers/Smith2024/no.md")
 
     stage = library.stage_dir()
     artifact = stage / "artifact.md"
@@ -78,9 +78,9 @@ def test_single_artifact_rejects_paths_outside_staging_and_library(
 
 def test_install_rejects_symlinked_destination_parent(library_root: Path, tmp_path: Path) -> None:
     library = _paper_library(library_root)
-    outside = tmp_path / "outside-generated"
+    outside = tmp_path / "outside-operational"
     outside.mkdir()
-    generated = library_root / "papers" / "Smith2024" / "generated"
+    generated = library_root / "papers" / "Smith2024" / ".pp"
     try:
         generated.symlink_to(outside, target_is_directory=True)
     except OSError as error:
@@ -90,7 +90,7 @@ def test_install_rejects_symlinked_destination_parent(library_root: Path, tmp_pa
     artifact.write_text("must stay inside", encoding="utf-8")
 
     with pytest.raises(ValueError, match="must not contain symlinks"):
-        library.install_artifact(artifact, "papers/Smith2024/generated/summary.md")
+        library.install_artifact(artifact, "papers/Smith2024/.pp/operation.log")
 
     assert list(outside.iterdir()) == []
 

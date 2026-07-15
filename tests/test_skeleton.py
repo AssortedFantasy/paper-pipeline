@@ -34,7 +34,7 @@ def test_terminal_job_states() -> None:
 
 
 def test_layout_constants() -> None:
-    assert paths.FORMAT_VERSION == 1
+    assert paths.FORMAT_VERSION == 2
     assert str(paths.relative_paper_dir("smith2024")) == "papers/smith2024"
 
 

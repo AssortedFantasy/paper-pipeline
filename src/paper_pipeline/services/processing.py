@@ -227,11 +227,17 @@ async def queue_recipes(
                     state.active_recipe = recipe.name
                     session.install_artifact(result.staged_path, result.destination)
                     state.results[recipe.name] = result
+                state.log_path = _install_text_log(
+                    session,
+                    f"recipe-{job.id}.log",
+                    _recipe_usage_text(staged_results),
+                )
+                job.log_path = state.log_path
             except Exception as error:
                 state.log_path = _install_text_log(
                     session,
                     f"recipe-{job.id}.log",
-                    f"{type(error).__name__}: {error}",
+                    _recipe_usage_text(staged_results, error=error),
                 )
                 job.log_path = state.log_path
                 raise
@@ -444,6 +450,36 @@ def _install_text_log(session: PaperSession, filename: str, text: str) -> str:
     finally:
         shutil.rmtree(stage, ignore_errors=True)
     return relative
+
+
+def _recipe_usage_text(
+    results: list[tuple[RecipeDefinition, RecipeRunResult]],
+    *,
+    error: Exception | None = None,
+) -> str:
+    lines = []
+    for recipe, result in results:
+        usage = result.record
+        hit_rate = usage.cached_tokens / usage.prompt_tokens if usage.prompt_tokens else 0.0
+        lines.append(
+            f"{recipe.name}: prompt={usage.prompt_tokens} cached={usage.cached_tokens} "
+            f"cache_hit_rate={hit_rate:.1%} completion={usage.completion_tokens} "
+            f"cost_usd={usage.cost_usd:.8f}"
+        )
+    totals = (
+        sum(result.record.prompt_tokens for _recipe, result in results),
+        sum(result.record.cached_tokens for _recipe, result in results),
+        sum(result.record.completion_tokens for _recipe, result in results),
+        sum(result.record.cost_usd for _recipe, result in results),
+    )
+    hit_rate = totals[1] / totals[0] if totals[0] else 0.0
+    lines.append(
+        f"total: prompt={totals[0]} cached={totals[1]} cache_hit_rate={hit_rate:.1%} "
+        f"completion={totals[2]} cost_usd={totals[3]:.8f}"
+    )
+    if error is not None:
+        lines.append(f"{type(error).__name__}: {error}")
+    return "\n".join(lines)
 
 
 def _runtime_job(runtime: LibraryRuntime, job_id: str) -> Job:

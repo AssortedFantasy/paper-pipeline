@@ -163,7 +163,7 @@ def _seed_full_paper(root: Path) -> None:
         "## Summary\n\nA concise, seeded analysis of the paper.\n",
         encoding="utf-8",
     )
-    output_path = f"papers/{citekey}/generated/summary.md"
+    output_path = f"papers/{citekey}/summary.md"
     output_hash = library.install_artifact(generated, output_path)
     record.recipes["summary"] = RecipeRecord(
         recipe_version=1,

@@ -113,6 +113,10 @@ class FakeLLMProvider:
     fail: bool = False
     delay_seconds: float = 0.0
     failure_message: str = "fake provider failure"
+    prompt_tokens: int = 100
+    cached_tokens: int = 0
+    completion_tokens: int = 20
+    cost_usd: float = 0.001
     calls: list[ProviderRequest] = field(default_factory=list, init=False)
 
     def generate(self, request: ProviderRequest) -> ProviderResult:
@@ -131,4 +135,8 @@ class FakeLLMProvider:
             text=self.response,
             provider=self.name,
             model=request.model,
+            prompt_tokens=self.prompt_tokens,
+            cached_tokens=self.cached_tokens,
+            completion_tokens=self.completion_tokens,
+            cost_usd=self.cost_usd,
         )

@@ -66,19 +66,7 @@ def _summary(library: Library, record: PaperRecord) -> str:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         return "no summary yet"
-    body = _without_front_matter(text)
-    return next((_one_line(line) for line in body.splitlines() if line.strip()), "no summary yet")
-
-
-def _without_front_matter(text: str) -> str:
-    lines = text.splitlines()
-    if not lines or lines[0] != "---":
-        return text
-    try:
-        closing = lines.index("---", 1)
-    except ValueError:
-        return ""
-    return "\n".join(lines[closing + 1 :])
+    return next((_one_line(line) for line in text.splitlines() if line.strip()), "no summary yet")
 
 
 def _status(library: Library, record: PaperRecord) -> str:

@@ -61,7 +61,7 @@ gate. The real-SSH smoke likewise remains an optional environment-gated check.
 | Keep transcription and generated output searchable with `rg` | Delivered as ordinary UTF-8 Markdown. |
 | Generate small rebuildable text indexes | Delivered for titles, authors, summaries, and status. |
 | Include title, citekey, authors, and summaries | Delivered with deterministic index tests. |
-| Visibly separate source-derived and LLM-generated content | Delivered by `transcription.md`/`figures/` versus `generated/`. |
+| Visibly separate source-derived and LLM-generated content | Delivered by `paper.json`: it declares flat recipe outputs and their provenance. |
 | Stable citekey-to-content paths | Delivered as `papers/<citekey>/`. |
 | Generate VCS guidance for operational noise | Delivered as a deterministic `.gitignore`. |
 
@@ -72,8 +72,8 @@ gate. The real-SSH smoke likewise remains an optional environment-gated check.
 | Built-in analysis recipes | Delivered as packaged `summary`, `contributions`, `intro`, and `method` recipes; the latter two preserve the v1 PDF-native review prompts. |
 | Run over one or selected papers | Delivered by services/API/dashboard selection. |
 | Simple template defining input and prompt | Delivered as Markdown plus validated YAML front matter. |
-| Predictable Markdown output per paper | Delivered under `papers/<citekey>/generated/`. |
-| Record recipe/provider/model/prompt/input provenance | Delivered in output front matter and `paper.json`, without credentials. |
+| Predictable Markdown output per paper | Delivered under `papers/<citekey>/`. |
+| Record recipe/provider/model/input/usage provenance | Delivered in `paper.json`, without credentials or output frontmatter. |
 | Show recipe progress/failures with conversion | Delivered by the shared Jobs dashboard. |
 | Retry failed recipes | Delivered for individual jobs. |
 | Keep execution linear | Delivered; recipes are sequential within a paper lane. |

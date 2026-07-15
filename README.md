@@ -114,17 +114,20 @@ papers/<citekey>/
     source/<hash>.pdf
     transcription.md
     figures/
-    generated/
+    summary.md
+    contributions.md
     .pp/
 .pp/
 ```
 
-All stored paths are library-relative POSIX paths. `library.json`, paper
-records, copied sources, transcriptions, and figures are essential content;
-indexes and generated guidance are rebuildable; `.pp/` directories are
-disposable operational state. The generated `.gitignore` excludes source PDFs
-and `.pp/` noise, so a Git clone stays searchable but cannot reprocess papers
-without restoring the source PDFs.
+All stored paths are library-relative POSIX paths. Recipe Markdown sits beside
+`transcription.md` and contains only the useful output; `paper.json` identifies
+which flat files are regenerable and records their provenance, token usage,
+cache hits, and spend. `library.json`, paper records, copied sources,
+transcriptions, and figures are essential content; indexes and recipe outputs
+are rebuildable; `.pp/` directories are disposable operational state. The
+generated `.gitignore` excludes source PDFs and `.pp/` noise, so a Git clone
+stays searchable but cannot reprocess papers without restoring the source PDFs.
 
 ## Development and verification
 

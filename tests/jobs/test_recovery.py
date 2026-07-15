@@ -137,9 +137,9 @@ async def test_invalid_artifact_fails_before_success(tmp_path: Path, failure: st
             artifact.write_text("actual", encoding="utf-8")
 
     def validate():  # type: ignore[no-untyped-def]
-        expected = {"papers/Smith2024/generated/summary.md": "0" * 64}
+        expected = {"papers/Smith2024/summary.md": "0" * 64}
         return validate_artifacts(
-            {"papers/Smith2024/generated/summary.md": artifact},
+            {"papers/Smith2024/summary.md": artifact},
             expected_hashes=expected if failure == "hash-mismatch" else None,
         )
 

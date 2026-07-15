@@ -23,7 +23,8 @@ per-paper processing status for interruption recovery.
             source/<file>.pdf   # source PDF                   [essential, git-ignored]
             transcription.md    # converter output             [essential output]
             figures/            # converter assets             [essential output]
-            generated/          # LLM recipe outputs           [derived]
+            summary.md          # declared LLM recipe output  [derived]
+            contributions.md    # declared LLM recipe output  [derived]
             .pp/                # diagnostics, logs, raw output[disposable]
 ```
 
@@ -39,10 +40,12 @@ Key choices:
    the latest completed attempt for conversion and each recipe. Live job state
    does not overwrite completed artifact truth; disposable in-flight markers
    live under `.pp/attempts/` as specified by ADR-0004.
-3. **Source-derived vs LLM-generated separation is by placement**:
-   `transcription.md`/`figures/` come from the paper; everything under
-   `generated/` comes from an LLM and carries YAML front matter provenance
-   (ADR-0003).
+3. **Recipe outputs are flat and declared.** They sit directly beside
+   `transcription.md`, avoiding an extra lookup hop. `paper.json` is the
+   authority that distinguishes regenerable LLM output from essential content
+   and carries provenance (ADR-0003). Recipe output names cannot collide,
+   case-insensitively, with `paper.json`, `transcription.md`, `source/`,
+   `figures/`, or `.pp/`.
 4. **All disposable content lives in `.pp/` directories** (library-level and
    per-paper). Deleting every `.pp/` is always safe.
 5. **Citekeys must match** `^[A-Za-z0-9](?:[A-Za-z0-9_.+-]*[A-Za-z0-9_+-])?$`
@@ -50,7 +53,7 @@ Key choices:
    names) and must not be Windows-reserved names. Imports with hostile
    citekeys are rejected in the preview with a clear message — never
    silently renamed.
-6. `library.json` and `paper.json` carry `format_version` (currently 1).
+6. `library.json` and `paper.json` carry `format_version` (currently 2).
    Readers reject newer versions with an actionable message.
 7. The source PDF's SHA-256 is recorded in `paper.json`. Conversion records
    store the source hash they consumed; recipe records store the hash of the
@@ -58,14 +61,12 @@ Key choices:
    hashes, so a replaced PDF cannot silently leave downstream work current.
    `source_pdf` must name exactly one file under that same paper's
    `papers/<citekey>/source/` directory; cross-paper and non-source references
-   are invalid. This tightens validation without changing the format-1 shape,
-   so the format version remains 1.
+   are invalid.
 8. Recipe provenance records both its library-relative input and installed
    output artifact paths; output filenames are not inferred from recipe names.
-9. The schema is versioned, not frozen. Before the first stable release,
-   implementation feedback may amend format version 1 while no user libraries
-   exist. Once libraries have been produced for use, incompatible serialized
-   changes bump `format_version` and add a compatibility or migration test.
+9. Format 2 adds flat recipe outputs and recipe usage/spend fields. Older
+   experimental libraries are rejected and may be rebuilt from their Zotero
+   export; no in-application migration surface is maintained.
 
 ## Consequences
 

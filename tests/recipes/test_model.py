@@ -103,6 +103,12 @@ def test_output_must_be_a_bare_markdown_filename(output: str) -> None:
         parse_recipe(recipe_text(output=output))
 
 
+@pytest.mark.parametrize("output", ["transcription.md"])
+def test_output_must_not_collide_with_reserved_paper_names(output: str) -> None:
+    with pytest.raises(ValueError, match="reserved paper filename"):
+        parse_recipe(recipe_text(output=output))
+
+
 @pytest.mark.parametrize("prompt", ["", "\n", " \n\t"])
 def test_prompt_must_be_non_empty(prompt: str) -> None:
     text = "---\nname: empty\nversion: 1\ninput: pdf\noutput: empty.md\n---\n" + prompt
