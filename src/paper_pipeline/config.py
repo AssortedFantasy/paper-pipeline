@@ -14,6 +14,7 @@ Implemented by WP-0.2.
 """
 
 from pathlib import Path
+from typing import Any, cast
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -44,5 +45,5 @@ class AppConfig(BaseSettings):
 
 
 def load_config() -> AppConfig:
-    """Load application configuration from the environment."""
-    return AppConfig()
+    """Load user configuration, with environment variables taking precedence."""
+    return AppConfig(**cast(Any, {"_env_file": USER_CONFIG_FILE}))

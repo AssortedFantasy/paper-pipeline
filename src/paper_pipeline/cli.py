@@ -10,7 +10,61 @@ Subcommands are implemented alongside their services:
 """
 
 import argparse
+import importlib.util
+import os
 import sys
+from pathlib import Path
+
+from paper_pipeline import __version__
+from paper_pipeline.config import AppConfig, load_config
+
+
+def _target_is_writable(target: Path) -> bool:
+    """Return whether *target*, or its nearest existing parent, is writable."""
+    candidate = target.expanduser()
+    while not candidate.exists() and candidate != candidate.parent:
+        candidate = candidate.parent
+    return candidate.is_dir() and os.access(candidate, os.W_OK)
+
+
+def _run_doctor(target: Path | None, config: AppConfig | None = None) -> int:
+    """Print safe, actionable environment diagnostics."""
+    config = config or load_config()
+    python_ok = sys.version_info >= (3, 12)
+    print(
+        f"Python: {sys.version.split()[0]} "
+        f"({'ok' if python_ok else 'unsupported; Python 3.12+ is required'})"
+    )
+    print(f"Paper Pipeline: {__version__}")
+
+    marker_available = importlib.util.find_spec("marker") is not None
+    if marker_available:
+        print("Marker extra: available")
+    else:
+        print("Marker extra: not installed (optional; run 'uv sync --extra marker' for conversion)")
+
+    print(
+        "LLM credentials: configured"
+        if config.llm_api_key
+        else "LLM credentials: not configured (optional; set PAPER_PIPELINE_LLM_API_KEY)"
+    )
+    print(
+        f"LLM model: configured ({config.llm_model})"
+        if config.llm_model
+        else "LLM model: not configured (optional; set PAPER_PIPELINE_LLM_MODEL)"
+    )
+
+    target_ok = True
+    if target is not None:
+        target_ok = _target_is_writable(target)
+        if target_ok:
+            print(f"Target directory: writable ({target.expanduser()})")
+        else:
+            print(
+                f"Target directory: not writable ({target.expanduser()}); "
+                "choose an existing writable directory or adjust permissions"
+            )
+    return 0 if python_ok and target_ok else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -20,7 +74,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("serve", help="run the web dashboard")
-    subparsers.add_parser("doctor", help="check environment health")
+    doctor_parser = subparsers.add_parser("doctor", help="check environment health")
+    doctor_parser.add_argument(
+        "target",
+        nargs="?",
+        type=Path,
+        help="optional library parent directory to check for writability",
+    )
     subparsers.add_parser("validate", help="validate a library")
     subparsers.add_parser("reindex", help="rebuild library indexes")
 
@@ -28,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         parser.print_help()
         return 0
+    if args.command == "doctor":
+        return _run_doctor(args.target)
     print(f"'{args.command}' is not implemented yet.", file=sys.stderr)
     return 2
 
