@@ -51,6 +51,7 @@
   {% endif %}
 
   <form hx-post="/import/apply" hx-target="#import-preview" hx-swap="innerHTML" hx-indicator="#apply-progress">
+    <input type="hidden" name="preview_id" value="{{ preview_id }}">
     {% for heading, items, kind in [
       ('Additions', plan.additions, 'addition'),
       ('Metadata refreshes', plan.refreshes, 'refresh'),
@@ -77,7 +78,7 @@
 
     <div class="import-actions">
       <button class="button button-accent" type="submit"{% if actionable == 0 %} disabled{% endif %}>Apply import</button>
-      <button class="button button-quiet" type="button" hx-post="/import/cancel" hx-target="#import-preview" hx-swap="innerHTML">Cancel</button>
+      <button class="button button-quiet" type="button" hx-post="/import/cancel" hx-include="closest form" hx-target="#import-preview" hx-swap="innerHTML">Cancel</button>
       <span id="apply-progress" class="request-progress htmx-indicator" role="status">Applying paper changes…</span>
     </div>
   </form>

@@ -44,14 +44,22 @@
 <section class="job-section" aria-labelledby="history-heading">
   <div class="section-heading">
     <div><p class="eyebrow">Recent history</p><h2 id="history-heading">Terminal</h2></div>
-    <span class="count-chip">{{ terminal_jobs | length }}</span>
+    <div class="section-heading-actions">
+      {% if terminal_jobs %}
+      <button class="button button-quiet" type="button" hx-post="/jobs/retry-selected"
+              hx-include="#batch-retry-selection" hx-target="#jobs-list"
+              hx-swap="innerHTML" hx-disabled-elt="this">Retry selected</button>
+      {% endif %}
+      <span class="count-chip">{{ terminal_jobs | length }}</span>
+    </div>
   </div>
   {% if terminal_jobs %}
-  <div class="job-stack">
+  <form id="batch-retry-selection" class="job-stack">
   {% for job in terminal_jobs %}
+    {% set selectable_retry = true %}
     {% include "_job_row.html" %}
   {% endfor %}
-  </div>
+  </form>
   {% else %}
   <div class="section-empty"><span>No completed jobs yet.</span><small>Successes and failures remain visible for this session.</small></div>
   {% endif %}

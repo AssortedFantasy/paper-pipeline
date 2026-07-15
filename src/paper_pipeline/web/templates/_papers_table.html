@@ -7,6 +7,7 @@
 
 {% if rows %}
 <form id="paper-selection" class="paper-card">
+  <input type="hidden" name="library_key" value="{{ library_key }}">
   <div class="action-bar">
     <p><strong>{{ total }}</strong> paper{{ '' if total == 1 else 's' }}</p>
     <div class="action-controls">

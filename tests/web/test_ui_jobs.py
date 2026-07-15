@@ -154,6 +154,35 @@ def test_failed_job_log_tail_and_retry(
     expect(retry_row.locator(".badge-failed")).to_be_visible()
 
 
+@pytest.mark.parametrize("jobs_server", [{"mode": "failure"}], indirect=True)
+def test_retry_selected_failed_jobs(page: Page, jobs_server: RunningServer, tmp_path: Path) -> None:
+    _create_and_import(page, jobs_server, tmp_path / "library")
+    papers = page.request.get(f"{jobs_server.url}/api/papers")
+    citekeys = [paper["metadata"]["citekey"] for paper in papers.json()["papers"][:2]]
+    page.goto(f"{jobs_server.url}/jobs")
+    response = page.request.post(
+        f"{jobs_server.url}/api/jobs/conversion",
+        data={"citekeys": citekeys},
+    )
+    assert response.ok, response.text()
+    original_ids = [job["id"] for job in response.json()["jobs"]]
+    for job_id in original_ids:
+        expect(page.locator(f"[data-job-id='{job_id}'] .badge-failed")).to_be_visible()
+
+    page.get_by_role("button", name="Retry selected").click()
+    expect(page.get_by_role("alert")).to_contain_text("select at least one")
+    checkboxes = page.locator("#batch-retry-selection input[name=job_ids]")
+    expect(checkboxes).to_have_count(2)
+    for checkbox in checkboxes.all():
+        checkbox.check()
+    page.get_by_role("button", name="Retry selected").click()
+
+    for job_id in original_ids:
+        retry_row = page.locator(".job-row", has_text=f"Retry of {job_id}")
+        expect(retry_row).to_be_visible()
+        expect(retry_row.locator(".badge-failed")).to_be_visible()
+
+
 def test_interrupted_attempt_is_labeled_and_retryable(
     page: Page, jobs_server: RunningServer, tmp_path: Path
 ) -> None:
@@ -207,3 +236,28 @@ def test_disconnected_indicator_recovers(
     expect(page.locator("#connection-status")).to_contain_text("disconnected")
     page.unroute("**/events", abort_events)
     expect(page.locator("#connection-status")).to_contain_text("connected", timeout=15_000)
+
+
+@pytest.mark.parametrize("jobs_server", [{"mode": "hang", "hang_seconds": 30}], indirect=True)
+def test_closing_real_sse_tab_does_not_cancel_running_job(
+    page: Page, jobs_server: RunningServer, tmp_path: Path
+) -> None:
+    citekey = _create_and_import(page, jobs_server, tmp_path / "library")
+    dashboard = page.context.new_page()
+    try:
+        dashboard.goto(f"{jobs_server.url}/jobs")
+        expect(dashboard.locator("#connection-status")).to_contain_text("connected")
+        job_id = _queue_conversion(page, jobs_server, citekey)
+        expect(dashboard.locator(f"[data-job-id='{job_id}'] .badge-running")).to_be_visible()
+        dashboard.close()
+
+        jobs = page.request.get(f"{jobs_server.url}/api/jobs")
+        assert jobs.ok, jobs.text()
+        state = next(job["state"] for job in jobs.json()["jobs"] if job["id"] == job_id)
+        assert state == "running"
+
+        cancelled = page.request.post(f"{jobs_server.url}/api/jobs/{job_id}/cancel")
+        assert cancelled.ok, cancelled.text()
+    finally:
+        if not dashboard.is_closed():
+            dashboard.close()

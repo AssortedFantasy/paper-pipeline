@@ -59,6 +59,10 @@ Key choices:
    store the source hash they consumed; recipe records store the hash of the
    PDF or transcription they consumed. Freshness is derived by comparing
    hashes, so a replaced PDF cannot silently leave downstream work current.
+   `source_pdf` must name exactly one file under that same paper's
+   `papers/<citekey>/source/` directory; cross-paper and non-source references
+   are invalid. This tightens validation without changing the format-1 shape,
+   so the format version remains 1.
 8. Recipe provenance records both its library-relative input and installed
    output artifact paths; output filenames are not inferred from recipe names.
 9. The schema is versioned, not frozen. Before the first stable release,

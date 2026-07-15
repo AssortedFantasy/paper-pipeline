@@ -1,0 +1,16 @@
+{% if error %}
+  <div class="alert alert-error" role="alert"><strong>Library operation failed.</strong> {{ error }}</div>
+{% elif report %}
+  <div class="alert {{ 'alert-error' if not report.ok else 'alert-warning' }}" role="alert">
+    <strong>Validation found {{ report.problems | length }} problem{{ '' if report.problems | length == 1 else 's' }}.</strong>
+    <ul>{% for problem in report.problems %}<li><span class="validation-severity">{{ problem.severity }}</span> {{ problem.message }} <small>{{ problem.action }}</small></li>{% endfor %}</ul>
+  </div>
+{% elif message %}
+  <div class="alert alert-success" role="status"><strong>{{ message }}</strong>{% if library_root %} <a href="/papers">View papers</a>{% endif %}</div>
+{% endif %}
+{% if library_root %}
+  <a id="library-chip" class="library-chip" href="/import#library-setup" title="{{ library_root }}" hx-swap-oob="outerHTML">
+    <span class="status-dot is-online"></span>{{ library_root.name }}
+  </a>
+  <input id="import-library-path" type="text" name="library_path" value="{{ library_root }}" placeholder="D:\Papers\My Library" required hx-swap-oob="outerHTML">
+{% endif %}

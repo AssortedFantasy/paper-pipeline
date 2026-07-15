@@ -19,10 +19,10 @@
         <a href="/import"{% if active_page == 'import' %} aria-current="page"{% endif %}>Import</a>
         <a href="/jobs">Jobs</a>
       </nav>
-      <div class="library-chip" title="{{ library_root or 'No library open' }}">
+      <a id="library-chip" class="library-chip" href="/import#library-setup" title="{{ library_root or 'No library open' }}">
         <span class="status-dot{% if library_root %} is-online{% endif %}"></span>
         {{ library_root.name if library_root else 'No library' }}
-      </div>
+      </a>
     </header>
 
     <div class="job-stream"{% if library_root %} hx-get="/fragments/job-strip" hx-trigger="sse:state" hx-swap="innerHTML"{% endif %}>

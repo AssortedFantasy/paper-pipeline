@@ -54,6 +54,23 @@ class ImportOperationError(RuntimeError):
     """An import preview failed before it could produce a plan."""
 
 
+def select_source_replacements(plan: ImportPlan, accepted: set[str]) -> ImportPlan:
+    """Return an accepted preview while making declined PDF replacements explicit."""
+    selected = plan.model_copy(deep=True)
+    declined = [
+        item.metadata.citekey
+        for item in selected.source_replacements
+        if item.metadata.citekey not in accepted
+    ]
+    selected.source_replacements = [
+        item for item in selected.source_replacements if item.metadata.citekey in accepted
+    ]
+    selected.problems.extend(
+        f"{citekey}: source replacement was not accepted" for citekey in declined
+    )
+    return selected
+
+
 async def preview_import(runtime: LibraryRuntime, export_path: Path) -> ImportPlan:
     """Parse a Zotero export and compare it with the current library."""
     plans: list[ImportPlan] = []

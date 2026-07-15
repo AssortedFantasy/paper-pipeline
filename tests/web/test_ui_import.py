@@ -16,6 +16,7 @@ from tests.fakes import FakeLLMProvider
 
 from paper_pipeline.config import AppConfig
 from paper_pipeline.convert.runner import ConverterSpec
+from paper_pipeline.library.storage import create_library as seed_library
 from paper_pipeline.services.runtime import RuntimeRegistry
 from paper_pipeline.web.app import create_app
 
@@ -122,3 +123,50 @@ def test_cancel_before_apply_leaves_library_untouched(
         "Import cancelled. The library was not changed."
     )
     assert not list((import_server.library / "papers").glob("*/paper.json"))
+
+
+def test_previews_are_isolated_across_browser_tabs(page: Page, import_server: ImportServer) -> None:
+    second = page.context.new_page()
+    try:
+        _preview(page, import_server, "clean")
+        _preview(second, import_server, "clean")
+        page.get_by_role("button", name="Cancel").click()
+        expect(page.get_by_role("status")).to_contain_text("Import cancelled")
+
+        second.get_by_role("button", name="Apply import").click()
+        expect(second.get_by_role("heading", name="5 papers updated")).to_be_visible()
+        assert len(list((import_server.library / "papers").glob("*/paper.json"))) == 5
+    finally:
+        second.close()
+
+
+def test_import_page_can_open_an_existing_library(
+    page: Page, import_server: ImportServer, tmp_path: Path
+) -> None:
+    existing = tmp_path / "existing-library"
+    seed_library(existing, name="Existing Library")
+    page.goto(f"{import_server.url}/import")
+
+    page.get_by_label("Existing library folder").fill(str(existing))
+    page.get_by_role("button", name="Open library").click()
+
+    expect(page.get_by_role("status")).to_contain_text("Opened library")
+    expect(page.locator("#library-chip")).to_contain_text("existing-library")
+    expect(page.locator("#import-library-path")).to_have_value(str(existing))
+
+
+def test_library_control_error_is_designed(
+    page: Page, import_server: ImportServer, tmp_path: Path
+) -> None:
+    nonempty = tmp_path / "not-empty"
+    nonempty.mkdir()
+    (nonempty / "keep.txt").write_text("keep", encoding="utf-8")
+    page.goto(f"{import_server.url}/import")
+
+    page.get_by_label("New library folder").fill(str(nonempty))
+    page.get_by_role("button", name="Create library").click()
+
+    error = page.get_by_role("alert")
+    expect(error).to_contain_text("Library operation failed")
+    expect(error).to_contain_text("Refusing to create a library in non-empty directory")
+    assert (nonempty / "keep.txt").read_text(encoding="utf-8") == "keep"

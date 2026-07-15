@@ -1,5 +1,9 @@
 <article class="job-row" data-job-id="{{ job.id }}">
   <div class="job-main">
+    {% if selectable_retry and job.state.value in ('failed', 'cancelled') %}
+      <input class="job-select" type="checkbox" name="job_ids" value="{{ job.id }}"
+             aria-label="Select {{ job.label }} for retry">
+    {% endif %}
     <span class="badge badge-{{ job.state.value }}">{{ job.state.value }}</span>
     <div>
       <strong>{{ job.label }}</strong>

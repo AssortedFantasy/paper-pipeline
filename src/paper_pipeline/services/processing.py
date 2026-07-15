@@ -74,14 +74,23 @@ async def queue_conversion(
                 if record.source_pdf is None or record.source_sha256 is None:
                     raise ProcessingError(f"paper {session.citekey!r} has no usable source PDF")
                 source = _safe_input_path(session, record.source_pdf)
-                state.source_sha256 = record.source_sha256
                 stage = session.stage_dir()
-                request = ConversionRequest(
-                    pdf_path=source,
-                    staging_dir=stage,
-                    timeout_seconds=timeout_seconds,
-                )
+                input_stage = session.stage_dir()
                 try:
+                    snapshot = input_stage / "source.pdf"
+                    shutil.copy2(source, snapshot)
+                    snapshot_hash = sha256_file(snapshot)
+                    if snapshot_hash != record.source_sha256:
+                        raise ProcessingError(
+                            f"paper {session.citekey!r} source PDF hash no longer "
+                            "matches paper.json"
+                        )
+                    state.source_sha256 = snapshot_hash
+                    request = ConversionRequest(
+                        pdf_path=snapshot,
+                        staging_dir=stage,
+                        timeout_seconds=timeout_seconds,
+                    )
                     result = await asyncio.to_thread(
                         run_conversion,
                         converter_spec,
@@ -98,6 +107,7 @@ async def queue_conversion(
                     state.artifacts = session.install_conversion_bundle(stage)
                 finally:
                     shutil.rmtree(stage, ignore_errors=True)
+                    shutil.rmtree(input_stage, ignore_errors=True)
             except Exception as error:
                 if state.log_path is None:
                     state.log_path = _install_text_log(

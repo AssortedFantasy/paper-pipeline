@@ -23,6 +23,43 @@ from paper_pipeline.web.app import create_app
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "zotero"
 
 
+def test_remote_converter_configuration_selects_ssh_backend(tmp_path: Path) -> None:
+    values: dict[str, object] = {
+        "remote_converter_host": "noesis",
+        "remote_converter_root": "/srv/paper-pipeline",
+        "remote_converter_python": "/opt/paper-pipeline/bin/python",
+        "_env_file": None,
+    }
+    config = AppConfig(**cast(Any, values))
+
+    app = create_app(registry=RuntimeRegistry(), config=config)
+    context: WebContext = app.state.web_context
+
+    assert context.converter_spec.module_path == "paper_pipeline.convert.remote:RemoteConverter"
+    assert context.converter_spec.kwargs == {
+        "host": "noesis",
+        "remote_root": "/srv/paper-pipeline",
+        "remote_python": "/opt/paper-pipeline/bin/python",
+    }
+
+
+@pytest.mark.asyncio
+async def test_cross_origin_mutation_is_rejected(tmp_path: Path) -> None:
+    app = create_app(registry=RuntimeRegistry(), config=_config(tmp_path))
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://paper-pipeline.test",
+    ) as client:
+        response = await client.post(
+            "/api/library/create",
+            json={"path": str(tmp_path / "library")},
+            headers={"Origin": "https://malicious.example"},
+        )
+
+    assert response.status_code == 403
+    assert not (tmp_path / "library").exists()
+
+
 def _config(tmp_path: Path) -> AppConfig:
     values: dict[str, object] = {
         "config_dir": tmp_path / "config",

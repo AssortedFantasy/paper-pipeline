@@ -162,6 +162,30 @@ async def test_failed_rerun_preserves_last_good_conversion_and_records_log(
     assert (runtime.root / after.conversion.last_attempt.log_path).is_file()
 
 
+async def test_conversion_rejects_source_bytes_that_no_longer_match_record(
+    tmp_path: Path,
+) -> None:
+    runtime = await _runtime(tmp_path)
+    await _seed(runtime)
+    source = runtime.root / "papers" / "Smith2024" / "source" / "source.pdf"
+    source.write_bytes(b"%PDF-1.4 tampered source")
+
+    job = (
+        await queue_conversion(
+            runtime,
+            ["Smith2024"],
+            converter_spec=ConverterSpec(FAKE_CONVERTER),
+            timeout_seconds=5,
+        )
+    )[0]
+
+    assert (await runtime.queue.wait(job.id)).state is JobState.FAILED
+    record = await _read(runtime)
+    assert record.conversion.transcription_sha256 is None
+    assert record.conversion.last_attempt is not None
+    assert "hash no longer matches" in (record.conversion.last_attempt.error or "")
+
+
 async def test_cancel_mid_conversion_kills_child_and_records_cancelled(tmp_path: Path) -> None:
     runtime = await _runtime(tmp_path)
     await _seed(runtime)

@@ -3,7 +3,8 @@
 import threading
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from paper_pipeline.config import AppConfig, load_config
@@ -29,11 +30,24 @@ def create_app(
     config = config or load_config()
     registry = registry or _default_registry(config)
     app = FastAPI(title="Paper Pipeline")
+
+    @app.middleware("http")
+    async def reject_cross_origin_mutations(request: Request, call_next):  # type: ignore[no-untyped-def]
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            origin = request.headers.get("origin")
+            if origin is not None:
+                expected = f"{request.url.scheme}://{request.headers.get('host', '')}"
+                if origin.rstrip("/").casefold() != expected.rstrip("/").casefold():
+                    return JSONResponse(
+                        {"detail": "cross-origin mutations are not allowed"},
+                        status_code=403,
+                    )
+        return await call_next(request)
+
     context = WebContext(
         registry=registry,
         config=config,
-        converter_spec=converter_spec
-        or ConverterSpec("paper_pipeline.convert.marker:MarkerConverter"),
+        converter_spec=converter_spec or _configured_converter(config),
         provider_name=provider_name,
     )
     app.state.web_context = context
@@ -51,6 +65,19 @@ def create_app(
         return {"status": "ok"}
 
     return app
+
+
+def _configured_converter(config: AppConfig) -> ConverterSpec:
+    if config.remote_converter_host:
+        return ConverterSpec(
+            "paper_pipeline.convert.remote:RemoteConverter",
+            {
+                "host": config.remote_converter_host,
+                "remote_root": config.remote_converter_root,
+                "remote_python": config.remote_converter_python,
+            },
+        )
+    return ConverterSpec("paper_pipeline.convert.marker:MarkerConverter")
 
 
 def _default_registry(config: AppConfig) -> RuntimeRegistry:

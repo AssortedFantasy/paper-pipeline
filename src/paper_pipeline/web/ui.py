@@ -2,23 +2,31 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qs
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from paper_pipeline.ingest.plan import ImportPlan
-from paper_pipeline.jobs.model import JobState
-from paper_pipeline.library.model import AttemptState, PaperRecord
-from paper_pipeline.services.import_ops import ImportReport, apply_import, preview_import
-from paper_pipeline.services.library_ops import list_papers, open_library
+from paper_pipeline.services.import_ops import (
+    ImportReport,
+    apply_import,
+    preview_import,
+    select_source_replacements,
+)
+from paper_pipeline.services.job_ops import job_counts
+from paper_pipeline.services.library_ops import (
+    create_library,
+    open_library,
+    rebuild_indexes,
+    validate_library,
+)
+from paper_pipeline.services.paper_browse import browse_papers
 from paper_pipeline.services.paper_detail import get_figure, get_paper_detail, get_source_pdf
 from paper_pipeline.services.processing import (
-    pending_conversion_citekeys,
-    pending_recipe_citekeys,
     queue_conversion,
     queue_recipes,
 )
@@ -30,19 +38,10 @@ _WEB_ROOT = Path(__file__).parent
 templates = Jinja2Templates(directory=_WEB_ROOT / "templates")
 
 
-@dataclass(frozen=True)
-class PaperRow:
-    record: PaperRecord
-    conversion_state: str
-    recipe_state: str
-    selected: bool = False
-
-
 def create_ui_router(context: WebContext) -> APIRouter:
     """Create stable page and fragment routes over the shared web context."""
     router = APIRouter(include_in_schema=False)
-    import_plan: ImportPlan | None = None
-    import_library_key: str | None = None
+    import_previews: dict[str, tuple[str, ImportPlan]] = {}
 
     @router.get("/", response_class=HTMLResponse)
     @router.get("/papers", response_class=HTMLResponse)
@@ -52,12 +51,83 @@ def create_ui_router(context: WebContext) -> APIRouter:
 
     @router.get("/import", response_class=HTMLResponse)
     async def import_page(request: Request) -> HTMLResponse:
-        page = _import_page_context(context, request, import_plan)
+        page = _import_page_context(context, request)
         return templates.TemplateResponse(request, "import.html", page)
+
+    @router.post("/library/create", response_class=HTMLResponse)
+    async def create_library_control(request: Request) -> HTMLResponse:
+        values = await _form_values(request)
+        path = _first(values, "library_path")
+        if not path:
+            return _library_result_response(request, error="Choose a folder for the new library.")
+        try:
+            context.runtime = create_library(
+                Path(path),
+                name=_first(values, "library_name"),
+                registry=context.registry,
+            )
+        except (OSError, ValueError, RuntimeError) as error:
+            return _library_result_response(request, error=str(error))
+        return _library_result_response(
+            request,
+            message=f"Created and opened library {context.runtime.root.name!r}.",
+            runtime=context.runtime,
+        )
+
+    @router.post("/library/open", response_class=HTMLResponse)
+    async def open_library_control(request: Request) -> HTMLResponse:
+        values = await _form_values(request)
+        path = _first(values, "library_path")
+        if not path:
+            return _library_result_response(request, error="Choose a library folder to open.")
+        try:
+            context.runtime = open_library(Path(path), registry=context.registry)
+        except (OSError, ValueError, RuntimeError) as error:
+            return _library_result_response(request, error=str(error))
+        return _library_result_response(
+            request,
+            message=f"Opened library {context.runtime.root.name!r}.",
+            runtime=context.runtime,
+        )
+
+    @router.post("/library/validate", response_class=HTMLResponse)
+    async def validate_library_control(request: Request) -> HTMLResponse:
+        values = await _form_values(request)
+        runtime, error = _guard_library_operation(context, values)
+        if error is not None:
+            return _library_result_response(request, error=error)
+        assert runtime is not None
+        try:
+            report = await validate_library(runtime)
+        except (OSError, ValueError, RuntimeError) as operation_error:
+            return _library_result_response(request, error=str(operation_error))
+        if report.problems:
+            return _library_result_response(request, report=report, runtime=runtime)
+        return _library_result_response(
+            request,
+            message="Library validation passed with no problems.",
+            runtime=runtime,
+        )
+
+    @router.post("/library/reindex", response_class=HTMLResponse)
+    async def reindex_library_control(request: Request) -> HTMLResponse:
+        values = await _form_values(request)
+        runtime, error = _guard_library_operation(context, values)
+        if error is not None:
+            return _library_result_response(request, error=error)
+        assert runtime is not None
+        try:
+            await rebuild_indexes(runtime)
+        except (OSError, ValueError, RuntimeError) as operation_error:
+            return _library_result_response(request, error=str(operation_error))
+        return _library_result_response(
+            request,
+            message="Rebuilt indexes and library support files.",
+            runtime=runtime,
+        )
 
     @router.post("/import/preview", response_class=HTMLResponse)
     async def import_preview(request: Request) -> HTMLResponse:
-        nonlocal import_library_key, import_plan
         values = await _form_values(request)
         export_path = _first(values, "export_path")
         library_path = _first(values, "library_path")
@@ -70,47 +140,35 @@ def create_ui_router(context: WebContext) -> APIRouter:
                     context.runtime = open_library(selected, registry=context.registry)
             if context.runtime is None:
                 return _import_preview_response(request, error="Choose a library to import into.")
-            import_plan = await preview_import(context.runtime, Path(export_path))
-            import_library_key = context.runtime.library_key
+            plan = await preview_import(context.runtime, Path(export_path))
+            preview_id = uuid4().hex
+            import_previews[preview_id] = (context.runtime.library_key, plan)
+            while len(import_previews) > 32:
+                import_previews.pop(next(iter(import_previews)))
         except (OSError, ValueError, RuntimeError) as error:
-            import_plan = None
-            import_library_key = None
             return _import_preview_response(request, error=str(error))
-        return _import_preview_response(request, plan=import_plan)
+        return _import_preview_response(request, plan=plan, preview_id=preview_id)
 
     @router.post("/import/apply", response_class=HTMLResponse)
     async def import_apply(request: Request) -> HTMLResponse:
-        nonlocal import_library_key, import_plan
+        values = await _form_values(request)
+        preview_id = _first(values, "preview_id")
         if context.runtime is None:
             return _import_preview_response(request, error="Choose a library before applying.")
-        if import_plan is None:
+        stored = import_previews.pop(preview_id, None) if preview_id else None
+        if stored is None:
             return _import_preview_response(
                 request,
-                error="Preview the export again before applying it.",
+                error="This preview is missing or expired. Preview the export again.",
             )
+        import_library_key, import_plan = stored
         if context.runtime.library_key != import_library_key:
-            import_plan = None
-            import_library_key = None
             return _import_preview_response(
                 request,
                 error="The selected library changed. Preview the export again.",
             )
-        values = await _form_values(request)
         accepted = set(values.get("source_replacements", []))
-        plan = import_plan.model_copy(deep=True)
-        declined = [
-            item.metadata.citekey
-            for item in plan.source_replacements
-            if item.metadata.citekey not in accepted
-        ]
-        plan.source_replacements = [
-            item for item in plan.source_replacements if item.metadata.citekey in accepted
-        ]
-        plan.problems.extend(
-            f"{citekey}: source replacement was not accepted" for citekey in declined
-        )
-        import_plan = None
-        import_library_key = None
+        plan = select_source_replacements(import_plan, accepted)
         try:
             report = await apply_import(context.runtime, plan)
         except (OSError, ValueError, RuntimeError) as error:
@@ -119,9 +177,10 @@ def create_ui_router(context: WebContext) -> APIRouter:
 
     @router.post("/import/cancel", response_class=HTMLResponse)
     async def import_cancel(request: Request) -> HTMLResponse:
-        nonlocal import_library_key, import_plan
-        import_plan = None
-        import_library_key = None
+        values = await _form_values(request)
+        preview_id = _first(values, "preview_id")
+        if preview_id:
+            import_previews.pop(preview_id, None)
         return _import_preview_response(
             request,
             message="Import cancelled. The library was not changed.",
@@ -158,6 +217,11 @@ def create_ui_router(context: WebContext) -> APIRouter:
         citekeys = values.get("citekeys", [])
         if context.runtime is None:
             return _action_response(request, error="Open a library before launching work.")
+        if _first(values, "library_key") != context.runtime.library_key:
+            return _action_response(
+                request,
+                error="The selected library changed. Reload the papers page before launching work.",
+            )
         if not citekeys:
             return _action_response(request, error="Select at least one paper to convert.")
         try:
@@ -181,6 +245,11 @@ def create_ui_router(context: WebContext) -> APIRouter:
         recipe_names = values.get("recipe_names", [])
         if context.runtime is None:
             return _action_response(request, error="Open a library before launching work.")
+        if _first(values, "library_key") != context.runtime.library_key:
+            return _action_response(
+                request,
+                error="The selected library changed. Reload the papers page before launching work.",
+            )
         if not citekeys:
             return _action_response(request, error="Select at least one paper for a recipe.")
         if not recipe_names:
@@ -278,69 +347,38 @@ async def _table_context(
     if context.runtime is None:
         return {"rows": [], "total": 0, "problems": [], "no_library": True}
     runtime = context.runtime
-    page = await list_papers(runtime)
-    papers, problems = page.papers, page.problems
-    conversion_pending, recipe_pending = await _pending_sets(runtime)
-    query = q.casefold().strip()
-    rows: list[PaperRow] = []
-    for paper in papers:
-        citekey = paper.metadata.citekey
-        conversion_state = _processing_state(
-            citekey in conversion_pending,
-            paper.conversion.last_attempt.state if paper.conversion.last_attempt else None,
-        )
-        recipe_record = paper.recipes.get("summary")
-        recipe_state = _processing_state(
-            citekey in recipe_pending,
-            recipe_record.last_attempt.state
-            if recipe_record and recipe_record.last_attempt
-            else None,
-        )
-        searchable = " ".join((citekey, paper.metadata.title, *paper.metadata.authors)).casefold()
-        if query and query not in searchable:
-            continue
-        if conversion != "all" and conversion_state != conversion:
-            continue
-        if recipe != "all" and recipe_state != recipe:
-            continue
-        rows.append(
-            PaperRow(
-                record=paper,
-                conversion_state=conversion_state,
-                recipe_state=recipe_state,
-                selected=selection == "conversion" and citekey in conversion_pending,
-            )
-        )
+    page = await browse_papers(
+        runtime,
+        query=q,
+        conversion=conversion,
+        recipe=recipe,
+        select_pending_conversion=selection == "conversion",
+    )
     return {
-        "rows": rows,
-        "total": len(rows),
-        "problems": problems,
+        "rows": page.rows,
+        "total": len(page.rows),
+        "problems": page.problems,
         "filters": {"q": q, "conversion": conversion, "recipe": recipe},
+        "library_key": runtime.library_key,
     }
-
-
-async def _pending_sets(context_runtime: LibraryRuntime) -> tuple[set[str], set[str]]:
-    conversion_pending = set(await pending_conversion_citekeys(context_runtime))
-    recipe_pending = set(await pending_recipe_citekeys(context_runtime, "summary"))
-    return conversion_pending, recipe_pending
-
-
-def _processing_state(pending: bool, attempt: AttemptState | None) -> str:
-    if attempt is AttemptState.FAILED:
-        return "failed"
-    return "pending" if pending else "ready"
 
 
 def _job_context(context: WebContext) -> dict[str, object]:
     if context.runtime is None:
         return {"job_counts": {}, "job_total": 0, "job_error": "No library open"}
-    jobs = [
-        job
-        for job in context.runtime.queue.list_jobs()
-        if job.library_key == context.runtime.library_key
-    ]
-    counts = {state.value: sum(job.state is state for job in jobs) for state in JobState}
-    return {"job_counts": counts, "job_total": len(jobs), "job_error": None}
+    counts = job_counts(context.runtime)
+    return {"job_counts": counts, "job_total": sum(counts.values()), "job_error": None}
+
+
+def _guard_library_operation(
+    context: WebContext,
+    values: dict[str, list[str]],
+) -> tuple[LibraryRuntime | None, str | None]:
+    if context.runtime is None:
+        return None, "Open a library before running maintenance."
+    if _first(values, "library_key") != context.runtime.library_key:
+        return None, "The selected library changed. Reload the page before running maintenance."
+    return context.runtime, None
 
 
 async def _form_values(request: Request) -> dict[str, list[str]]:
@@ -361,16 +399,35 @@ def _action_response(
     )
 
 
+def _library_result_response(
+    request: Request,
+    *,
+    message: str | None = None,
+    error: str | None = None,
+    report: object | None = None,
+    runtime: LibraryRuntime | None = None,
+) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "_library_result.html",
+        {
+            "message": message,
+            "error": error,
+            "report": report,
+            "library_root": runtime.root if runtime is not None else None,
+        },
+    )
+
+
 def _import_page_context(
     context: WebContext,
     request: Request,
-    plan: ImportPlan | None,
 ) -> dict[str, object]:
     result: dict[str, object] = {
         "request": request,
         "active_page": "import",
         "library_root": context.runtime.root if context.runtime is not None else None,
-        "plan": plan,
+        "plan": None,
     }
     result.update(_job_context(context))
     return result
@@ -380,6 +437,7 @@ def _import_preview_response(
     request: Request,
     *,
     plan: ImportPlan | None = None,
+    preview_id: str | None = None,
     report: ImportReport | None = None,
     message: str | None = None,
     error: str | None = None,
@@ -387,7 +445,13 @@ def _import_preview_response(
     return templates.TemplateResponse(
         request,
         "_import_preview.html",
-        {"plan": plan, "report": report, "message": message, "error": error},
+        {
+            "plan": plan,
+            "preview_id": preview_id,
+            "report": report,
+            "message": message,
+            "error": error,
+        },
     )
 
 

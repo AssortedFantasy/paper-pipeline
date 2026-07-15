@@ -114,6 +114,25 @@ def test_all_path_typed_fields_require_relative_posix_paths(
         library.write_paper(record)
 
 
+@pytest.mark.parametrize(
+    "source_pdf",
+    [
+        "papers/Other2024/source/paper.pdf",
+        "papers/Smith2024/generated/not-a-source.pdf",
+        "papers/Smith2024/source/nested/paper.pdf",
+    ],
+)
+def test_source_pdf_must_be_one_file_in_its_own_source_directory(
+    library_root: Path, source_pdf: str
+) -> None:
+    library = create_library(library_root)
+    record = make_record()
+    record.source_pdf = source_pdf
+
+    with pytest.raises(ValueError, match="inside this paper's source directory"):
+        library.write_paper(record)
+
+
 def test_bibliographic_text_is_not_treated_as_a_path(library_root: Path) -> None:
     library = create_library(library_root)
     record = make_record()

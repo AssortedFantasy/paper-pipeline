@@ -159,3 +159,69 @@ def test_no_library_error_state(page: Page, ui_server: str) -> None:
     page.goto(f"{ui_server}/papers")
     expect(page.get_by_role("heading", name="No library is open")).to_be_visible()
     expect(page.locator(".job-stream")).to_contain_text("No library open")
+
+
+def test_no_library_dashboard_can_create_library(
+    page: Page, ui_server: str, tmp_path: Path
+) -> None:
+    library = tmp_path / "created-from-dashboard"
+    page.goto(f"{ui_server}/papers")
+
+    page.get_by_label("New library folder").fill(str(library))
+    page.get_by_label("Library name").fill("Dashboard Library")
+    page.get_by_role("button", name="Create library").click()
+
+    expect(page.locator(".library-operation-result").get_by_role("status")).to_contain_text(
+        "Created and opened library"
+    )
+    expect(page.locator("#library-chip")).to_contain_text("created-from-dashboard")
+    assert (library / "library.json").is_file()
+    page.get_by_role("link", name="View papers").click()
+    expect(page.get_by_role("heading", name="No papers found")).to_be_visible()
+
+
+def test_active_library_can_validate_and_rebuild(
+    page: Page, ui_server: str, tmp_path: Path
+) -> None:
+    library = tmp_path / "maintained-library"
+    _create_library(page, ui_server, library)
+    _import_papers(page, ui_server)
+    page.goto(f"{ui_server}/papers")
+
+    page.get_by_role("button", name="Validate library").click()
+    expect(page.get_by_role("status")).to_contain_text("validation passed")
+
+    page.get_by_role("button", name="Rebuild indexes").click()
+    expect(page.get_by_role("status")).to_contain_text("Rebuilt indexes")
+    assert "Journal Article" in (library / "indexes" / "titles.md").read_text(encoding="utf-8")
+
+    source = next((library / "papers" / "SmithJournal2024" / "source").glob("*.pdf"))
+    source.unlink()
+    page.get_by_role("button", name="Validate library").click()
+    validation = page.locator(".library-operation-result").get_by_role("alert")
+    expect(validation).to_contain_text("Validation found 1 problem")
+    expect(validation).to_contain_text("Source PDF is missing")
+
+
+def test_stale_papers_tab_cannot_launch_against_new_library(
+    page: Page, ui_server: str, tmp_path: Path
+) -> None:
+    first = tmp_path / "first-library"
+    second = tmp_path / "second-library"
+    _create_library(page, ui_server, first)
+    _import_papers(page, ui_server)
+    page.goto(f"{ui_server}/papers")
+    page.locator("tbody input[type=checkbox]").first.check()
+
+    _create_library(page, ui_server, second)
+    page.get_by_role("button", name="Convert selected").click()
+
+    expect(page.get_by_role("alert")).to_contain_text("selected library changed")
+    jobs = page.request.get(f"{ui_server}/api/jobs")
+    assert jobs.ok, jobs.text()
+    assert jobs.json()["jobs"] == []
+
+    page.get_by_role("button", name="Validate library").click()
+    expect(page.locator(".library-operation-result").get_by_role("alert")).to_contain_text(
+        "selected library changed"
+    )

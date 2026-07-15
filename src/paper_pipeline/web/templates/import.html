@@ -11,10 +11,12 @@
     </div>
   </header>
 
+  {% include "_library_setup.html" %}
+
   <form class="import-picker" hx-post="/import/preview" hx-target="#import-preview" hx-swap="innerHTML" hx-indicator="#preview-progress">
     <label>
       <span>Library folder</span>
-      <input type="text" name="library_path" value="{{ library_root or '' }}" placeholder="D:\Papers\My Library" required>
+      <input id="import-library-path" type="text" name="library_path" value="{{ library_root or '' }}" placeholder="D:\Papers\My Library" required>
     </label>
     <label>
       <span>Zotero RDF export</span>

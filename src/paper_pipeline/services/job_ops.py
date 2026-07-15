@@ -5,8 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import PurePosixPath, PureWindowsPath
 
-from paper_pipeline.jobs.model import Job
+from paper_pipeline.convert.runner import ConverterSpec
+from paper_pipeline.jobs.model import Job, JobKind, JobState
 from paper_pipeline.jobs.recovery import InterruptedAttempt
+from paper_pipeline.services.processing import retry_job
 from paper_pipeline.services.runtime import LibraryRuntime
 
 
@@ -34,6 +36,78 @@ def job_dashboard(runtime: LibraryRuntime) -> JobDashboard:
         terminal=tuple(job for job in jobs if job.state.is_terminal),
         interrupted=tuple(reversed(runtime.interrupted_attempts)),
     )
+
+
+def list_runtime_jobs(
+    runtime: LibraryRuntime,
+    *,
+    state: JobState | None = None,
+    kind: JobKind | None = None,
+) -> tuple[Job, ...]:
+    """Return one library's in-memory jobs with optional contract filters."""
+    return tuple(
+        job
+        for job in runtime.queue.list_jobs()
+        if job.library_key == runtime.library_key
+        and (state is None or job.state is state)
+        and (kind is None or job.kind is kind)
+    )
+
+
+def list_interrupted_attempts(
+    runtime: LibraryRuntime,
+    *,
+    state: JobState | None = None,
+    kind: JobKind | None = None,
+) -> tuple[InterruptedAttempt, ...]:
+    if state not in (None, JobState.INTERRUPTED):
+        return ()
+    return tuple(
+        attempt for attempt in runtime.interrupted_attempts if kind is None or attempt.kind is kind
+    )
+
+
+def job_counts(runtime: LibraryRuntime) -> dict[str, int]:
+    jobs = list_runtime_jobs(runtime)
+    return {state.value: sum(job.state is state for job in jobs) for state in JobState}
+
+
+async def retry_selected_jobs(
+    runtime: LibraryRuntime,
+    job_ids: list[str],
+    *,
+    converter_spec: ConverterSpec,
+    timeout_seconds: int,
+    provider_name: str,
+    model: str = "",
+) -> tuple[Job, ...]:
+    """Validate and retry a selected live-job batch within one library."""
+    if not job_ids:
+        raise ValueError("select at least one failed or cancelled job to retry")
+    if len(set(job_ids)) != len(job_ids):
+        raise ValueError("selected retry jobs must not contain duplicates")
+    selected: list[Job] = []
+    for job_id in job_ids:
+        job = runtime.queue.get(job_id)
+        if job is None or job.library_key != runtime.library_key:
+            raise ValueError(f"selected job does not belong to this library: {job_id}")
+        if job.state not in {JobState.FAILED, JobState.CANCELLED}:
+            raise ValueError(f"selected job is not retryable: {job_id}")
+        selected.append(job)
+
+    replacements: list[Job] = []
+    for job in selected:
+        replacements.append(
+            await retry_job(
+                runtime,
+                job.id,
+                converter_spec=converter_spec,
+                timeout_seconds=timeout_seconds,
+                provider_name=provider_name,
+                model=model,
+            )
+        )
+    return tuple(replacements)
 
 
 def read_log_tail(

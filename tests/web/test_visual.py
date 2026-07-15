@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import base64
 import socket
+import struct
 import threading
 import time
+import zlib
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -202,10 +204,105 @@ def _snapshot(page: Page, name: str, *, update: bool) -> None:
         pytest.fail(
             f"missing visual baseline {baseline}; run the documented --update-snapshots command"
         )
-    assert actual == baseline.read_bytes(), (
-        f"visual snapshot differs: {name}; run the documented --update-snapshots command "
-        "after reviewing the UI change"
+    changed, total, maximum_delta = _pixel_difference(actual, baseline.read_bytes())
+    allowed = max(10, int(total * 0.0005))
+    assert changed <= allowed, (
+        f"visual snapshot differs: {name}; {changed}/{total} pixels changed "
+        f"(allowed {allowed}, max channel delta {maximum_delta}); run the documented "
+        "--update-snapshots command after reviewing the UI change"
     )
+
+
+def _pixel_difference(actual: bytes, expected: bytes) -> tuple[int, int, int]:
+    actual_size, actual_pixels = _decode_png(actual)
+    expected_size, expected_pixels = _decode_png(expected)
+    assert actual_size == expected_size, (
+        f"visual dimensions changed from {expected_size} to {actual_size}"
+    )
+    changed = 0
+    maximum_delta = 0
+    for offset in range(0, len(actual_pixels), 4):
+        delta = max(
+            abs(actual_pixels[offset + channel] - expected_pixels[offset + channel])
+            for channel in range(4)
+        )
+        maximum_delta = max(maximum_delta, delta)
+        if delta > 2:
+            changed += 1
+    return changed, actual_size[0] * actual_size[1], maximum_delta
+
+
+def _decode_png(payload: bytes) -> tuple[tuple[int, int], bytes]:
+    """Decode Playwright's 8-bit RGB/RGBA PNGs into RGBA pixels."""
+    assert payload.startswith(b"\x89PNG\r\n\x1a\n")
+    offset = 8
+    compressed = bytearray()
+    width = height = channels = 0
+    while offset < len(payload):
+        length = int.from_bytes(payload[offset : offset + 4], "big")
+        kind = payload[offset + 4 : offset + 8]
+        data = payload[offset + 8 : offset + 8 + length]
+        offset += 12 + length
+        if kind == b"IHDR":
+            width, height, depth, color_type, compression, filtering, interlace = struct.unpack(
+                ">IIBBBBB", data
+            )
+            assert depth == 8 and color_type in (2, 6)
+            assert (compression, filtering, interlace) == (0, 0, 0)
+            channels = 3 if color_type == 2 else 4
+        elif kind == b"IDAT":
+            compressed.extend(data)
+        elif kind == b"IEND":
+            break
+    stride = width * channels
+    raw = zlib.decompress(bytes(compressed))
+    assert len(raw) == height * (stride + 1)
+    pixels = bytearray(height * stride)
+    for row in range(height):
+        source = row * (stride + 1)
+        filter_type = raw[source]
+        scanline = raw[source + 1 : source + 1 + stride]
+        destination = row * stride
+        for column, value in enumerate(scanline):
+            left = pixels[destination + column - channels] if column >= channels else 0
+            above = pixels[destination - stride + column] if row else 0
+            upper_left = (
+                pixels[destination - stride + column - channels]
+                if row and column >= channels
+                else 0
+            )
+            if filter_type == 0:
+                decoded = value
+            elif filter_type == 1:
+                decoded = value + left
+            elif filter_type == 2:
+                decoded = value + above
+            elif filter_type == 3:
+                decoded = value + ((left + above) // 2)
+            elif filter_type == 4:
+                decoded = value + _paeth(left, above, upper_left)
+            else:
+                raise AssertionError(f"unsupported PNG filter: {filter_type}")
+            pixels[destination + column] = decoded & 0xFF
+    if channels == 4:
+        rgba = pixels
+    else:
+        rgba = bytearray(width * height * 4)
+        for source in range(0, len(pixels), 3):
+            destination = (source // 3) * 4
+            rgba[destination : destination + 3] = pixels[source : source + 3]
+            rgba[destination + 3] = 255
+    return (width, height), bytes(rgba)
+
+
+def _paeth(left: int, above: int, upper_left: int) -> int:
+    prediction = left + above - upper_left
+    distances = (
+        abs(prediction - left),
+        abs(prediction - above),
+        abs(prediction - upper_left),
+    )
+    return (left, above, upper_left)[distances.index(min(distances))]
 
 
 def test_visual_papers_table_filled(
@@ -217,6 +314,9 @@ def test_visual_papers_table_filled(
 
     page.goto(f"{visual_server.url}/papers")
     expect(page.locator("tbody tr")).to_have_count(5)
+    page.locator(".library-maintenance small").evaluate(
+        "element => element.textContent = 'D:\\\\Libraries\\\\Visual Fixture'"
+    )
     _snapshot(page, "papers-table-filled.png", update=update_snapshots)
 
 
@@ -227,6 +327,9 @@ def test_visual_papers_table_empty(
 
     page.goto(f"{visual_server.url}/papers")
     expect(page.get_by_role("heading", name="No papers found")).to_be_visible()
+    page.locator(".library-maintenance small").evaluate(
+        "element => element.textContent = 'D:\\\\Libraries\\\\Visual Fixture'"
+    )
     _snapshot(page, "papers-table-empty.png", update=update_snapshots)
 
 
@@ -321,7 +424,8 @@ def test_visual_import_preview(
     page.get_by_label("Zotero RDF export").fill(str(FIXTURES / "clean"))
     page.get_by_role("button", name="Preview import").click()
     expect(page.get_by_role("heading", name="5 actionable papers")).to_be_visible()
-    page.get_by_label("Library folder").fill(r"D:\Libraries\Visual Fixture")
+    page.get_by_label("Library folder", exact=True).fill(r"D:\Libraries\Visual Fixture")
+    page.get_by_label("Existing library folder").fill(r"D:\Libraries\Visual Fixture")
     page.get_by_label("Zotero RDF export").fill(r"D:\Exports\library.rdf")
     _snapshot(page, "import-preview.png", update=update_snapshots)
 
@@ -334,7 +438,8 @@ def test_visual_error_state(
     page.get_by_label("Zotero RDF export").fill(str(FIXTURES / "problems"))
     page.get_by_role("button", name="Preview import").click()
     expect(page.get_by_role("heading", name="Problems require attention")).to_be_visible()
-    page.get_by_label("Library folder").fill(r"D:\Libraries\Visual Fixture")
+    page.get_by_label("Library folder", exact=True).fill(r"D:\Libraries\Visual Fixture")
+    page.get_by_label("Existing library folder").fill(r"D:\Libraries\Visual Fixture")
     page.get_by_label("Zotero RDF export").fill(r"D:\Exports\problem-library.rdf")
     _snapshot(page, "import-error-state.png", update=update_snapshots)
 

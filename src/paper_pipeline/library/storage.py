@@ -362,6 +362,12 @@ def _validate_paper_record(record: PaperRecord, *, expected_citekey: str) -> Non
     for field, value in _record_paths(record):
         if value is not None:
             _validate_relative_posix_path(value, field=field)
+    if record.source_pdf is not None:
+        source_parts = PurePosixPath(record.source_pdf).parts
+        if source_parts[:3] != ("papers", expected_citekey, "source") or len(source_parts) != 4:
+            raise ValueError(
+                "source_pdf must be a library-relative file inside this paper's source directory"
+            )
     expected_input_root = ("papers", expected_citekey)
     for recipe_name, recipe in record.recipes.items():
         if recipe.input_artifact is not None:

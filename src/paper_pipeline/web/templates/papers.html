@@ -10,12 +10,13 @@
 </section>
 
 {% if no_library %}
-  <section class="state-panel" role="status">
-    <span class="state-icon">⌁</span>
-    <h2>No library is open</h2>
-    <p>Open or create a library through the API before managing papers.</p>
+  <section class="state-panel compact no-library-state" role="status">
+    <span class="state-icon">⌁</span><h2>No library is open</h2>
+    <p>Create a folder-based library or open one you already have.</p>
   </section>
+  {% include "_library_setup.html" %}
 {% else %}
+  {% include "_library_maintenance.html" %}
   <form id="paper-filters" class="filters" aria-label="Paper filters">
     <label class="search-field">
       <span>Search</span>

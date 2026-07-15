@@ -1,0 +1,14 @@
+<section class="library-maintenance" aria-label="Library maintenance">
+  <div><p class="eyebrow">Active library</p><strong>{{ library_root.name }}</strong><small>{{ library_root }}</small></div>
+  <div class="library-maintenance-actions">
+    <form hx-post="/library/validate" hx-target="#library-operation-result" hx-swap="innerHTML">
+      <input type="hidden" name="library_key" value="{{ library_key }}">
+      <button class="button button-quiet" type="submit">Validate library</button>
+    </form>
+    <form hx-post="/library/reindex" hx-target="#library-operation-result" hx-swap="innerHTML">
+      <input type="hidden" name="library_key" value="{{ library_key }}">
+      <button class="button button-quiet" type="submit">Rebuild indexes</button>
+    </form>
+  </div>
+  <div id="library-operation-result" class="library-operation-result" aria-live="polite"></div>
+</section>

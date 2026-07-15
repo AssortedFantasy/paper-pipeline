@@ -111,7 +111,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     subparsers = parser.add_subparsers(dest="command")
     serve_parser = subparsers.add_parser("serve", help="run the web dashboard")
-    serve_parser.add_argument("--host", default="127.0.0.1", help="bind host")
+    serve_parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        choices=("127.0.0.1", "localhost", "::1"),
+        help="loopback bind host",
+    )
     serve_parser.add_argument("--port", type=int, default=8000, help="bind port")
     doctor_parser = subparsers.add_parser("doctor", help="check environment health")
     doctor_parser.add_argument(

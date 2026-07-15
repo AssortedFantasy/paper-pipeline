@@ -20,6 +20,7 @@ from paper_pipeline.jobs.model import Job, JobKind, JobScope, JobState
 from paper_pipeline.library.model import PaperRecord
 from paper_pipeline.library.validation import ValidationReport
 from paper_pipeline.services.import_ops import ImportReport, apply_import, preview_import
+from paper_pipeline.services.job_ops import list_interrupted_attempts, list_runtime_jobs
 from paper_pipeline.services.library_ops import (
     PaperPage,
     create_library,
@@ -267,11 +268,7 @@ def create_api_router(context: WebContext) -> APIRouter:
     ) -> JobsResponse:
         runtime = _runtime(request)
         jobs = [
-            JobResponse.from_job(job)
-            for job in runtime.queue.list_jobs()
-            if job.library_key == runtime.library_key
-            and (state is None or job.state is state)
-            and (kind is None or job.kind is kind)
+            JobResponse.from_job(job) for job in list_runtime_jobs(runtime, state=state, kind=kind)
         ]
         interrupted = [
             InterruptedResponse(
@@ -282,8 +279,7 @@ def create_api_router(context: WebContext) -> APIRouter:
                 scope=attempt.scope,
                 started_at=attempt.started_at,
             )
-            for attempt in runtime.interrupted_attempts
-            if state in (None, JobState.INTERRUPTED) and (kind is None or attempt.kind is kind)
+            for attempt in list_interrupted_attempts(runtime, state=state, kind=kind)
         ]
         return JobsResponse(jobs=jobs, interrupted=interrupted)
 

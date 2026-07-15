@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from urllib.parse import parse_qs
+
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from paper_pipeline.services.job_ops import job_dashboard, read_log_tail
+from paper_pipeline.services.job_ops import job_dashboard, read_log_tail, retry_selected_jobs
 from paper_pipeline.services.processing import cancel_job, retry_job
 from paper_pipeline.web.api import WebContext
 from paper_pipeline.web.ui import templates
@@ -50,6 +52,28 @@ def create_jobs_router(context: WebContext) -> APIRouter:
         except (KeyError, ValueError, RuntimeError) as error:
             return _jobs_response(context, request, error=str(error))
         return _jobs_response(context, request, message="Retry queued as a new job.")
+
+    @router.post("/jobs/retry-selected", response_class=HTMLResponse)
+    async def retry_selected_route(request: Request) -> HTMLResponse:
+        if context.runtime is None:
+            return _jobs_response(context, request, error="No library is open.")
+        values = parse_qs((await request.body()).decode("utf-8"))
+        try:
+            jobs = await retry_selected_jobs(
+                context.runtime,
+                values.get("job_ids", []),
+                converter_spec=context.converter_spec,
+                timeout_seconds=context.config.converter_timeout_seconds,
+                provider_name=context.provider_name,
+                model=context.config.llm_model or "",
+            )
+        except (KeyError, ValueError, RuntimeError) as error:
+            return _jobs_response(context, request, error=str(error))
+        return _jobs_response(
+            context,
+            request,
+            message=f"Queued {len(jobs)} selected job{'s' if len(jobs) != 1 else ''} for retry.",
+        )
 
     @router.get("/jobs/{job_id}/log", response_class=HTMLResponse)
     async def job_log(job_id: str, request: Request) -> HTMLResponse:
