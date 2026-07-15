@@ -54,7 +54,7 @@ async def validate_library(runtime: LibraryRuntime) -> ValidationReport:
 
     async def validate(session: LibrarySession, job: Job, token: CancellationToken) -> None:
         del job, token
-        reports.append(session.call(_validate_library))
+        reports.append(session.inspect(lambda view: _validate_library(view.root)))
 
     job = await runtime.enqueue_library_read(
         JobKind.MAINTENANCE,
@@ -71,8 +71,8 @@ async def rebuild_indexes(runtime: LibraryRuntime) -> Job:
 
     async def rebuild(session: LibrarySession, job: Job, token: CancellationToken) -> None:
         del job, token
-        session.call(_rebuild_indexes)
-        session.call(write_library_support_files)
+        session.mutate(_rebuild_indexes)
+        session.mutate(write_library_support_files)
 
     job = await runtime.enqueue_library_write(
         JobKind.MAINTENANCE,

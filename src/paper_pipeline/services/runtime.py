@@ -13,7 +13,7 @@ import threading
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import MappingProxyType
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from paper_pipeline.jobs.model import Job, JobKind
 from paper_pipeline.jobs.queue import CancellationToken, JobQueue, KillHook
@@ -55,9 +55,20 @@ class _ScopedSession:
 class LibrarySession(_ScopedSession):
     """Short-lived storage surface inside a library read or write operation."""
 
-    def call(self, operation: Callable[[Library], T]) -> T:
-        """Invoke whole-library infrastructure inside the held barrier."""
+    def __init__(self, library: Library, *, writable: bool) -> None:
+        super().__init__(library)
+        self._writable = writable
+
+    def inspect(self, operation: Callable[[Any], T]) -> T:
+        """Invoke read-only infrastructure against a mutation-free view."""
         self._require_active()
+        return operation(_LibraryReadView(self._library))
+
+    def mutate(self, operation: Callable[[Library], T]) -> T:
+        """Invoke raw library infrastructure only under the write barrier."""
+        self._require_active()
+        if not self._writable:
+            raise RuntimeError("library read session cannot mutate storage")
         return operation(self._library)
 
     def root_path(self, relative_path: str) -> Path:
@@ -75,11 +86,36 @@ class LibrarySession(_ScopedSession):
 
     def stage_dir(self) -> Path:
         self._require_active()
+        if not self._writable:
+            raise RuntimeError("library read session cannot stage artifacts")
         return self._library.stage_dir()
 
     def install_artifact(self, staged_path: Path, destination: str) -> str:
         self._require_active()
+        if not self._writable:
+            raise RuntimeError("library read session cannot install artifacts")
         return self._library.install_artifact(staged_path, destination)
+
+
+class _LibraryReadView:
+    """Library surface without mutation methods for nonexclusive readers."""
+
+    def __init__(self, library: Library) -> None:
+        self._library = library
+
+    @property
+    def root(self) -> Path:
+        return self._library.root
+
+    @property
+    def info(self):  # type: ignore[no-untyped-def]
+        return self._library.info
+
+    def list_papers(self) -> tuple[list[PaperRecord], list[str]]:
+        return self._library.list_papers()
+
+    def read_paper(self, citekey: str) -> PaperRecord:
+        return self._library.read_paper(citekey)
 
 
 class PaperSession(_ScopedSession):
@@ -244,7 +280,7 @@ class LibraryRuntime:
             self.library_key,
             kind,
             label,
-            self._library_worker(worker),
+            self._library_worker(worker, writable=False),
             meta=meta,
         )
 
@@ -261,15 +297,15 @@ class LibraryRuntime:
             self.library_key,
             kind,
             label,
-            self._library_worker(worker),
+            self._library_worker(worker, writable=True),
             meta=meta,
         )
 
     def _library_worker(
-        self, worker: LibraryWorker
+        self, worker: LibraryWorker, *, writable: bool
     ) -> Callable[[Job, CancellationToken], Awaitable[None]]:
         async def queued_worker(job: Job, token: CancellationToken) -> None:
-            session = LibrarySession(self._library)
+            session = LibrarySession(self._library, writable=writable)
             try:
                 await worker(session, job, token)
             finally:

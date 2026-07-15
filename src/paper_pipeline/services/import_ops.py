@@ -63,7 +63,7 @@ async def preview_import(runtime: LibraryRuntime, export_path: Path) -> ImportPl
         if token.is_set():
             raise asyncio.CancelledError
         records = parse_rdf(export_path)
-        plans.append(session.call(lambda library: build_import_plan(library, records)))
+        plans.append(session.inspect(lambda library: build_import_plan(library, records)))
 
     job = await runtime.enqueue_library_read(JobKind.IMPORT, "import:preview", preview)
     result = await runtime.queue.wait(job.id)

@@ -195,6 +195,22 @@ async def test_runtime_exposes_library_read_and_write_barriers(tmp_path: Path) -
     assert write_started.is_set() is True
 
 
+async def test_library_read_session_has_no_storage_mutation_capability(tmp_path: Path) -> None:
+    runtime = RuntimeRegistry().create(tmp_path / "library")
+
+    async def read_worker(session: LibrarySession, job: Job, token: CancellationToken) -> None:
+        del job, token
+        assert session.inspect(lambda view: view.root) == runtime.root
+        with pytest.raises(RuntimeError, match="cannot stage"):
+            session.stage_dir()
+        with pytest.raises(RuntimeError, match="cannot mutate"):
+            session.mutate(lambda library: library.stage_dir())
+
+    job = await runtime.enqueue_library_read(JobKind.MAINTENANCE, "read", read_worker)
+
+    assert (await runtime.queue.wait(job.id)).state is JobState.SUCCEEDED
+
+
 async def test_runtime_wires_recovery_callbacks_inside_paper_lane(tmp_path: Path) -> None:
     runtime = RuntimeRegistry().create(tmp_path / "library")
     await seed(runtime, record())
