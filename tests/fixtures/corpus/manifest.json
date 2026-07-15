@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "description": "Reference-only Marker characterization corpus. PDFs are not committed; acquire them from the recorded source URLs and verify SHA-256 before use.",
+  "documents": [
+    {
+      "id": "native-text",
+      "class": "native_text",
+      "citekey": "kingmaAdamMethodStochastic2017",
+      "title": "Adam: A Method for Stochastic Optimization",
+      "source_url": "https://arxiv.org/pdf/1412.6980",
+      "doi": "10.48550/arXiv.1412.6980",
+      "sha256": "eab9c73ae2ceda884b94830bda99312254bac4806f6c9f045cbab90721ecda31",
+      "page_count": 15,
+      "sample_page_range": "all",
+      "expected_features": ["native text", "single-column prose", "display equations", "references"],
+      "redistribution": "reference_only_not_committed"
+    },
+    {
+      "id": "multi-column",
+      "class": "multi_column",
+      "citekey": "xuHowNeuralNetworks2020",
+      "title": "How Neural Networks Extrapolate: From Feedforward to Graph Neural Networks",
+      "source_url": "https://openreview.net/pdf?id=UH-cmocLJC",
+      "doi": null,
+      "sha256": "e8addcbd3bb71f320b009af7778e97331184a4dfd0349acc71254623423f1f86",
+      "page_count": 52,
+      "sample_page_range": "0-9",
+      "expected_features": ["two-column layout", "equations", "plots", "appendices"],
+      "redistribution": "reference_only_not_committed"
+    },
+    {
+      "id": "equations",
+      "class": "equations",
+      "citekey": "raissiPhysicsInformedDeep2017",
+      "title": "Physics Informed Deep Learning (Part I): Data-driven Solutions of Nonlinear Partial Differential Equations",
+      "source_url": "https://arxiv.org/pdf/1711.10561",
+      "doi": "10.48550/arXiv.1711.10561",
+      "sha256": "2a8db6776a110a4f36bd1e36af79cf31a2e74baa5af8f7ee3d9286a75fdc400d",
+      "page_count": 22,
+      "sample_page_range": "0-9",
+      "expected_features": ["dense display equations", "inline math", "plots"],
+      "redistribution": "reference_only_not_committed"
+    },
+    {
+      "id": "tables",
+      "class": "tables",
+      "citekey": "huangMachineLearningElectronic2021",
+      "title": "Machine Learning for Electronic Design Automation: A Survey",
+      "source_url": "https://doi.org/10.1145/3451179",
+      "doi": "10.1145/3451179",
+      "sha256": "12e8730747e904a562e9eab02dfa8dfcec633335cdc24e1523c86e80bf2f1f15",
+      "page_count": 47,
+      "sample_page_range": "0-14",
+      "expected_features": ["two-column layout", "large comparison tables", "figures", "references"],
+      "redistribution": "reference_only_not_committed"
+    },
+    {
+      "id": "figures",
+      "class": "figures",
+      "citekey": "liuKANKolmogorovArnold2024",
+      "title": "KAN: Kolmogorov-Arnold Networks",
+      "source_url": "https://openreview.net/pdf?id=Ozo7qJ5vZi",
+      "doi": null,
+      "sha256": "baa1ac628aa3ad0ee780f541a06fabf8a7c66a6760cde24691d2e3515b0e2273",
+      "page_count": 47,
+      "sample_page_range": "0-9",
+      "expected_features": ["many diagrams", "plots", "captions", "equations"],
+      "redistribution": "reference_only_not_committed"
+    },
+    {
+      "id": "scanned",
+      "class": "scanned",
+      "citekey": "fishburnTILOSPosynomialProgramming2003",
+      "title": "TILOS: A Posynomial Programming Approach to Transistor Sizing",
+      "source_url": "https://doi.org/10.1007/978-1-4615-0292-0_23",
+      "doi": "10.1007/978-1-4615-0292-0_23",
+      "sha256": "61419fce38d3d61270708ab08dfacac76ae1a35715914d97bcd157dad25b8f40",
+      "page_count": 699,
+      "sample_page_range": "294-303",
+      "expected_features": ["scanned pages", "OCR", "book layout", "equations", "figures"],
+      "redistribution": "reference_only_not_committed"
+    }
+  ]
+}
