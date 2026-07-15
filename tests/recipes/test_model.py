@@ -22,13 +22,13 @@ def test_builtins_parse() -> None:
 
     assert set(recipes) == {"contributions", "intro", "method", "summary"}
     assert recipes["summary"].output == "summary.md"
-    assert recipes["contributions"].input == "transcription"
+    assert recipes["contributions"].input == "pdf"
     assert recipes["intro"].input == "pdf"
     assert recipes["intro"].output == "intro_filtered.md"
     assert "Motivation & Problem Context" in recipes["intro"].prompt
     assert recipes["method"].input == "pdf"
     assert recipes["method"].output == "method_filtered.md"
-    assert "Ontological Reduction" in recipes["method"].prompt
+    assert "Approach" in recipes["method"].prompt
 
 
 def test_prompt_body_is_preserved_verbatim() -> None:

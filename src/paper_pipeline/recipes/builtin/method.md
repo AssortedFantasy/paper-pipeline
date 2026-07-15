@@ -1,17 +1,26 @@
 ---
 name: method
-version: 1
+version: 2
 input: pdf
 output: method_filtered.md
 ---
-Role: Expert Scientific & Technical Reviewer.
+Summarize how the work in this paper was carried out: the approach, its
+components, and how it was evaluated or validated.
 
-Task: Summarize the methodology of the provided text. Extract the exact technical pipeline, architectural choices, and experimental setup.
+Rules:
 
-Constraints:
-1. Third-Party Objectivity: Write strictly in the third person. Omit all subjective claims of novelty, significance, or impact. Strip all marketing-like language and self-aggrandizement.
-2. Ontological Reduction (De-obfuscation): Identify and translate author-invented terminology, unnecessarily dense prose, or inflated heuristic descriptions back into their standard, established mathematical or algorithmic equivalents. Reduce all obfuscated descriptions to their fundamental computational or statistical mechanics without adopting the author's proprietary framing.
-3. Quantitative Rigor: Extract and list all provided numerical values, hyperparameters, dataset dimensions, statistical thresholds, and hardware specifications.
-4. Technical Density: Maintain high technical rigor. Prioritize the extraction of foundational methodological mechanics over high-level narrative abstractions.
+- Write strictly in the third person. Omit claims of novelty,
+  significance, or impact, and strip promotional language.
+- Where the authors coin their own terminology for standard concepts,
+  describe the underlying mechanism in established, field-standard terms;
+  note the authors' name for it once, then use the standard description.
+- Report every concrete setting, quantity, resource, and measurement the
+  paper provides about how the work was done and assessed.
+- Prefer precise mechanics over high-level narrative. Keep the level of
+  detail a reader would need to assess or reproduce the work.
 
-Format the output clearly, separating the core framework from the experimental setup and evaluation metrics.
+Output format: Markdown with exactly these three second-level headings, in
+this order — "Approach", "Setup", "Evaluation". Use prose or bullets under
+each as appropriate. If the paper gives nothing for a section, write "Not
+reported in the paper." under that heading. No other headings, no
+preamble, no closing remarks.
