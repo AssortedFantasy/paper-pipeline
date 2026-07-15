@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Literal
 
 from paper_pipeline.convert.contract import ConversionRequest, ConversionResult
+from paper_pipeline.recipes.provider import ProviderRequest, ProviderResult
 
 FakeConverterMode = Literal["success", "failure", "crash", "hang", "empty"]
 
@@ -100,4 +101,34 @@ class FakeConverter:
             transcription_path=transcription_path,
             figure_paths=figure_paths or [],
             error=error,
+        )
+
+
+@dataclass
+class FakeLLMProvider:
+    """Deterministic LLM double with call recording and failure/delay modes."""
+
+    name: str = field(default="fake", init=False)
+    response: str = "Fake LLM response."
+    fail: bool = False
+    delay_seconds: float = 0.0
+    failure_message: str = "fake provider failure"
+    calls: list[ProviderRequest] = field(default_factory=list, init=False)
+
+    def generate(self, request: ProviderRequest) -> ProviderResult:
+        self.calls.append(request)
+        if self.delay_seconds > 0:
+            time.sleep(self.delay_seconds)
+        if self.fail:
+            return ProviderResult(
+                ok=False,
+                provider=self.name,
+                model=request.model,
+                error=self.failure_message,
+            )
+        return ProviderResult(
+            ok=True,
+            text=self.response,
+            provider=self.name,
+            model=request.model,
         )

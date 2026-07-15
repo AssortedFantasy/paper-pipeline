@@ -1248,7 +1248,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "marker-pdf", marker = "extra == 'marker'", specifier = ">=1.0" },
-    { name = "openai", marker = "extra == 'llm'", specifier = ">=1.50" },
+    { name = "openai", marker = "extra == 'llm'", specifier = ">=1.66" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pydantic-settings", specifier = ">=2.4" },
     { name = "rdflib", specifier = ">=7.0" },

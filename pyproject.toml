@@ -25,7 +25,7 @@ marker = [
 ]
 # Remote LLM provider SDKs. Never required by the default dev loop.
 llm = [
-    "openai>=1.50",
+    "openai>=1.66",
 ]
 
 [dependency-groups]
