@@ -24,19 +24,19 @@ WP here.
 | WP | Title | Depends on | Status |
 | --- | --- | --- | --- |
 | 0.1 | Skeleton, tooling, contracts | — | done |
-| 0.2 | Config + `doctor` command | 0.1 | todo |
+| 0.2 | Config + `doctor` command | 0.1 | done |
 | 0.3 | Contract feedback pass: lanes, recovery, source identity | 0.1 | done |
-| 1.1 | Library storage core | 0.3 | todo |
+| 1.1 | Library storage core | 0.3 | done |
 | 1.2 | Staging + atomic artifact install | 1.1 | todo |
 | 1.3 | Library validator | 1.1 | todo |
 | 2A.1 | Zotero RDF parsing + fixtures | 0.3 | todo |
 | 2A.2 | Import planning (preview) | 2A.1, 1.1 | todo |
 | 2B.0 | Marker corpus, pins, runtime characterization | 0.1 | todo |
-| 2B.1 | Fake converter + contract tests | 0.1 | todo |
+| 2B.1 | Fake converter + contract tests | 0.1 | done |
 | 2B.2 | Child-process conversion runner | 2B.1 | todo |
 | 2B.3 | Marker adapter + GPU smoke test | 2B.0, 2B.2 | todo |
 | 2B.4 | Remote conversion over SSH (conditional) | 2B.3 | conditional |
-| 2C.1 | Recipe template parsing + built-ins | 0.3 | todo |
+| 2C.1 | Recipe template parsing + built-ins | 0.3 | done |
 | 2C.2 | LLM providers (fake + OpenAI) | 0.3 | todo |
 | 2C.3 | Recipe runner + provenance | 2C.1, 2C.2, 1.2 | todo |
 | 2D.1 | Job queue, state machine, events | 0.3 | todo |
