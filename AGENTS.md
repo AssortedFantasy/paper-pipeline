@@ -46,6 +46,7 @@ All commands run from the repository root. Use `uv`, never bare `pip`.
 | Lint (fix) | `uv run ruff check --fix .` |
 | Type check | `uv run pyright` |
 | Fast tests (default) | `uv run pytest` |
+| Clean-environment smoke | `uv run python scripts/smoke.py` |
 | Browser/UI tests | `uv run pytest -m browser` (after `uv run playwright install chromium`) |
 | GPU/Marker tests | `uv run pytest -m gpu` (explicit only; needs `marker` extra + GPU) |
 | Real-LLM tests | `uv run pytest -m llm` (explicit only; needs credentials; costs money) |

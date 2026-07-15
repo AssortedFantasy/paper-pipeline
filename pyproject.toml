@@ -80,7 +80,7 @@ pythonVersion = "3.12"
 testpaths = ["tests"]
 asyncio_mode = "auto"
 # Fast default suite: no GPU, no paid APIs, no real browser.
-addopts = "-m 'not gpu and not llm and not browser'"
+addopts = "-m 'not gpu and not llm and not browser and not slow'"
 markers = [
     "gpu: requires a GPU and the 'marker' extra (run explicitly)",
     "llm: requires real LLM provider credentials (run explicitly)",
