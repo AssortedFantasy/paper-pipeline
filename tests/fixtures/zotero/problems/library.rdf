@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+ xmlns:z="http://www.zotero.org/namespaces/export#"
+ xmlns:dc="http://purl.org/dc/elements/1.1/"
+ xmlns:link="http://purl.org/rss/1.0/modules/link/">
+  <rdf:Description rdf:about="urn:missing-key">
+    <z:itemType>journalArticle</z:itemType><dc:title>No Key and Missing File</dc:title>
+    <link:link rdf:resource="#missing"/>
+  </rdf:Description>
+  <z:Attachment rdf:about="#missing"><z:path rdf:resource="files/missing.pdf"/><link:type>application/pdf</link:type></z:Attachment>
+  <rdf:Description rdf:about="urn:odd">
+    <z:itemType>computerProgram</z:itemType><z:citationKey>OddSoftware2025</z:citationKey><dc:title>Odd Software</dc:title>
+  </rdf:Description>
+</rdf:RDF>

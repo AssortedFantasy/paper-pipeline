@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+ xmlns:z="http://www.zotero.org/namespaces/export#"
+ xmlns:dc="http://purl.org/dc/elements/1.1/"
+ xmlns:dcterms="http://purl.org/dc/terms/"
+ xmlns:bib="http://purl.org/net/biblio#"
+ xmlns:foaf="http://xmlns.com/foaf/0.1/"
+ xmlns:link="http://purl.org/rss/1.0/modules/link/">
+  <bib:Article rdf:about="https://example.test/article">
+    <z:itemType>journalArticle</z:itemType>
+    <z:citationKey>SmithJournal2024</z:citationKey>
+    <dc:title>Journal Article</dc:title>
+    <dc:date>2024-02-03</dc:date>
+    <dcterms:isPartOf rdf:resource="urn:journal:test"/>
+    <bib:authors><rdf:Seq>
+      <rdf:li><foaf:Person><foaf:surname>Smith</foaf:surname><foaf:givenName>Ada</foaf:givenName></foaf:Person></rdf:li>
+      <rdf:li><foaf:Person><foaf:surname>Jones</foaf:surname><foaf:givenName>Ben</foaf:givenName></foaf:Person></rdf:li>
+    </rdf:Seq></bib:authors>
+    <dc:identifier>DOI 10.1234/example.1</dc:identifier>
+    <dc:identifier><dcterms:URI><rdf:value>https://example.test/article</rdf:value></dcterms:URI></dc:identifier>
+    <dcterms:abstract>An abstract.</dcterms:abstract>
+    <dc:subject><z:Tag><rdf:value>learning</rdf:value></z:Tag></dc:subject>
+    <link:link rdf:resource="#article-pdf"/>
+  </bib:Article>
+  <bib:Journal rdf:about="urn:journal:test"><dc:title>Journal of Tests</dc:title></bib:Journal>
+  <z:Attachment rdf:about="#article-pdf"><z:path rdf:resource="files/article.pdf"/><link:type>application/pdf</link:type></z:Attachment>
+
+  <rdf:Description rdf:about="https://example.test/conference">
+    <z:itemType>conferencePaper</z:itemType><z:citationKey>LeeConference2023</z:citationKey>
+    <dc:title>Conference Paper</dc:title><dc:date>October 2023</dc:date>
+    <bib:presentedAt><bib:Conference><dc:title>Testing Conference</dc:title></bib:Conference></bib:presentedAt>
+    <link:link rdf:resource="#conference-pdf"/>
+  </rdf:Description>
+  <z:Attachment rdf:about="#conference-pdf"><z:path rdf:resource="files/conference.pdf"/><link:type>application/pdf</link:type></z:Attachment>
+
+  <rdf:Description rdf:about="https://example.test/preprint">
+    <z:itemType>preprint</z:itemType><z:citationKey>ChenPreprint2022</z:citationKey>
+    <dc:title>Preprint</dc:title><dc:publisher><foaf:Organization><foaf:name>arXiv</foaf:name></foaf:Organization></dc:publisher>
+    <link:link rdf:resource="#preprint-pdf"/>
+  </rdf:Description>
+  <z:Attachment rdf:about="#preprint-pdf"><z:path rdf:resource="files/preprint.pdf"/><link:type>application/pdf</link:type></z:Attachment>
+
+  <bib:Book rdf:about="urn:book:one">
+    <z:itemType>book</z:itemType><z:citationKey>DoeBook2020</z:citationKey><dc:title>A Book</dc:title>
+    <dc:publisher><foaf:Organization><foaf:name>Test Press</foaf:name></foaf:Organization></dc:publisher>
+    <link:link rdf:resource="#book-pdf"/>
+  </bib:Book>
+  <z:Attachment rdf:about="#book-pdf"><z:path rdf:resource="files/book.pdf"/><link:type>application/pdf</link:type></z:Attachment>
+
+  <bib:BookSection rdf:about="urn:chapter:one">
+    <z:itemType>bookSection</z:itemType><z:citationKey>DoeChapter2021</z:citationKey><dc:title>A Chapter</dc:title>
+    <dcterms:isPartOf rdf:resource="urn:book:container"/><link:link rdf:resource="#chapter-pdf"/>
+  </bib:BookSection>
+  <bib:Book rdf:about="urn:book:container"><dc:title>Collected Tests</dc:title></bib:Book>
+  <z:Attachment rdf:about="#chapter-pdf"><z:path rdf:resource="files/chapter.pdf"/><link:type>application/pdf</link:type></z:Attachment>
+</rdf:RDF>

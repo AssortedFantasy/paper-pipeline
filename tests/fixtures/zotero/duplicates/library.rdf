@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+ xmlns:z="http://www.zotero.org/namespaces/export#"
+ xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <rdf:Description rdf:about="urn:first"><z:itemType>preprint</z:itemType><z:citationKey>First2020</z:citationKey><dc:title>First</dc:title><dc:identifier>DOI 10.5555/shared</dc:identifier></rdf:Description>
+  <rdf:Description rdf:about="urn:second"><z:itemType>journalArticle</z:itemType><z:citationKey>Second2021</z:citationKey><dc:title>Second</dc:title><dc:identifier>https://doi.org/10.5555/shared</dc:identifier></rdf:Description>
+</rdf:RDF>
