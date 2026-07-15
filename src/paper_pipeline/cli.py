@@ -10,6 +10,7 @@ Subcommands are implemented alongside their services:
 """
 
 import argparse
+import asyncio
 import importlib.util
 import os
 import sys
@@ -17,6 +18,11 @@ from pathlib import Path
 
 from paper_pipeline import __version__
 from paper_pipeline.config import AppConfig, load_config
+from paper_pipeline.services.library_ops import (
+    open_library,
+    rebuild_indexes,
+    validate_library,
+)
 
 
 def _target_is_writable(target: Path) -> bool:
@@ -67,6 +73,37 @@ def _run_doctor(target: Path | None, config: AppConfig | None = None) -> int:
     return 0 if python_ok and target_ok else 1
 
 
+def _run_validate(path: Path) -> int:
+    """Validate one library and print actionable findings."""
+    try:
+        runtime = open_library(path)
+        report = asyncio.run(validate_library(runtime))
+    except (OSError, ValueError, RuntimeError) as error:
+        print(f"Could not validate library {path}: {error}", file=sys.stderr)
+        return 2
+
+    if not report.problems:
+        print(f"Library is valid: {runtime.root}")
+        return 0
+    for problem in report.problems:
+        citekey = f" [{problem.citekey}]" if problem.citekey else ""
+        print(f"{problem.severity.upper()}{citekey}: {problem.message}")
+        print(f"  Action: {problem.action}")
+    return 0 if report.ok else 1
+
+
+def _run_reindex(path: Path) -> int:
+    """Rebuild all derived navigation and guidance files."""
+    try:
+        runtime = open_library(path)
+        asyncio.run(rebuild_indexes(runtime))
+    except (OSError, ValueError, RuntimeError) as error:
+        print(f"Could not reindex library {path}: {error}", file=sys.stderr)
+        return 2
+    print(f"Rebuilt indexes, AGENTS.md, and .gitignore: {runtime.root}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="paper-pipeline",
@@ -81,8 +118,10 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="optional library parent directory to check for writability",
     )
-    subparsers.add_parser("validate", help="validate a library")
-    subparsers.add_parser("reindex", help="rebuild library indexes")
+    validate_parser = subparsers.add_parser("validate", help="validate a library")
+    validate_parser.add_argument("library", type=Path, help="library directory")
+    reindex_parser = subparsers.add_parser("reindex", help="rebuild library indexes")
+    reindex_parser.add_argument("library", type=Path, help="library directory")
 
     args = parser.parse_args(argv)
     if args.command is None:
@@ -90,6 +129,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "doctor":
         return _run_doctor(args.target)
+    if args.command == "validate":
+        return _run_validate(args.library)
+    if args.command == "reindex":
+        return _run_reindex(args.library)
     print(f"'{args.command}' is not implemented yet.", file=sys.stderr)
     return 2
 
