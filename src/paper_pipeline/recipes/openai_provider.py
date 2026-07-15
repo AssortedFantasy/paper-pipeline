@@ -87,11 +87,8 @@ class OpenAIProvider:
             return self._failure(model, "OpenAI provider unavailable; reinstall Paper Pipeline")
         except ValueError as error:
             return self._failure(model, str(error))
-        except Exception:
-            return self._failure(
-                model,
-                "OpenAI request failed; check credentials, model, endpoint, and network",
-            )
+        except Exception as error:
+            return self._failure(model, _safe_request_failure(error))
 
     def _get_client(self) -> Any:
         if self._client is not None:
@@ -211,3 +208,51 @@ def _cache_key(request: ProviderRequest) -> str:
 
 def _uses_explicit_cache_breakpoints(model: str) -> bool:
     return model.casefold().startswith("gpt-5.6")
+
+
+def _safe_request_failure(error: Exception) -> str:
+    """Describe an SDK failure without copying request or response content."""
+
+    status = getattr(error, "status_code", None)
+    error_name = type(error).__name__
+    if status == 400:
+        message = "OpenAI rejected the request (check model parameters and input limits)"
+    elif status == 401:
+        message = "OpenAI authentication failed"
+    elif status == 403:
+        message = "OpenAI denied access to the requested model or resource"
+    elif status == 404:
+        message = "OpenAI model or endpoint was not found"
+    elif status == 408 or error_name == "APITimeoutError":
+        message = "OpenAI request timed out"
+    elif status == 409:
+        message = "OpenAI request conflicted with current resource state"
+    elif status == 422:
+        message = "OpenAI could not process the request parameters"
+    elif status == 429:
+        message = "OpenAI rate limit or quota was exceeded after automatic retries"
+    elif isinstance(status, int) and status >= 500:
+        message = "OpenAI service failed after automatic retries"
+    elif error_name == "APIConnectionError":
+        message = "OpenAI connection failed after automatic retries"
+    else:
+        message = "OpenAI request failed; check credentials, model, endpoint, and network"
+
+    diagnostics: list[str] = []
+    if isinstance(status, int) and 100 <= status <= 599:
+        diagnostics.append(f"HTTP {status}")
+    request_id = _safe_diagnostic_value(getattr(error, "request_id", None))
+    if request_id:
+        diagnostics.append(f"request_id={request_id}")
+    if diagnostics:
+        return f"{message} ({', '.join(diagnostics)})"
+    return message
+
+
+def _safe_diagnostic_value(value: Any) -> str:
+    """Allow only the conservative character set used by request IDs."""
+
+    if not isinstance(value, str) or not 1 <= len(value) <= 128:
+        return ""
+    allowed = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.:")
+    return value if all(character in allowed for character in value) else ""

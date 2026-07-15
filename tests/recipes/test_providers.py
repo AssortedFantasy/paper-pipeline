@@ -8,6 +8,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from httpx import Request, Response
+from openai import APIConnectionError, APITimeoutError, BadRequestError, RateLimitError
 
 from paper_pipeline.config import AppConfig
 from paper_pipeline.recipes.openai_provider import OpenAIProvider
@@ -224,6 +226,55 @@ def test_openai_errors_are_safe() -> None:
     assert secret not in result.error
     assert request.prompt not in result.error
     assert (request.text_input or "") not in result.error
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (
+            RateLimitError(
+                "private response body",
+                response=Response(
+                    429,
+                    request=Request("POST", "https://api.openai.com/v1/responses"),
+                    headers={"x-request-id": "req_safe-123"},
+                ),
+                body={"private": "response"},
+            ),
+            "OpenAI rate limit or quota was exceeded after automatic retries "
+            "(HTTP 429, request_id=req_safe-123)",
+        ),
+        (
+            BadRequestError(
+                "private input excerpt",
+                response=Response(
+                    400,
+                    request=Request("POST", "https://api.openai.com/v1/responses"),
+                ),
+                body={"private": "response"},
+            ),
+            "OpenAI rejected the request (check model parameters and input limits) (HTTP 400)",
+        ),
+        (
+            APITimeoutError(Request("POST", "https://api.openai.com/v1/responses")),
+            "OpenAI request timed out",
+        ),
+        (
+            APIConnectionError(request=Request("POST", "https://api.openai.com/v1/responses")),
+            "OpenAI connection failed after automatic retries",
+        ),
+    ],
+)
+def test_openai_errors_include_safe_actionable_diagnostics(error: Exception, expected: str) -> None:
+    client = RecordingClient(error=error)
+
+    result = OpenAIProvider(config(), client=client).generate(
+        ProviderRequest(prompt="private prompt", text_input="private paper")
+    )
+
+    assert result.error == expected
+    assert result.error is not None
+    assert "private" not in result.error
 
 
 def test_openai_client_creation_is_lazy_and_respects_base_url(
