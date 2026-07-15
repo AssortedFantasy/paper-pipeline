@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "description": "Structural tolerances for explicit Marker golden runs. These intentionally avoid byte equality and exact Markdown formatting.",
+  "documents": [
+    {
+      "id": "native-text",
+      "environment_variable": "PAPER_PIPELINE_GOLDEN_NATIVE_TEXT_PDF",
+      "page_range": "all",
+      "minimum_characters": 5000,
+      "headings": {"minimum": 2, "maximum": 100},
+      "tables": {"minimum": 0, "maximum": 30},
+      "figure_references": {"minimum": 0, "maximum": 100},
+      "extracted_figures": {"minimum": 0, "maximum": 100}
+    },
+    {
+      "id": "tables",
+      "environment_variable": "PAPER_PIPELINE_GOLDEN_TABLES_PDF",
+      "page_range": "0-14",
+      "minimum_characters": 5000,
+      "headings": {"minimum": 2, "maximum": 150},
+      "tables": {"minimum": 1, "maximum": 100},
+      "figure_references": {"minimum": 0, "maximum": 150},
+      "extracted_figures": {"minimum": 0, "maximum": 150}
+    },
+    {
+      "id": "figures",
+      "environment_variable": "PAPER_PIPELINE_GOLDEN_FIGURES_PDF",
+      "page_range": "0-9",
+      "minimum_characters": 3000,
+      "headings": {"minimum": 1, "maximum": 100},
+      "tables": {"minimum": 0, "maximum": 50},
+      "figure_references": {"minimum": 1, "maximum": 150},
+      "extracted_figures": {"minimum": 1, "maximum": 150}
+    }
+  ]
+}

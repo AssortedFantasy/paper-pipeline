@@ -19,6 +19,13 @@ clear message when a file is missing, not fail.
 
 Populated by WP-2B.0.
 
+The explicit GPU golden test uses the `native-text`, `tables`, and `figures`
+entries. Set `PAPER_PIPELINE_GOLDEN_NATIVE_TEXT_PDF`,
+`PAPER_PIPELINE_GOLDEN_TABLES_PDF`, and
+`PAPER_PIPELINE_GOLDEN_FIGURES_PDF` to verified local copies, then run the
+documented GPU test command. Structural bounds live in
+`corpus/golden_expectations.json`; the PDFs remain local and uncommitted.
+
 ## Zotero exports (`zotero/`)
 
 Small, hand-trimmed Zotero RDF exports (RDF file + `files/` attachments using
