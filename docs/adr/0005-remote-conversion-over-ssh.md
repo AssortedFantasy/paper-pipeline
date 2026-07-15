@@ -16,8 +16,9 @@ artifact validation, and installation.
 1. `RemoteConverter` implements the existing converter contract. It copies one
    PDF to a fresh, random remote run directory, invokes the installed
    `paper_pipeline.convert.remote` worker there, downloads a manifest plus the
-   canonical `transcription.md` and optional `figures/`, and returns only local
-   staging paths. Library formats and converter result contracts do not change.
+   canonical `transcription.md`, optional `figures/`, and `pages/`, and returns
+   only local staging paths. The converter result's additive `page_paths` field is
+   validated through the same local contract as figures.
 2. Host alias, absolute POSIX remote root, and remote Python executable come
    only from user-level `AppConfig`. They are never serialized into a library,
    provenance, or stored diagnostics. SSH credentials remain SSH's concern.
@@ -53,3 +54,7 @@ artifact validation, and installation.
 - The full production path was verified against `noesis` (Ubuntu 24.04.4,
   RTX 3090) using Marker 1.10.2: fresh local child, SSH upload/execution,
   validated download, and cleanup completed successfully.
+- Successful conversion logs retain numeric stage timings. A measured 11-page
+  run spent 56.0 of 61.8 remote-worker seconds inside Marker conversion;
+  imports took 2.7 seconds, model construction 0.7 seconds, and 96-DPI page
+  rendering 1.4 seconds. SSH upload and download added about 1.7 seconds.

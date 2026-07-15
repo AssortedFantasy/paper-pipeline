@@ -23,6 +23,7 @@ per-paper processing status for interruption recovery.
             source/<file>.pdf   # source PDF                   [essential, git-ignored]
             transcription.md    # converter output             [essential output]
             figures/            # converter assets             [essential output]
+            pages/page1.png      # 96-DPI PDF page image         [essential output]
             summary.md          # declared LLM recipe output  [derived]
             contributions.md    # declared LLM recipe output  [derived]
             .pp/                # diagnostics, logs, raw output[disposable]
@@ -45,7 +46,7 @@ Key choices:
    authority that distinguishes regenerable LLM output from essential content
    and carries provenance (ADR-0003). Recipe output names cannot collide,
    case-insensitively, with `paper.json`, `transcription.md`, `source/`,
-   `figures/`, or `.pp/`.
+   `figures/`, `pages/`, or `.pp/`.
 4. **All disposable content lives in `.pp/` directories** (library-level and
    per-paper). Deleting every `.pp/` is always safe.
 5. **Citekeys must match** `^[A-Za-z0-9](?:[A-Za-z0-9_.+-]*[A-Za-z0-9_+-])?$`
@@ -67,6 +68,15 @@ Key choices:
 9. Format 2 adds flat recipe outputs and recipe usage/spend fields. Older
    experimental libraries are rejected and may be rebuilt from their Zotero
    export; no in-application migration surface is maintained.
+10. Conversion also installs deterministic 96-DPI PNGs at
+    `pages/page1.png`, `page2.png`, and so on. They are source-derived members
+    of the same validated atomic conversion bundle as the transcription and
+    figures.
+11. Format remains 2 for the page directory and the additive
+    `cache_write_tokens` recipe field. Existing format-2 libraries remain
+    valid: older recipe records default the new counter to zero, and a normal
+    explicit conversion rerun adds pages. No migration path or compatibility
+    shim is introduced.
 
 ## Consequences
 

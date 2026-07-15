@@ -57,7 +57,8 @@ Then restart `uv run paper-pipeline serve`. When the host is set, the existing
 Convert action automatically selects the SSH backend; there is no separate
 remote queue or dashboard to start. Each attempt uploads one PDF into a random,
 private directory below the configured remote root, downloads the validated
-transcription and figures, and removes the remote attempt directory.
+transcription, figures, and 96-DPI `pages/pageN.png` images, then removes the
+remote attempt directory.
 
 ## 4. Verify before converting a library
 
@@ -75,6 +76,12 @@ the remote Marker worker, download validation, and local staging. It does not
 install the result into a library. After it passes, start the local dashboard,
 select one imported paper, choose **Convert selected**, and watch its live row
 or the Jobs tab.
+
+Successful conversion logs under the paper's `.pp/` directory include import,
+model construction, Marker conversion, page rendering, and SSH transfer
+timings. These are operational diagnostics only. On the verified 11-page Ash
+paper, Marker conversion itself took about 56 seconds of a 62-second remote
+worker run; page rendering added about 1.4 seconds and transport was minor.
 
 ## Troubleshooting
 

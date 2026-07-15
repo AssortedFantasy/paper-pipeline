@@ -46,6 +46,7 @@ gate. The environment-gated real-SSH smoke passed on `noesis`.
 | Produce non-empty `transcription.md` | Delivered and validated from staged artifacts before success. |
 | Preserve headings, equations, tables, figures, captions, references where practical | Implemented through Marker Markdown normalization with versioned structural expectations; local real-corpus execution is owner-deferred. |
 | Preserve extracted figures | Delivered by safe figure installation and contract tests. |
+| Generate representative PDF page images | Delivered as validated 96-DPI `pages/pageN.png` files in the atomic conversion bundle. |
 | Support native text and attempt scanned PDFs | Delivered through the general Marker adapter; scanned quality is backend-dependent and not a byte-level promise. |
 | Process one, selected, or all pending papers | Delivered by processing selection services and API/dashboard actions. |
 | Fresh child process per conversion | Delivered with failure, crash, timeout, cancellation, cleanup, and orphan-process tests. |
@@ -104,7 +105,7 @@ gate. The environment-gated real-SSH smoke passed on `noesis`.
 | Show queue, live progress, failures, and logs | Delivered through Jobs, SSE, and safe log tails. |
 | Retry/cancel work | Delivered for individual work and selected failed/cancelled retry batches; interrupted attempts can be retried individually. |
 | Inspect metadata, transcription, recipes, and figures | Delivered by the stable paper detail view. |
-| Inspect source PDF or representative pages | Delivered as a safe source-PDF link; page rendering is deferred. |
+| Inspect source PDF or representative pages | The dashboard provides a safe source-PDF link; conversion also emits directly inspectable `pages/pageN.png` files. |
 | Rebuild and validate from the dashboard | Delivered through active-library maintenance controls with browser coverage. |
 | Single owner for library/job UI state | Delivered with server-rendered htmx fragments and process runtime. |
 | Avoid duplicated client truth and full/detail behavior | Delivered; client scripts handle connection presentation only. |
@@ -159,6 +160,8 @@ complete.
   path or paper content is retained in this repository.
 - [x] Real OpenAI provider connectivity: a tiny `gpt-5.6-luna` smoke passed on
   2026-07-15. Credentials and provider payloads were not recorded.
+- [x] Real GPT-5.6 prompt-cache verification: an explicit-prefix pair recorded
+  cache-write tokens on the first call and cached-read tokens on the second.
 - [ ] `uv run pytest -m gpu`: intentionally not run on the target laptop by
   owner safety direction. Optional on an approved stronger/remote machine;
   not an offline release blocker.

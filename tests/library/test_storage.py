@@ -52,6 +52,19 @@ def test_create_open_and_paper_round_trip(library_root: Path) -> None:
     assert (library_root / ".pp").is_dir()
 
 
+def test_format_two_recipe_record_without_cache_write_count_remains_valid() -> None:
+    record = RecipeRecord.model_validate(
+        {
+            "prompt_tokens": 100,
+            "cached_tokens": 80,
+            "completion_tokens": 10,
+            "cost_usd": 0.001,
+        }
+    )
+
+    assert record.cache_write_tokens == 0
+
+
 def test_create_refuses_non_empty_directory(library_root: Path) -> None:
     (library_root / "keep.txt").write_text("user data", encoding="utf-8")
 

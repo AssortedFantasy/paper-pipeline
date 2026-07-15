@@ -116,8 +116,8 @@ work package. Do not let parallel tracks independently drift the same contract.
 Three kinds of state — keep them distinct:
 
 1. **Library content** (essential): `library.json`, `papers/<citekey>/paper.json`,
-   `source/`, `transcription.md`, `figures/`. Never regenerated or replaced
-   silently. Explicit reruns/source replacement install atomically; import
+   `source/`, `transcription.md`, `figures/`, `pages/`. Never regenerated or
+   replaced silently. Explicit reruns/source replacement install atomically; import
    never deletes papers merely because they disappeared from a later export.
 2. **Derived content** (rebuildable): `indexes/`, library `AGENTS.md`, library
    `.gitignore`, and recipe outputs declared in `paper.json`. Must be
