@@ -14,7 +14,9 @@ Planned surface (signatures may gain parameters, not lose them):
 
 - ``create_library(root: Path, name: str = "") -> Library``
 - ``open_library(root: Path) -> Library``
-- ``Library.list_papers() -> list[PaperRecord]``
+- ``Library.list_papers() -> tuple[list[PaperRecord], list[str]]``
+  (valid papers, plus problem descriptions for invalid paper dirs —
+  reported, never raised)
 - ``Library.read_paper(citekey: str) -> PaperRecord``
 - ``Library.write_paper(record: PaperRecord) -> None``          (atomic)
 - ``Library.install_artifact(citekey, relative_dest, staged_src) -> None``  (atomic)

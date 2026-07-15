@@ -20,7 +20,9 @@ class ConversionRequest:
 
     pdf_path: Path
     staging_dir: Path
-    timeout_seconds: int = 1800
+    # No default here: the value comes from AppConfig.converter_timeout_seconds,
+    # which is the single source of the timeout default.
+    timeout_seconds: int
 
 
 @dataclass(frozen=True)

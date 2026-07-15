@@ -20,21 +20,27 @@ Job-state persistence representation was deferred.
    `interrupted` assigned only during startup reconciliation. Before a job
    reports `succeeded`, its completion validator must confirm expected
    artifacts on disk; terminal output is never proof.
-3. **Write ordering**: `paper.json` is marked "running" before work starts
-   and updated with the terminal state after artifact validation. Artifacts
-   are staged in `.pp/tmp` and installed atomically before the record says
-   `succeeded`.
+3. **Write ordering**: `paper.json` is marked `running` before work starts
+   and updated with the terminal state after artifact validation. The full
+   record lifecycle is `pending -> running -> succeeded | failed |
+   cancelled | interrupted` (`ArtifactState` in `library/model.py`).
+   Artifacts are staged in `.pp/tmp` and installed atomically before the
+   record says `succeeded`.
 4. **Startup reconciliation**: on opening a library, any `paper.json` record
    left in a running state with no live owner is rewritten to `interrupted`
-   and surfaced in the UI as retryable. In-memory state is never trusted
-   across restarts.
+   and surfaced in the UI as retryable. Interrupted rows in the jobs
+   dashboard are synthesized from `paper.json` records at render time —
+   they are not live queue jobs; retrying enqueues a fresh job. In-memory
+   state is never trusted across restarts.
 5. **Scheduling policies by category**:
    - `conversion`: global concurrency 1 (default); each conversion in a
      fresh child process; cancellation kills the process tree.
    - `recipe`: concurrency `llm_concurrency` across papers; strictly one job
      per paper at a time, FIFO per paper, so same-paper recipes run
      back-to-back and reuse the provider's input cache.
-   - `maintenance` (reindex, validate): exclusive with mutating jobs.
+   - `maintenance`: reindex mutates derived files and runs exclusively
+     with all other jobs; validate is read-only and requires no
+     exclusivity.
 6. **Events** are published on an in-process bus; the web layer forwards
    them over SSE. Browser disconnects never affect jobs.
 

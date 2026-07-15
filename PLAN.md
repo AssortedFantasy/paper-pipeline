@@ -88,8 +88,9 @@ plan, sanity tests.
 - **Goal:** finished `AppConfig` loading (env + `.env`) and a
   `paper-pipeline doctor` command that reports, with actionable messages:
   Python version, package version, whether the `marker` extra is importable,
-  whether LLM credentials are configured (present/absent only — never print
-  the key), and writability of a target directory if given.
+  whether LLM credentials and a model slug (`llm_model`) are configured
+  (presence only — never print the key), and writability of a target
+  directory if given.
 - **Requirements:** doctor never triggers heavy imports at module scope;
   probe the `marker` extra in a subprocess or via `importlib.util.find_spec`.
   Exit code 0 when core is healthy even if optional extras are absent.
@@ -204,7 +205,9 @@ plan, sanity tests.
   index on Windows).
 - **Outcome:** committed corpus manifest + committed extra pins. Only
   escalate (ADR-0001 amendment) if a whole document class fails badly —
-  full no-go is considered unlikely.
+  full no-go is considered unlikely. The measured per-paper runtimes also
+  give the owner the data to decide whether local conversion is fast
+  enough or WP-2B.4 (remote delegation) is warranted.
 
 #### WP-2B.1 Fake converter + contract tests
 
@@ -243,16 +246,22 @@ plan, sanity tests.
 
 #### WP-2B.4 Remote conversion over SSH (conditional)
 
-- **Status:** conditional — build only when the owner asks for it; requires
-  a small ADR first.
+- **Status:** conditional — the owner decides go/no-go using WP-2B.0's
+  runtime measurements; requires a small ADR (ADR-0005) before
+  implementation.
+- **Motivation:** the development machine is a laptop with a weak NVIDIA
+  GPU, and Marker may be too slow on it. The owner has an Ubuntu server
+  (reachable as `ssh noesis`, RTX 3090) and wants the option to delegate
+  conversion there. This is one remote *backend* behind the existing
+  converter contract — not distributed processing, which remains a
+  REFACTOR.md non-goal.
 - **Owns:** `convert/remote.py`, `tests/convert/test_remote.py`, ADR-0005.
-- **Goal:** run Marker on a remote GPU host (e.g. `ssh noesis`, Ubuntu +
-  3090) instead of a local child process. The converter contract already
-  supports this shape: a remote runner copies `request.pdf_path` to the
-  host, runs the same child-process entry point there, and syncs results
-  back into `request.staging_dir`; validation and atomic install are
-  unchanged. The job queue still sees one `CONVERSION` category at
-  concurrency 1 — this is a remote *backend*, not distributed processing.
+- **Goal:** run Marker on the remote host instead of a local child
+  process. The converter contract already supports this shape: a remote
+  runner copies `request.pdf_path` to the host, runs the same
+  child-process entry point there, and syncs results back into
+  `request.staging_dir`; validation and atomic install are unchanged. The
+  job queue still sees one `CONVERSION` category at concurrency 1.
 - **Requirements:** host/alias comes from `AppConfig` (never stored in the
   library); cancellation kills the SSH client *and* the remote process
   (`ssh -tt` or a remote pidfile + kill); a dead connection maps to
@@ -278,7 +287,8 @@ plan, sanity tests.
 #### WP-2C.2 LLM providers (fake + OpenAI)
 
 - **Owns:** `FakeLLMProvider` in `tests/fakes.py`, OpenAI adapter in
-  `recipes/provider.py` (or `recipes/openai_provider.py` if cleaner),
+  `recipes/openai_provider.py` (a separate module — `recipes/provider.py`
+  is a frozen contract file and must stay adapter-free),
   `tests/recipes/test_providers.py`.
 - **Goal:** fake provider (canned responses, call recording, failure/delay
   modes) and an OpenAI-compatible adapter supporting text input and PDF
@@ -318,13 +328,16 @@ plan, sanity tests.
 
 - **Owns:** scheduling in `jobs/queue.py`, `tests/jobs/test_scheduling.py`.
 - **Goal:** ADR-0004 policies: conversion concurrency 1; recipe concurrency
-  N across papers with strict per-paper FIFO of 1; maintenance exclusive.
-  Cancel queued (immediate) and running (cooperative token + process-tree
-  kill hook). Retry re-enqueues a terminal failed/cancelled/interrupted job.
+  N across papers with strict per-paper FIFO of 1; mutating maintenance
+  (reindex) exclusive with all other jobs, read-only maintenance (validate)
+  non-exclusive. Cancel queued (immediate) and running (cooperative token +
+  process-tree kill hook). Retry re-enqueues a terminal
+  failed/cancelled/interrupted job.
 - **Tests:** two conversions never overlap; recipes for the same paper are
   strictly sequential while different papers interleave (assert via
-  FakeLLMProvider call log); maintenance excludes others; cancel and retry
-  paths; queue drains cleanly on shutdown.
+  FakeLLMProvider call log); reindex excludes others while validate does
+  not block running jobs; cancel and retry paths; queue drains cleanly on
+  shutdown.
 
 #### WP-2D.3 Completion validation + startup reconciliation
 
@@ -344,8 +357,10 @@ plan, sanity tests.
 
 - **Owns:** `indexes/build.py`, `tests/indexes/test_build.py`.
 - **Goal:** `rebuild_indexes(library)` producing `indexes/titles.md`,
-  `authors.md`, `summaries.md` (from `generated/summary.md` bodies, first
-  line), `status.md` (papers with missing/failed outputs). Format: one line
+  `authors.md`, `summaries.md` (from `generated/summary.md`: front matter
+  stripped, then the first body line — which the summary recipe requires
+  to be a one-sentence TL;DR), `status.md` (papers with missing/failed
+  outputs). Format: one line
   per paper, `<citekey>: <value>`, sorted by citekey, LF endings.
 - **Requirements:** deterministic (byte-identical on unchanged input);
   written atomically; entries for missing paper dirs dropped; wholly derived
@@ -452,8 +467,8 @@ plan, sanity tests.
 
 - **Owns:** `web/templates/` (jobs), `tests/web/test_ui_jobs.py` (browser).
 - **Goal:** `/jobs`: queued/running/terminal lists updating via SSE,
-  per-job log tail view, cancel and retry buttons, interrupted jobs
-  labeled and retryable.
+  per-job log tail view, cancel and retry buttons; interrupted work rows
+  synthesized from `paper.json` records (ADR-0004), labeled and retryable.
 - **Tests (browser):** live update on state change, cancel and retry flows,
   disconnected state (SSE dropped) shows a designed indicator and recovers.
 

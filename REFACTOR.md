@@ -245,6 +245,10 @@ it is not currently a required public library interface.
 
 - Render every PDF page as an image for quick visual inspection.
 - Select a different converter for exceptional documents.
+- Delegate conversion to a single user-controlled remote host over SSH
+  (e.g. a home server with a stronger GPU) when the local GPU is too slow.
+  This is one remote backend behind the converter contract, not
+  distributed processing.
 - Compare converter outputs or configurations.
 - Expose advanced conversion settings in the UI.
 - Manual correction or approval workflows.
@@ -393,7 +397,8 @@ be stopped and later classified as interrupted.
 - Work estimates before large batches.
 - Formal cross-process library locks if real concurrent-writer use requires
   them.
-- Multi-machine execution.
+- Multi-machine execution beyond the conditional single-host SSH
+  conversion delegation noted under Document Conversion.
 
 ## Browser UI and UX
 
@@ -525,7 +530,8 @@ machine-specific settings.
 - Semantic search as a foundational feature.
 - Citation graphs, saved searches, or cross-paper research workflows.
 - A general workflow DAG system.
-- Multi-machine or distributed processing.
+- Distributed or multi-machine processing. (Delegating conversion to one
+  user-controlled SSH host is a conditional feature, not this.)
 
 # 3. Code Organization Plans
 

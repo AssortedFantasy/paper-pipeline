@@ -24,7 +24,9 @@ class AppConfig(BaseSettings):
     # LLM provider (used by recipes; optional for core operation)
     llm_api_key: str | None = None
     llm_base_url: str | None = None
-    llm_model: str = "gpt-5"
+    # Required to run recipes; there is no default model. `doctor` and the
+    # recipe services fail with an actionable message when unset.
+    llm_model: str | None = None
     # Max concurrent remote recipe jobs across papers (same-paper is always sequential).
     llm_concurrency: int = 4
 

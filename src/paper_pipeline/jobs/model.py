@@ -17,6 +17,9 @@ class JobState(StrEnum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    # Never assigned to a live queue job. Interrupted rows in the jobs
+    # dashboard are synthesized from paper.json records found by startup
+    # reconciliation (ADR-0004); retrying enqueues a fresh job.
     INTERRUPTED = "interrupted"
 
     @property

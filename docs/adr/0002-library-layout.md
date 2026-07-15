@@ -46,9 +46,11 @@ Key choices:
    (ADR-0003).
 4. **All disposable content lives in `.pp/` directories** (library-level and
    per-paper). Deleting every `.pp/` is always safe.
-5. **Citekeys must match** `^[A-Za-z0-9][A-Za-z0-9_.+-]*$` and must not be
-   Windows-reserved names. Imports with hostile citekeys are rejected in the
-   preview with a clear message — never silently renamed.
+5. **Citekeys must match** `^[A-Za-z0-9](?:[A-Za-z0-9_.+-]*[A-Za-z0-9_+-])?$`
+   (no trailing dot — Windows silently strips trailing dots from directory
+   names) and must not be Windows-reserved names. Imports with hostile
+   citekeys are rejected in the preview with a clear message — never
+   silently renamed.
 6. `library.json` and `paper.json` carry `format_version` (currently 1).
    Readers reject newer versions with an actionable message.
 

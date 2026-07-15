@@ -43,7 +43,8 @@ GENERATED_DIR = "generated"
 FORMAT_VERSION = 1
 
 # Citekeys become directory names. Keep this conservative and portable.
-CITEKEY_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.+-]*$"
+# No trailing dot: Windows silently strips trailing dots from directory names.
+CITEKEY_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9_.+-]*[A-Za-z0-9_+-])?$"
 
 
 def paper_dir(library_root: Path, citekey: str) -> Path:

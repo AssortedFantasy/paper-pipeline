@@ -41,11 +41,19 @@ class PaperMetadata(BaseModel):
 
 
 class ArtifactState(StrEnum):
-    """Durable state of one processing artifact for one paper."""
+    """Durable state of one processing artifact for one paper.
+
+    Lifecycle: pending -> running -> succeeded | failed | cancelled |
+    interrupted. ``running`` is written to ``paper.json`` before work starts
+    (ADR-0004 write ordering); startup reconciliation rewrites orphaned
+    ``running`` records to ``interrupted``.
+    """
 
     PENDING = "pending"
+    RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    CANCELLED = "cancelled"
     INTERRUPTED = "interrupted"
 
 
@@ -70,7 +78,7 @@ class RecipeRecord(BaseModel):
     recipe_version: int | None = None
     provider: str | None = None
     model: str | None = None
-    input_artifact: str | None = None  # e.g. "transcription.md" or "source pdf"
+    input_artifact: str | None = None  # e.g. "transcription.md" or "source/<file>.pdf"
     started_at: datetime | None = None
     finished_at: datetime | None = None
     error: str | None = None
