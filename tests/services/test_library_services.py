@@ -8,6 +8,8 @@ from paper_pipeline.library.model import PaperMetadata, PaperRecord
 from paper_pipeline.library.paths import FORMAT_VERSION
 from paper_pipeline.services.library_ops import (
     create_library,
+    get_paper,
+    list_papers,
     open_library,
     rebuild_indexes,
     validate_library,
@@ -78,6 +80,18 @@ async def test_reindex_builds_all_indexes_and_support_files(tmp_path: Path) -> N
     assert (runtime.root / ".gitignore").read_text(encoding="utf-8") == (
         "**/.pp/\npapers/*/source/\n"
     )
+
+
+async def test_list_and_get_papers_apply_service_owned_filters(tmp_path: Path) -> None:
+    runtime = create_library(tmp_path / "library", registry=RuntimeRegistry())
+    await seed(runtime)
+
+    page = await list_papers(runtime, query="useful", author="smith", limit=10)
+
+    assert page.total == 1
+    assert [record.metadata.citekey for record in page.papers] == ["Smith2024"]
+    assert (await get_paper(runtime, "Smith2024")).metadata.title == "A useful paper"
+    assert (await list_papers(runtime, query="absent")).total == 0
 
 
 async def test_reindex_waits_behind_active_paper_lane(tmp_path: Path) -> None:

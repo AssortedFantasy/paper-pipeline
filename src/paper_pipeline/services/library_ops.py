@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import BaseModel, Field
+
 from paper_pipeline.indexes.agents_md import write_library_support_files
 from paper_pipeline.indexes.build import rebuild_indexes as _rebuild_indexes
 from paper_pipeline.jobs.model import Job, JobKind, JobState
 from paper_pipeline.jobs.queue import CancellationToken
+from paper_pipeline.library.model import PaperRecord
 from paper_pipeline.library.validation import ValidationReport
 from paper_pipeline.library.validation import validate_library as _validate_library
 from paper_pipeline.services.runtime import (
@@ -17,6 +20,14 @@ from paper_pipeline.services.runtime import (
     create_runtime,
     open_runtime,
 )
+
+
+class PaperPage(BaseModel):
+    """Serializable filtered page of durable paper records."""
+
+    papers: list[PaperRecord]
+    problems: list[str] = Field(default_factory=list)
+    total: int
 
 
 class LibraryOperationError(RuntimeError):
@@ -82,6 +93,66 @@ async def rebuild_indexes(runtime: LibraryRuntime) -> Job:
     result = await runtime.queue.wait(job.id)
     _require_success(result)
     return result
+
+
+async def list_papers(
+    runtime: LibraryRuntime,
+    *,
+    query: str | None = None,
+    author: str | None = None,
+    year: int | None = None,
+    offset: int = 0,
+    limit: int = 100,
+) -> PaperPage:
+    """List and filter papers through a nonexclusive library read."""
+    if offset < 0 or limit < 1:
+        raise ValueError("paper page offset must be nonnegative and limit must be positive")
+    results: list[tuple[list[PaperRecord], list[str]]] = []
+
+    async def read(session: LibrarySession, job: Job, token: CancellationToken) -> None:
+        del job, token
+        results.append(session.list_papers())
+
+    job = await runtime.enqueue_library_read(JobKind.MAINTENANCE, "papers:list", read)
+    completed = await runtime.queue.wait(job.id)
+    _require_success(completed)
+    papers, problems = results[0]
+    query_text = query.casefold().strip() if query else None
+    author_text = author.casefold().strip() if author else None
+    filtered: list[PaperRecord] = []
+    for paper in papers:
+        metadata = paper.metadata
+        searchable = " ".join((metadata.citekey, metadata.title, *metadata.authors)).casefold()
+        if query_text and query_text not in searchable:
+            continue
+        if author_text and not any(author_text in name.casefold() for name in metadata.authors):
+            continue
+        if year is not None and metadata.year != year:
+            continue
+        filtered.append(paper)
+    return PaperPage(
+        papers=filtered[offset : offset + limit],
+        problems=problems,
+        total=len(filtered),
+    )
+
+
+async def get_paper(runtime: LibraryRuntime, citekey: str) -> PaperRecord:
+    """Read one paper through the shared runtime."""
+    results: list[PaperRecord] = []
+
+    async def read(session: LibrarySession, job: Job, token: CancellationToken) -> None:
+        del job, token
+        results.append(session.read_paper(citekey))
+
+    job = await runtime.enqueue_library_read(JobKind.MAINTENANCE, "paper:detail", read)
+    completed = await runtime.queue.wait(job.id)
+    if completed.state is not JobState.SUCCEEDED:
+        error = completed.error or f"could not read paper {citekey!r}"
+        if "FileNotFoundError" in error:
+            raise FileNotFoundError(error)
+        raise LibraryOperationError(error)
+    return results[0]
 
 
 def _require_success(job: Job) -> None:
