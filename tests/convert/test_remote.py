@@ -18,6 +18,7 @@ from paper_pipeline.convert.remote import (
     _remote_cleanup_script,
     _remote_execution_script,
 )
+from paper_pipeline.convert.runner import ConverterSpec, run_conversion
 
 
 class FakeTransport:
@@ -264,11 +265,17 @@ def test_real_remote_host_opt_in(tmp_path: Path) -> None:
     staging = tmp_path / "staging"
     staging.mkdir()
 
-    result = RemoteConverter(
-        config.remote_converter_host,
-        config.remote_converter_root,
-        config.remote_converter_python,
-    ).convert(ConversionRequest(pdf, staging, config.converter_timeout_seconds))
+    result = run_conversion(
+        ConverterSpec(
+            "paper_pipeline.convert.remote:RemoteConverter",
+            {
+                "host": config.remote_converter_host,
+                "remote_root": config.remote_converter_root,
+                "remote_python": config.remote_converter_python,
+            },
+        ),
+        ConversionRequest(pdf, staging, config.converter_timeout_seconds),
+    )
 
     assert result.ok, result.error
     assert result.transcription_path is not None

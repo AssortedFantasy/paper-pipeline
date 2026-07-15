@@ -66,6 +66,13 @@ def _run_doctor(target: Path | None, config: AppConfig | None = None) -> int:
         if config.llm_model
         else "LLM model: not configured (optional; set PAPER_PIPELINE_LLM_MODEL)"
     )
+    if config.remote_converter_host:
+        print(
+            "Conversion backend: remote "
+            f"({config.remote_converter_host}, {config.remote_converter_python})"
+        )
+    else:
+        print("Conversion backend: local Marker")
 
     target_ok = True
     if target is not None:

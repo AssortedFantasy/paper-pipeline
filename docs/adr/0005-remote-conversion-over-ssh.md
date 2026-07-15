@@ -1,6 +1,6 @@
 # ADR-0005: Remote conversion over SSH
 
-Status: Accepted (2026-07-15)
+Status: Accepted, verified (2026-07-15)
 
 ## Context
 
@@ -50,3 +50,6 @@ artifact validation, and installation.
   classified messages instead.
 - The remote host is a replaceable external edge. Scheduling, durable truth,
   and artifact installation remain local and unchanged.
+- The full production path was verified against `noesis` (Ubuntu 24.04.4,
+  RTX 3090) using Marker 1.10.2: fresh local child, SSH upload/execution,
+  validated download, and cleanup completed successfully.

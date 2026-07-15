@@ -18,7 +18,7 @@ Local Marker/OCR execution on the target laptop is explicitly deferred by
 owner safety direction. The three-document, SHA-verified structural golden
 suite remains available for an approved stronger or remote machine and emits
 `GOLDEN_RUNTIME` report lines, but its execution is not an offline release
-gate. The real-SSH smoke likewise remains an optional environment-gated check.
+gate. The environment-gated real-SSH smoke passed on `noesis`.
 
 ## Requirement audit
 
@@ -164,8 +164,8 @@ complete.
   not an offline release blocker.
 - [ ] Full `uv run pytest -m llm`: intentionally not run because it may spend
   money. The small real-provider connectivity smoke above passed.
-- [ ] Real remote-host smoke: optional and environment-gated; not run during
-  documentation polish.
+- [x] Real remote-host smoke: the production fresh-child path passed against
+  `noesis` (Ubuntu 24.04.4, RTX 3090, Marker 1.10.2) on 2026-07-15.
 - [x] Confirmed no real corpus PDFs, credentials, `.pp/`, or temporary output
   are in the release commits; only the established tiny RDF test-fixture PDFs
   are tracked.

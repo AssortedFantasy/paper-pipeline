@@ -26,7 +26,12 @@ def test_doctor_reports_missing_required_llm_sdk(monkeypatch, capsys) -> None:
 def test_doctor_reports_configured_extras_without_printing_secret(monkeypatch, capsys) -> None:
     monkeypatch.setattr("paper_pipeline.cli.importlib.util.find_spec", lambda _name: object())
     secret = "never-print-this-secret"
-    config = _config(llm_api_key=secret, llm_model="test-model")
+    config = _config(
+        llm_api_key=secret,
+        llm_model="test-model",
+        remote_converter_host="noesis",
+        remote_converter_python="/opt/paper-pipeline/bin/python",
+    )
 
     assert _run_doctor(None, config) == 0
     output = capsys.readouterr().out
@@ -34,6 +39,7 @@ def test_doctor_reports_configured_extras_without_printing_secret(monkeypatch, c
     assert "LLM SDK: available" in output
     assert "LLM credentials: configured" in output
     assert "LLM model: configured (test-model)" in output
+    assert "Conversion backend: remote (noesis, /opt/paper-pipeline/bin/python)" in output
     assert secret not in output
 
 

@@ -58,8 +58,9 @@ PAPER_PIPELINE_LLM_BASE_URL=...
 Conversion defaults to one local Marker child process at a time. Optional SSH
 conversion settings are `PAPER_PIPELINE_REMOTE_CONVERTER_HOST`,
 `PAPER_PIPELINE_REMOTE_CONVERTER_ROOT`, and
-`PAPER_PIPELINE_REMOTE_CONVERTER_PYTHON`; the remote adapter currently has no
-dashboard selection control.
+`PAPER_PIPELINE_REMOTE_CONVERTER_PYTHON`. When a host is configured, dashboard
+conversion automatically runs there while the dashboard and library stay
+local. See [Remote conversion on `noesis`](docs/remote-conversion.md).
 
 Check the local environment without making provider or GPU calls:
 
@@ -151,3 +152,4 @@ Browser, GPU, and real-provider tests are explicit workflows. See
 | [AGENTS.md](AGENTS.md) | Development commands, invariants, and required checks |
 | [docs/adr/](docs/adr/) | Durable architecture decisions |
 | [docs/release-checklist.md](docs/release-checklist.md) | Delivered requirements, deferrals, and release gates |
+| [docs/remote-conversion.md](docs/remote-conversion.md) | Set up and verify SSH Marker conversion on `noesis` |
