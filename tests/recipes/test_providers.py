@@ -8,10 +8,10 @@ from typing import Any
 
 import pytest
 
-from fakes import FakeLLMProvider
 from paper_pipeline.config import AppConfig
 from paper_pipeline.recipes.openai_provider import OpenAIProvider
 from paper_pipeline.recipes.provider import ProviderRequest
+from tests.fakes import FakeLLMProvider
 
 
 class RecordingFiles:

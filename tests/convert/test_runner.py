@@ -5,11 +5,11 @@ import threading
 import time
 from pathlib import Path
 
-from fakes import FakeConverter
 from paper_pipeline.convert.contract import ConversionRequest, ConversionResult
 from paper_pipeline.convert.runner import ConverterSpec, run_conversion
+from tests.fakes import FakeConverter
 
-FAKE_SPEC = "fakes:FakeConverter"
+FAKE_SPEC = "tests.fakes:FakeConverter"
 
 
 class PrintingConverter(FakeConverter):
@@ -145,7 +145,7 @@ def test_cancellation_kills_child_and_cleans_staging(tmp_path: Path) -> None:
 def test_stdout_and_stderr_are_captured(tmp_path: Path) -> None:
     request = make_request(tmp_path)
 
-    result = run_conversion(ConverterSpec("test_runner:PrintingConverter"), request)
+    result = run_conversion(ConverterSpec("tests.convert.test_runner:PrintingConverter"), request)
 
     assert result.ok is True
     assert result.diagnostics["stdout"] == "fake stdout\n"
@@ -171,7 +171,9 @@ def test_invalid_module_path_becomes_failed_result(tmp_path: Path) -> None:
 
 
 def test_nonzero_child_exit_becomes_failed_result(tmp_path: Path) -> None:
-    result = run_conversion(ConverterSpec("test_runner:HardExitConverter"), make_request(tmp_path))
+    result = run_conversion(
+        ConverterSpec("tests.convert.test_runner:HardExitConverter"), make_request(tmp_path)
+    )
 
     assert result.ok is False
     assert result.error == "converter process exited without a result (exit code 7)"
@@ -181,7 +183,9 @@ def test_nonzero_child_exit_becomes_failed_result(tmp_path: Path) -> None:
 def test_false_success_with_empty_artifact_is_rejected(tmp_path: Path) -> None:
     request = make_request(tmp_path)
 
-    result = run_conversion(ConverterSpec("test_runner:EmptySuccessConverter"), request)
+    result = run_conversion(
+        ConverterSpec("tests.convert.test_runner:EmptySuccessConverter"), request
+    )
 
     assert result.ok is False
     assert result.error == "converter reported success without a non-empty transcription"

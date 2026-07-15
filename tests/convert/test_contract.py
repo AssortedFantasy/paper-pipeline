@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from fakes import FakeConverter
 from paper_pipeline.convert.contract import ConversionRequest, Converter
+from tests.fakes import FakeConverter
 
 
 def request(tmp_path: Path) -> ConversionRequest:
@@ -91,7 +91,7 @@ def test_crash_raises(tmp_path: Path) -> None:
 
 def test_hang_sleeps_past_timeout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     sleeps: list[float] = []
-    monkeypatch.setattr("fakes.time.sleep", sleeps.append)
+    monkeypatch.setattr("tests.fakes.time.sleep", sleeps.append)
     conversion_request = request(tmp_path)
 
     result = FakeConverter(mode="hang").convert(conversion_request)
@@ -106,7 +106,7 @@ def test_explicit_hang_duration_is_supported(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     sleeps: list[float] = []
-    monkeypatch.setattr("fakes.time.sleep", sleeps.append)
+    monkeypatch.setattr("tests.fakes.time.sleep", sleeps.append)
 
     FakeConverter(mode="hang", hang_seconds=0.25).convert(request(tmp_path))
 
