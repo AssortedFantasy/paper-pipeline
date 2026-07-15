@@ -21,3 +21,4 @@ and would be expensive to relitigate.
 | [0002](0002-library-layout.md) | Generated library layout | Accepted |
 | [0003](0003-recipe-template-format.md) | Recipe template format | Accepted |
 | [0004](0004-job-execution-model.md) | Job execution and interruption recovery | Accepted |
+| [0005](0005-remote-conversion-over-ssh.md) | Remote conversion over SSH | Accepted |

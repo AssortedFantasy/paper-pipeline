@@ -42,6 +42,11 @@ class AppConfig(BaseSettings):
     # Conversion
     converter_timeout_seconds: int = 1800
     conversion_concurrency: int = 1  # keep 1 unless testing proves otherwise
+    # Optional SSH Marker backend. Host aliases and remote paths are user-level
+    # machine configuration and are never written into a generated library.
+    remote_converter_host: str | None = None
+    remote_converter_root: str = "/tmp/paper-pipeline"
+    remote_converter_python: str = "python3"
 
 
 def load_config() -> AppConfig:

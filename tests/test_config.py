@@ -15,6 +15,9 @@ def test_defaults_without_environment(monkeypatch, tmp_path: Path) -> None:
     assert settings.llm_model is None
     assert settings.llm_api_key is None
     assert settings.llm_concurrency == 4
+    assert settings.remote_converter_host is None
+    assert settings.remote_converter_root == "/tmp/paper-pipeline"
+    assert settings.remote_converter_python == "python3"
 
 
 def test_home_env_file_is_loaded(monkeypatch, tmp_path: Path) -> None:
