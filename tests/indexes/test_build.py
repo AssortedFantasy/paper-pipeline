@@ -3,6 +3,8 @@
 import shutil
 from pathlib import Path
 
+import pytest
+
 from paper_pipeline.indexes.build import INDEX_FILES, rebuild_indexes
 from paper_pipeline.library.model import (
     ConversionRecord,
@@ -50,10 +52,18 @@ def test_summary_uses_first_body_line_after_front_matter(library_root: Path) -> 
     library.write_paper(record)
     generated = library_root / "papers" / "Alpha2024" / "generated"
     generated.mkdir()
-    (generated / "summary.md").write_text(
+    summary = generated / "summary.md"
+    summary.write_text(
         "---\nrecipe: summary\n---\n\nOne sentence TLDR.\nMore detail.\n",
         encoding="utf-8",
     )
+    record.recipes["summary"] = RecipeRecord(
+        input_artifact="papers/Alpha2024/transcription.md",
+        input_sha256="input-hash",
+        output_artifact="papers/Alpha2024/generated/summary.md",
+        output_sha256=sha256_file(summary),
+    )
+    library.write_paper(record)
 
     rebuild_indexes(library)
 
@@ -88,6 +98,7 @@ def test_status_derives_missing_stale_and_ready_states(library_root: Path) -> No
     stale.recipes["summary"] = RecipeRecord(
         input_artifact="papers/Stale2024/transcription.md",
         input_sha256="old-transcription",
+        output_artifact="papers/Stale2024/generated/summary.md",
         output_sha256="summary-hash",
     )
     stale_root = library_root / "papers" / "Stale2024"
@@ -95,7 +106,9 @@ def test_status_derives_missing_stale_and_ready_states(library_root: Path) -> No
     (stale_root / "source" / "paper.pdf").write_bytes(b"source")
     (stale_root / "transcription.md").write_text("text", encoding="utf-8")
     (stale_root / "generated").mkdir()
-    (stale_root / "generated" / "summary.md").write_text("summary", encoding="utf-8")
+    stale_summary = stale_root / "generated" / "summary.md"
+    stale_summary.write_text("summary", encoding="utf-8")
+    stale.recipes["summary"].output_sha256 = sha256_file(stale_summary)
     library.write_paper(stale)
 
     ready = _record("Ready2024", "Ready")
@@ -117,6 +130,7 @@ def test_status_derives_missing_stale_and_ready_states(library_root: Path) -> No
     ready.recipes["summary"] = RecipeRecord(
         input_artifact="papers/Ready2024/transcription.md",
         input_sha256=ready.conversion.transcription_sha256,
+        output_artifact="papers/Ready2024/generated/summary.md",
         output_sha256=sha256_file(summary),
     )
     library.write_paper(ready)
@@ -127,6 +141,57 @@ def test_status_derives_missing_stale_and_ready_states(library_root: Path) -> No
     assert "Missing2024: source missing; transcription missing; summary missing\n" in status
     assert "Stale2024: transcription stale; summary stale\n" in status
     assert "Ready2024: ready\n" in status
+
+
+def test_unrecorded_or_hash_mismatched_summary_is_not_indexed(library_root: Path) -> None:
+    library = create_library(library_root)
+    record = _record("Alpha2024", "First")
+    library.write_paper(record)
+    generated = library_root / "papers" / "Alpha2024" / "generated"
+    generated.mkdir()
+    summary = generated / "summary.md"
+    summary.write_text("unrecorded summary", encoding="utf-8")
+
+    rebuild_indexes(library)
+    summaries = library_root / "indexes" / "summaries.md"
+    assert summaries.read_text(encoding="utf-8") == "Alpha2024: no summary yet\n"
+
+    record.recipes["summary"] = RecipeRecord(
+        input_artifact="papers/Alpha2024/transcription.md",
+        input_sha256="input",
+        output_artifact="papers/Alpha2024/generated/summary.md",
+        output_sha256="wrong-hash",
+    )
+    library.write_paper(record)
+    rebuild_indexes(library)
+    assert summaries.read_text(encoding="utf-8") == "Alpha2024: no summary yet\n"
+
+
+def test_symlinked_summary_is_not_indexed(library_root: Path, tmp_path: Path) -> None:
+    library = create_library(library_root)
+    record = _record("Alpha2024", "First")
+    generated = library_root / "papers" / "Alpha2024" / "generated"
+    generated.mkdir(parents=True)
+    outside = tmp_path / "outside-summary.md"
+    outside.write_text("outside summary", encoding="utf-8")
+    summary = generated / "summary.md"
+    try:
+        summary.symlink_to(outside)
+    except OSError as error:
+        pytest.skip(f"file symlinks unavailable: {error}")
+    record.recipes["summary"] = RecipeRecord(
+        input_artifact="papers/Alpha2024/transcription.md",
+        input_sha256="input",
+        output_artifact="papers/Alpha2024/generated/summary.md",
+        output_sha256=sha256_file(outside),
+    )
+    library.write_paper(record)
+
+    rebuild_indexes(library)
+
+    assert (library_root / "indexes" / "summaries.md").read_text(encoding="utf-8") == (
+        "Alpha2024: no summary yet\n"
+    )
 
 
 def test_rebuild_drops_entries_for_deleted_paper_directory(library_root: Path) -> None:

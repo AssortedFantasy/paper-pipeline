@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import shutil
+from pathlib import Path, PurePosixPath
 
 from paper_pipeline.library.model import AttemptState, PaperRecord
 from paper_pipeline.library.paths import INDEXES_DIR, PAPERS_DIR
-from paper_pipeline.library.storage import Library, conversion_is_fresh, recipe_is_fresh
+from paper_pipeline.library.storage import (
+    Library,
+    conversion_is_fresh,
+    recipe_is_fresh,
+    sha256_file,
+)
 
 INDEX_FILES = ("titles.md", "authors.md", "summaries.md", "status.md")
 
@@ -50,8 +56,11 @@ def _authors(record: PaperRecord) -> str:
 
 
 def _summary(library: Library, record: PaperRecord) -> str:
-    path = library.root / PAPERS_DIR / record.metadata.citekey / "generated" / "summary.md"
-    if not path.is_file():
+    summary = record.recipes.get("summary")
+    if summary is None or summary.output_artifact is None or summary.output_sha256 is None:
+        return "no summary yet"
+    path = library.root.joinpath(*PurePosixPath(summary.output_artifact).parts)
+    if not _is_safe_file(library.root, path) or sha256_file(path) != summary.output_sha256:
         return "no summary yet"
     try:
         text = path.read_text(encoding="utf-8")
@@ -78,11 +87,13 @@ def _status(library: Library, record: PaperRecord) -> str:
     issues: list[str] = []
 
     source = library.root / record.source_pdf if record.source_pdf else None
-    if source is None or not source.is_file():
+    if source is None or not _is_safe_file(library.root, source):
         issues.append("source missing")
 
     transcription = paper_root / "transcription.md"
-    if record.conversion.transcription_sha256 is None or not transcription.is_file():
+    if record.conversion.transcription_sha256 is None or not _is_safe_file(
+        library.root, transcription
+    ):
         issues.append("transcription missing")
     elif not conversion_is_fresh(record):
         issues.append("transcription stale")
@@ -93,8 +104,18 @@ def _status(library: Library, record: PaperRecord) -> str:
         issues.append("conversion last attempt failed")
 
     summary = record.recipes.get("summary")
-    summary_path = paper_root / "generated" / "summary.md"
-    if summary is None or summary.output_sha256 is None or not summary_path.is_file():
+    summary_path = (
+        library.root.joinpath(*PurePosixPath(summary.output_artifact).parts)
+        if summary is not None and summary.output_artifact is not None
+        else None
+    )
+    if (
+        summary is None
+        or summary.output_sha256 is None
+        or summary_path is None
+        or not _is_safe_file(library.root, summary_path)
+        or sha256_file(summary_path) != summary.output_sha256
+    ):
         issues.append("summary missing")
     elif not recipe_is_fresh(record, "summary"):
         issues.append("summary stale")
@@ -111,3 +132,16 @@ def _status(library: Library, record: PaperRecord) -> str:
         if recipe.last_attempt is not None and recipe.last_attempt.state == AttemptState.FAILED:
             issues.append(f"{name} last attempt failed")
     return "; ".join(issues) or "ready"
+
+
+def _is_safe_file(root: Path, path: Path) -> bool:
+    try:
+        relative = path.absolute().relative_to(root.resolve())
+    except ValueError:
+        return False
+    current = root.resolve()
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            return False
+    return path.is_file()

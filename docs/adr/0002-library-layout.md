@@ -59,7 +59,9 @@ Key choices:
    store the source hash they consumed; recipe records store the hash of the
    PDF or transcription they consumed. Freshness is derived by comparing
    hashes, so a replaced PDF cannot silently leave downstream work current.
-8. The schema is versioned, not frozen. Before the first stable release,
+8. Recipe provenance records both its library-relative input and installed
+   output artifact paths; output filenames are not inferred from recipe names.
+9. The schema is versioned, not frozen. Before the first stable release,
    implementation feedback may amend format version 1 while no user libraries
    exist. Once libraries have been produced for use, incompatible serialized
    changes bump `format_version` and add a compatibility or migration test.

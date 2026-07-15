@@ -245,23 +245,37 @@ def _validate_result(result: ConversionResult, staging_dir: Path) -> str | None:
         return None
     if result.transcription_path is None:
         return "converter reported success without a transcription path"
-    if not _is_inside(result.transcription_path, staging_dir):
-        return "converter returned a transcription path outside the staging directory"
+    expected_transcription = (staging_dir / "transcription.md").absolute()
+    if (
+        result.transcription_path.absolute() != expected_transcription
+        or result.transcription_path.is_symlink()
+    ):
+        return "converter must return the canonical staging transcription.md path"
     if not result.transcription_path.is_file() or result.transcription_path.stat().st_size == 0:
         return "converter reported success without a non-empty transcription"
+    figures_dir = staging_dir / "figures"
+    if figures_dir.is_symlink():
+        return "converter staging figures directory must not be a symlink"
     for figure_path in result.figure_paths:
-        if not _is_inside(figure_path, staging_dir):
-            return "converter returned a figure path outside the staging directory"
+        if not _is_inside_without_symlinks(figure_path, figures_dir):
+            return "converter must return figure paths inside the staging figures directory"
         if not figure_path.is_file():
             return f"converter reported a missing figure: {figure_path.name}"
     return None
 
 
-def _is_inside(path: Path, directory: Path) -> bool:
+def _is_inside_without_symlinks(path: Path, directory: Path) -> bool:
     try:
-        path.resolve().relative_to(directory.resolve())
+        relative = path.absolute().relative_to(directory.absolute())
     except ValueError:
         return False
+    current = directory
+    if current.is_symlink():
+        return False
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            return False
     return True
 
 

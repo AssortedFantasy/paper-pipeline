@@ -54,6 +54,11 @@ created: 2026-07-14T12:00:00Z
   paper-relative example was clarified before v2 library production. This does
   not change the serialized schema, so format version 1 remains appropriate;
   storage compatibility tests enforce the clarified invariant.
+- `paper.json` also records the library-relative installed `output_artifact`.
+  Recipe names and output filenames are intentionally independent contract
+  fields, so validators and indexers never infer one from the other. This adds
+  an optional field during pre-release format-1 implementation; format version
+  1 remains appropriate and compatibility tests cover non-matching names.
 
 ## Consequences
 

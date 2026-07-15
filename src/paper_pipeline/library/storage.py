@@ -120,6 +120,7 @@ class Library:
     def operational_dir(self) -> Path:
         """Return the disposable operational directory, creating it on demand."""
         directory = self.root / OPERATIONAL_DIR
+        _ensure_safe_managed_path(self.root, directory)
         directory.mkdir(parents=True, exist_ok=True)
         return directory
 
@@ -146,6 +147,7 @@ class Library:
         """Read and validate one paper record."""
         validate_citekey(citekey)
         record_path = paper_dir(self.root, citekey) / PAPER_FILE
+        _ensure_safe_managed_path(self.root, record_path)
         try:
             record = PaperRecord.model_validate_json(record_path.read_text(encoding="utf-8"))
         except FileNotFoundError as error:
@@ -159,12 +161,14 @@ class Library:
         validate_citekey(citekey)
         _validate_paper_record(record, expected_citekey=citekey)
         destination_dir = paper_dir(self.root, citekey)
+        _ensure_safe_managed_path(self.root, destination_dir)
         destination_dir.mkdir(parents=True, exist_ok=True)
         _atomic_write_json(self.root, destination_dir / PAPER_FILE, record)
 
     def stage_dir(self) -> Path:
         """Create a fresh staging directory on the library filesystem."""
         temp_root = self.operational_dir() / "tmp"
+        _ensure_safe_managed_path(self.root, temp_root)
         temp_root.mkdir(parents=True, exist_ok=True)
         return Path(tempfile.mkdtemp(prefix=f"{os.getpid()}-", dir=temp_root))
 
@@ -200,6 +204,7 @@ class Library:
         _require_staged_file(self.root, staged_path)
         relative_destination = _coerce_relative_destination(destination)
         destination_path = self.root.joinpath(*relative_destination.parts)
+        _ensure_safe_managed_path(self.root, destination_path)
         if validate is not None:
             validate(staged_path)
         artifact_hash = sha256_file(staged_path)
@@ -231,6 +236,7 @@ class Library:
         transcription = staging_dir / "transcription.md"
         figures = staging_dir / "figures"
         paper_root = paper_dir(self.root, citekey)
+        _ensure_safe_managed_path(self.root, paper_root)
         if not paper_root.is_dir():
             raise FileNotFoundError(f"Paper {citekey!r} does not exist")
 
@@ -251,6 +257,8 @@ class Library:
             (transcription, paper_root / "transcription.md", backup / "transcription.md"),
             (figures if figures.is_dir() else None, paper_root / "figures", backup / "figures"),
         ]
+        for _source, destination, _prior in targets:
+            _ensure_safe_managed_path(self.root, destination)
         try:
             for source, destination, prior in targets:
                 if destination.exists():
@@ -333,6 +341,7 @@ def _record_paths(record: PaperRecord) -> Iterator[tuple[str, str | None]]:
     )
     for recipe_name, recipe in record.recipes.items():
         yield f"recipes.{recipe_name}.input_artifact", recipe.input_artifact
+        yield f"recipes.{recipe_name}.output_artifact", recipe.output_artifact
         yield (
             f"recipes.{recipe_name}.last_attempt.log_path",
             (recipe.last_attempt.log_path if recipe.last_attempt else None),
@@ -355,17 +364,27 @@ def _validate_paper_record(record: PaperRecord, *, expected_citekey: str) -> Non
             _validate_relative_posix_path(value, field=field)
     expected_input_root = ("papers", expected_citekey)
     for recipe_name, recipe in record.recipes.items():
-        if recipe.input_artifact is None:
-            continue
-        parts = PurePosixPath(recipe.input_artifact).parts
-        if parts[:2] != expected_input_root or (
-            parts[2:] != ("transcription.md",)
-            and not (parts[2:3] == ("source",) and len(parts) > 3)
-        ):
-            raise ValueError(
-                f"recipes.{recipe_name}.input_artifact must reference this paper's "
-                "library-relative transcription or source path"
-            )
+        if recipe.input_artifact is not None:
+            parts = PurePosixPath(recipe.input_artifact).parts
+            if parts[:2] != expected_input_root or (
+                parts[2:] != ("transcription.md",)
+                and not (parts[2:3] == ("source",) and len(parts) > 3)
+            ):
+                raise ValueError(
+                    f"recipes.{recipe_name}.input_artifact must reference this paper's "
+                    "library-relative transcription or source path"
+                )
+        if recipe.output_artifact is not None:
+            output_parts = PurePosixPath(recipe.output_artifact).parts
+            if (
+                output_parts[:3] != ("papers", expected_citekey, "generated")
+                or len(output_parts) != 4
+                or not output_parts[-1].endswith(".md")
+            ):
+                raise ValueError(
+                    f"recipes.{recipe_name}.output_artifact must be a library-relative "
+                    "Markdown file in this paper's generated directory"
+                )
 
 
 def _validate_relative_posix_path(value: str, *, field: str) -> None:
@@ -390,13 +409,31 @@ def _coerce_relative_destination(value: str | PurePosixPath) -> PurePosixPath:
     return PurePosixPath(text)
 
 
+def _ensure_safe_managed_path(root: Path, path: Path) -> None:
+    """Reject managed paths redirected through symlinks or outside *root*."""
+    root = root.resolve()
+    try:
+        relative = path.absolute().relative_to(root)
+    except ValueError as error:
+        raise ValueError(f"managed path escapes the library root: {path}") from error
+    current = root
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            raise ValueError(f"managed library path must not contain symlinks: {current}")
+        if current.exists() and not current.resolve().is_relative_to(root):
+            raise ValueError(f"managed path escapes the library root: {current}")
+
+
 def _require_staging_dir(root: Path, path: Path) -> None:
+    _ensure_safe_managed_path(root, root / OPERATIONAL_DIR / "tmp")
     temp_root = (root / OPERATIONAL_DIR / "tmp").resolve()
     if not path.is_dir() or not path.is_relative_to(temp_root) or path == temp_root:
         raise ValueError("staging directory must be a child of the library .pp/tmp directory")
 
 
 def _require_staged_file(root: Path, path: Path) -> None:
+    _ensure_safe_managed_path(root, root / OPERATIONAL_DIR / "tmp")
     temp_root = (root / OPERATIONAL_DIR / "tmp").resolve()
     if not path.is_file() or not path.is_relative_to(temp_root):
         raise ValueError("artifact must be a staged file inside the library .pp/tmp directory")
@@ -408,11 +445,18 @@ def _validate_conversion_stage(staging_dir: Path) -> None:
     if unexpected:
         raise ValueError(f"conversion staging directory contains undeclared entries: {unexpected}")
     transcription = staging_dir / "transcription.md"
-    if not transcription.is_file() or transcription.stat().st_size == 0:
+    if (
+        transcription.is_symlink()
+        or not transcription.is_file()
+        or transcription.stat().st_size == 0
+    ):
         raise ValueError("conversion bundle requires a non-empty transcription.md")
     figures = staging_dir / "figures"
-    if figures.exists() and not figures.is_dir():
-        raise ValueError("conversion bundle figures entry must be a directory")
+    if figures.exists():
+        if figures.is_symlink() or not figures.is_dir():
+            raise ValueError("conversion bundle figures entry must be a real directory")
+        if any(path.is_symlink() for path in figures.rglob("*")):
+            raise ValueError("conversion bundle figures must not contain symlinks")
 
 
 def _remove_path(path: Path) -> None:
@@ -424,6 +468,8 @@ def _remove_path(path: Path) -> None:
 
 def _atomic_write_json(root: Path, destination: Path, model: LibraryInfo | PaperRecord) -> None:
     temp_dir = root / OPERATIONAL_DIR / "tmp"
+    _ensure_safe_managed_path(root, temp_dir)
+    _ensure_safe_managed_path(root, destination)
     temp_dir.mkdir(parents=True, exist_ok=True)
     temp_path = temp_dir / f"{uuid.uuid4().hex}.json"
     payload = model.model_dump_json(indent=2) + "\n"

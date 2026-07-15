@@ -93,6 +93,8 @@ class RecipeRecord(BaseModel):
     # Library-relative path to the consumed PDF or transcription.
     input_artifact: str | None = None
     input_sha256: str | None = None
+    # Library-relative path to the installed generated Markdown artifact.
+    output_artifact: str | None = None
     output_sha256: str | None = None
     completed_at: datetime | None = None
     last_attempt: AttemptRecord | None = None

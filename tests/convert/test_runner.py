@@ -5,6 +5,8 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
 from paper_pipeline.convert.contract import ConversionRequest, ConversionResult
 from paper_pipeline.convert.runner import ConverterSpec, run_conversion
 from tests.fakes import FakeConverter
@@ -39,6 +41,48 @@ class EmptySuccessConverter:
             backend_version="1",
             duration_seconds=0,
             transcription_path=transcription_path,
+        )
+
+
+class NonCanonicalSuccessConverter:
+    name = "noncanonical-success"
+
+    def convert(self, request: ConversionRequest) -> ConversionResult:
+        transcription_path = request.staging_dir / "nested" / "transcription.md"
+        transcription_path.parent.mkdir()
+        transcription_path.write_text("text", encoding="utf-8")
+        return ConversionResult(
+            ok=True,
+            backend=self.name,
+            backend_version="1",
+            duration_seconds=0,
+            transcription_path=transcription_path,
+        )
+
+
+class NonCanonicalFigureConverter(FakeConverter):
+    def convert(self, request: ConversionRequest) -> ConversionResult:
+        result = super().convert(request)
+        figure = request.staging_dir / "wrong-place.png"
+        figure.write_bytes(b"figure")
+        result.figure_paths.append(figure)
+        return result
+
+
+class SymlinkTranscriptionConverter:
+    name = "symlink-success"
+
+    def convert(self, request: ConversionRequest) -> ConversionResult:
+        outside = request.staging_dir.parent / "outside.md"
+        outside.write_text("outside", encoding="utf-8")
+        transcription = request.staging_dir / "transcription.md"
+        transcription.symlink_to(outside)
+        return ConversionResult(
+            ok=True,
+            backend=self.name,
+            backend_version="1",
+            duration_seconds=0,
+            transcription_path=transcription,
         )
 
 
@@ -189,4 +233,45 @@ def test_false_success_with_empty_artifact_is_rejected(tmp_path: Path) -> None:
 
     assert result.ok is False
     assert result.error == "converter reported success without a non-empty transcription"
+    assert list(request.staging_dir.iterdir()) == []
+
+
+def test_false_success_with_noncanonical_transcription_is_rejected(tmp_path: Path) -> None:
+    request = make_request(tmp_path)
+
+    result = run_conversion(
+        ConverterSpec("tests.convert.test_runner:NonCanonicalSuccessConverter"), request
+    )
+
+    assert not result.ok
+    assert result.error == "converter must return the canonical staging transcription.md path"
+    assert list(request.staging_dir.iterdir()) == []
+
+
+def test_false_success_with_figure_outside_figures_directory_is_rejected(
+    tmp_path: Path,
+) -> None:
+    request = make_request(tmp_path)
+
+    result = run_conversion(
+        ConverterSpec("tests.convert.test_runner:NonCanonicalFigureConverter"), request
+    )
+
+    assert not result.ok
+    assert result.error == (
+        "converter must return figure paths inside the staging figures directory"
+    )
+    assert list(request.staging_dir.iterdir()) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows symlink privileges are environment-specific")
+def test_false_success_with_symlinked_transcription_is_rejected(tmp_path: Path) -> None:
+    request = make_request(tmp_path)
+
+    result = run_conversion(
+        ConverterSpec("tests.convert.test_runner:SymlinkTranscriptionConverter"), request
+    )
+
+    assert not result.ok
+    assert result.error == "converter must return the canonical staging transcription.md path"
     assert list(request.staging_dir.iterdir()) == []

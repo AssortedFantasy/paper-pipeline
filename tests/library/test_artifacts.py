@@ -76,6 +76,25 @@ def test_single_artifact_rejects_paths_outside_staging_and_library(
         library.install_artifact(artifact, "../outside.md")
 
 
+def test_install_rejects_symlinked_destination_parent(library_root: Path, tmp_path: Path) -> None:
+    library = _paper_library(library_root)
+    outside = tmp_path / "outside-generated"
+    outside.mkdir()
+    generated = library_root / "papers" / "Smith2024" / "generated"
+    try:
+        generated.symlink_to(outside, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlinks unavailable: {error}")
+    stage = library.stage_dir()
+    artifact = stage / "summary.md"
+    artifact.write_text("must stay inside", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="must not contain symlinks"):
+        library.install_artifact(artifact, "papers/Smith2024/generated/summary.md")
+
+    assert list(outside.iterdir()) == []
+
+
 def test_install_conversion_bundle_with_figures_and_hashes(library_root: Path) -> None:
     library = _paper_library(library_root)
     stage = library.stage_dir()
@@ -119,6 +138,39 @@ def test_bundle_validation_happens_before_installed_content_changes(library_root
         library.install_conversion_bundle("Smith2024", stage)
 
     assert (paper / "transcription.md").read_text(encoding="utf-8") == "old"
+
+
+def test_bundle_rejects_symlinked_staged_content(library_root: Path, tmp_path: Path) -> None:
+    library = _paper_library(library_root)
+    stage = library.stage_dir()
+    outside = tmp_path / "outside-transcription.md"
+    outside.write_text("outside", encoding="utf-8")
+    try:
+        (stage / "transcription.md").symlink_to(outside)
+    except OSError as error:
+        pytest.skip(f"file symlinks unavailable: {error}")
+
+    with pytest.raises(ValueError, match="non-empty transcription"):
+        library.install_conversion_bundle("Smith2024", stage)
+
+    assert not (library_root / "papers" / "Smith2024" / "transcription.md").exists()
+
+
+def test_bundle_rejects_symlinked_figure(library_root: Path, tmp_path: Path) -> None:
+    library = _paper_library(library_root)
+    stage = library.stage_dir()
+    (stage / "transcription.md").write_text("text", encoding="utf-8")
+    figures = stage / "figures"
+    figures.mkdir()
+    outside = tmp_path / "outside-figure.png"
+    outside.write_bytes(b"outside")
+    try:
+        (figures / "linked.png").symlink_to(outside)
+    except OSError as error:
+        pytest.skip(f"file symlinks unavailable: {error}")
+
+    with pytest.raises(ValueError, match="figures must not contain symlinks"):
+        library.install_conversion_bundle("Smith2024", stage)
 
 
 def test_bundle_install_exception_rolls_back_previous_bundle(

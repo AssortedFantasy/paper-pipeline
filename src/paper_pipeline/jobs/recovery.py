@@ -97,7 +97,11 @@ class AttemptMarkerStore:
     def create(self, marker: AttemptMarker) -> None:
         """Atomically install one marker without overwriting an existing attempt."""
         _validate_marker(marker)
+        if self.attempts_dir.is_symlink():
+            raise ValueError("attempt marker directory must not be a symlink")
         self.attempts_dir.mkdir(parents=True, exist_ok=True)
+        if self.attempts_dir.is_symlink():
+            raise ValueError("attempt marker directory must not be a symlink")
         destination = self._path(marker.job_id)
         if destination.exists():
             raise FileExistsError(f"attempt marker already exists: {marker.job_id}")

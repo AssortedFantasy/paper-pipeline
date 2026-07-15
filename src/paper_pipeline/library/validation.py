@@ -18,7 +18,7 @@ Validation never deletes or rewrites paper content.
 """
 
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -125,7 +125,15 @@ def _validate_paper(library: Library, record, report: ValidationReport) -> None:
                 citekey,
             )
         source = library.root.joinpath(*Path(record.source_pdf).parts)
-        if not source.is_file():
+        if _has_symlink_component(library.root, source):
+            _add(
+                report,
+                "error",
+                "Declared source PDF path contains a symlink.",
+                "Replace the symlink with source content stored inside the paper directory.",
+                citekey,
+            )
+        elif not source.is_file():
             _add(
                 report,
                 "warning",
@@ -162,6 +170,7 @@ def _validate_paper(library: Library, record, report: ValidationReport) -> None:
     transcription = paper_root / TRANSCRIPTION_FILE
     if conversion.transcription_sha256 is not None:
         _check_recorded_artifact(
+            library.root,
             transcription,
             conversion.transcription_sha256,
             "transcription",
@@ -185,6 +194,7 @@ def _validate_paper(library: Library, record, report: ValidationReport) -> None:
             citekey,
         )
 
+    recorded_outputs: set[str] = set()
     for recipe_name, recipe in sorted(record.recipes.items()):
         if not _RECIPE_NAME.fullmatch(recipe_name):
             _add(
@@ -195,15 +205,28 @@ def _validate_paper(library: Library, record, report: ValidationReport) -> None:
                 citekey,
             )
             continue
-        output = paper_root / GENERATED_DIR / f"{recipe_name}.md"
+        output = None
+        if recipe.output_artifact is not None:
+            recorded_outputs.add(recipe.output_artifact)
+            output = library.root.joinpath(*PurePosixPath(recipe.output_artifact).parts)
         if recipe.output_sha256 is not None:
-            _check_recorded_artifact(
-                output,
-                recipe.output_sha256,
-                f"recipe output {recipe_name!r}",
-                citekey,
-                report,
-            )
+            if output is None:
+                _add(
+                    report,
+                    "error",
+                    f"Recipe output {recipe_name!r} has a hash but no artifact path.",
+                    f"Rerun recipe {recipe_name!r} to record complete provenance.",
+                    citekey,
+                )
+            else:
+                _check_recorded_artifact(
+                    library.root,
+                    output,
+                    recipe.output_sha256,
+                    f"recipe output {recipe_name!r}",
+                    citekey,
+                    report,
+                )
             if not recipe_is_fresh(record, recipe_name):
                 _add(
                     report,
@@ -212,7 +235,7 @@ def _validate_paper(library: Library, record, report: ValidationReport) -> None:
                     f"Rerun recipe {recipe_name!r}.",
                     citekey,
                 )
-        elif output.exists():
+        elif output is not None and output.exists():
             _add(
                 report,
                 "error",
@@ -221,15 +244,54 @@ def _validate_paper(library: Library, record, report: ValidationReport) -> None:
                 citekey,
             )
 
+    generated_root = paper_root / GENERATED_DIR
+    if generated_root.is_symlink():
+        _add(
+            report,
+            "error",
+            "The generated directory must not be a symlink.",
+            "Replace it with a real directory inside the paper directory.",
+            citekey,
+        )
+    elif generated_root.is_dir():
+        for generated in sorted(generated_root.iterdir()):
+            if generated.is_symlink() or generated.is_dir() or generated.suffix != ".md":
+                _add(
+                    report,
+                    "error",
+                    f"Unexpected entry in generated directory: {generated.name!r}.",
+                    "Keep only validated top-level Markdown recipe outputs in generated/.",
+                    citekey,
+                )
+                continue
+            relative = generated.relative_to(library.root).as_posix()
+            if relative not in recorded_outputs:
+                _add(
+                    report,
+                    "error",
+                    f"Generated artifact {generated.name!r} has no recipe provenance record.",
+                    "Remove the unvalidated file or rerun its recipe through Paper Pipeline.",
+                    citekey,
+                )
+
 
 def _check_recorded_artifact(
+    root: Path,
     path: Path,
     expected_hash: str,
     label: str,
     citekey: str,
     report: ValidationReport,
 ) -> None:
-    if not path.is_file():
+    if _has_symlink_component(root, path):
+        _add(
+            report,
+            "error",
+            f"Recorded {label} path contains a symlink.",
+            f"Replace the symlink and rerun the operation that produces the {label}.",
+            citekey,
+        )
+    elif not path.is_file():
         _add(
             report,
             "error",
@@ -245,6 +307,19 @@ def _check_recorded_artifact(
             f"Restore the artifact or rerun the operation that produces the {label}.",
             citekey,
         )
+
+
+def _has_symlink_component(root: Path, path: Path) -> bool:
+    try:
+        relative = path.absolute().relative_to(root.resolve())
+    except ValueError:
+        return True
+    current = root.resolve()
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False
 
 
 def _validate_indexes(

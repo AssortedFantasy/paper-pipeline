@@ -47,6 +47,22 @@ def test_marker_write_is_atomic_and_round_trips(tmp_path: Path) -> None:
     assert set(raw) == {"job_id", "target", "operation", "kind", "scope", "started_at"}
 
 
+def test_marker_store_rejects_symlinked_attempt_directory(tmp_path: Path) -> None:
+    outside = tmp_path / "outside-attempts"
+    outside.mkdir()
+    attempts = tmp_path / ".pp" / "attempts"
+    attempts.parent.mkdir()
+    try:
+        attempts.symlink_to(outside, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlinks unavailable: {error}")
+
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        AttemptMarkerStore(attempts).create(marker())
+
+    assert list(outside.iterdir()) == []
+
+
 async def test_success_validates_hashes_records_then_removes_marker(tmp_path: Path) -> None:
     store = marker_store(tmp_path)
     artifact = tmp_path / "transcription.md"

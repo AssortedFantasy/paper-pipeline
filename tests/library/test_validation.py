@@ -136,6 +136,7 @@ def test_recipe_output_hash_and_input_freshness_are_checked(library_root: Path) 
     record.recipes["summary"] = RecipeRecord(
         input_artifact="papers/Smith2024/source/paper.pdf",
         input_sha256="old-source",
+        output_artifact="papers/Smith2024/generated/summary.md",
         output_sha256=sha256_file(summary),
     )
     library.write_paper(record)
@@ -152,6 +153,53 @@ def test_recipe_output_hash_and_input_freshness_are_checked(library_root: Path) 
         problem.severity == "error" and "recipe output" in problem.message
         for problem in report.problems
     )
+
+
+def test_unrecorded_generated_markdown_is_an_error(library_root: Path) -> None:
+    library, _record = _library_with_source(library_root)
+    generated = library_root / "papers" / "Smith2024" / "generated"
+    generated.mkdir()
+    (generated / "orphan.md").write_text("unvalidated", encoding="utf-8")
+
+    report = validate_library(library)
+
+    assert any(
+        problem.severity == "error" and "no recipe provenance" in problem.message
+        for problem in report.problems
+    )
+
+
+def test_generated_directory_rejects_unexpected_entries(library_root: Path) -> None:
+    library, _record = _library_with_source(library_root)
+    generated = library_root / "papers" / "Smith2024" / "generated"
+    generated.mkdir()
+    (generated / "nested").mkdir()
+    (generated / "payload.json").write_text("{}", encoding="utf-8")
+
+    report = validate_library(library)
+
+    unexpected = [problem for problem in report.problems if "Unexpected entry" in problem.message]
+    assert {problem.message for problem in unexpected} == {
+        "Unexpected entry in generated directory: 'nested'.",
+        "Unexpected entry in generated directory: 'payload.json'.",
+    }
+
+
+def test_validator_rejects_symlinked_generated_directory(
+    library_root: Path, tmp_path: Path
+) -> None:
+    library, _record = _library_with_source(library_root)
+    outside = tmp_path / "outside-generated"
+    outside.mkdir()
+    generated = library_root / "papers" / "Smith2024" / "generated"
+    try:
+        generated.symlink_to(outside, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlinks unavailable: {error}")
+
+    report = validate_library(library)
+
+    assert any("generated directory must not be a symlink" in p.message for p in report.problems)
 
 
 def test_deleted_paper_is_reported_as_stale_index(library_root: Path) -> None:

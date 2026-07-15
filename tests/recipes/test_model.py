@@ -59,10 +59,28 @@ def test_invalid_name_is_rejected(name: str) -> None:
         parse_recipe(recipe_text(name=name))
 
 
-@pytest.mark.parametrize("version", ["zero", "0", "-1", "1.5", "+1", "01"])
+@pytest.mark.parametrize("version", ["zero", "0", "-1", "1.5", '"1"'])
 def test_invalid_version_is_rejected(version: str) -> None:
     with pytest.raises(ValueError, match="version"):
         parse_recipe(recipe_text(version=version))
+
+
+def test_yaml_quotes_and_inline_comments_are_supported() -> None:
+    recipe = parse_recipe(
+        """---
+name: "quoted" # ordinary YAML comment
+version: 1 # positive integer
+input: 'transcription'
+output: "different-file.md"
+---
+Keep this prompt.
+"""
+    )
+
+    assert recipe.name == "quoted"
+    assert recipe.version == 1
+    assert recipe.input == "transcription"
+    assert recipe.output == "different-file.md"
 
 
 def test_invalid_input_is_rejected() -> None:

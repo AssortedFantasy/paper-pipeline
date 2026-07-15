@@ -139,9 +139,45 @@ def test_recipe_input_must_be_library_relative_and_scoped_to_its_paper(
     with pytest.raises(ValueError, match="this paper's library-relative"):
         library.write_paper(record)
 
+    record.recipes["summary"] = RecipeRecord(
+        output_artifact="papers/Other2024/generated/summary.md"
+    )
+    with pytest.raises(ValueError, match="this paper's generated directory"):
+        library.write_paper(record)
+
     record.recipes["summary"] = RecipeRecord(input_artifact="papers/Other2024/transcription.md")
     with pytest.raises(ValueError, match="this paper's library-relative"):
         library.write_paper(record)
+
+
+def test_recipe_output_filename_is_not_inferred_from_recipe_name(
+    library_root: Path,
+) -> None:
+    library = create_library(library_root)
+    record = make_record()
+    record.recipes["custom"] = RecipeRecord(
+        input_artifact="papers/Smith2024/transcription.md",
+        output_artifact="papers/Smith2024/generated/different-name.md",
+        output_sha256="output-hash",
+    )
+
+    library.write_paper(record)
+
+    assert library.read_paper("Smith2024").recipes["custom"].output_artifact == (
+        "papers/Smith2024/generated/different-name.md"
+    )
+
+
+def test_format_one_recipe_record_without_output_artifact_still_loads() -> None:
+    legacy_json = (
+        '{"format_version":1,"metadata":{"citekey":"Smith2024","title":"Legacy"},'
+        '"recipes":{"summary":{"input_artifact":'
+        '"papers/Smith2024/transcription.md","output_sha256":"old-hash"}}}'
+    )
+
+    record = PaperRecord.model_validate_json(legacy_json)
+
+    assert record.recipes["summary"].output_artifact is None
 
 
 def test_atomic_write_failure_preserves_previous_record(
@@ -162,6 +198,22 @@ def test_atomic_write_failure_preserves_previous_record(
 
     assert library.read_paper("Smith2024") == original
     assert not list((library_root / ".pp" / "tmp").iterdir())
+
+
+def test_write_paper_rejects_symlinked_paper_directory(library_root: Path, tmp_path: Path) -> None:
+    library = create_library(library_root)
+    outside = tmp_path / "outside-paper"
+    outside.mkdir()
+    linked = library_root / "papers" / "Smith2024"
+    try:
+        linked.symlink_to(outside, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlinks unavailable: {error}")
+
+    with pytest.raises(ValueError, match="must not contain symlinks"):
+        library.write_paper(make_record())
+
+    assert list(outside.iterdir()) == []
 
 
 def test_process_killed_between_temp_write_and_rename_leaves_no_partial_record(

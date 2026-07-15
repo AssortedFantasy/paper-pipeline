@@ -20,16 +20,28 @@ import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
+from typing import Protocol
 
-from paper_pipeline.library.model import RecipeRecord
+from paper_pipeline.library.model import PaperRecord, RecipeRecord
 from paper_pipeline.library.paths import PAPERS_DIR, paper_dir
-from paper_pipeline.library.storage import Library, sha256_file
+from paper_pipeline.library.storage import sha256_file
 from paper_pipeline.recipes.model import RecipeDefinition
 from paper_pipeline.recipes.provider import LLMProvider, ProviderRequest
 
 
 class RecipeRunError(RuntimeError):
     """A recipe could not produce a valid staged artifact."""
+
+
+class RecipeStorage(Protocol):
+    """Minimal citekey-scoped storage needed by the recipe runner."""
+
+    @property
+    def root(self) -> Path: ...
+
+    def read_paper(self, citekey: str) -> PaperRecord: ...
+
+    def stage_dir(self) -> Path: ...
 
 
 @dataclass(frozen=True)
@@ -42,7 +54,7 @@ class RecipeRunResult:
 
 
 def run_recipe(
-    library: Library,
+    library: RecipeStorage,
     citekey: str,
     recipe: RecipeDefinition,
     provider: LLMProvider,
@@ -124,6 +136,7 @@ def run_recipe(
             model=provider_model,
             input_artifact=input_artifact,
             input_sha256=input_sha256,
+            output_artifact=f"{PAPERS_DIR}/{citekey}/generated/{recipe.output}",
             output_sha256=output_sha256,
             completed_at=completed_at,
         ),
@@ -131,7 +144,7 @@ def run_recipe(
 
 
 def _resolve_input(
-    library: Library,
+    library: RecipeStorage,
     citekey: str,
     recipe: RecipeDefinition,
     source_pdf: str | None,

@@ -73,6 +73,7 @@ def test_success_stages_exact_front_matter_and_provenance(library: Library) -> N
     assert result.record.model == "test-model"
     assert result.record.input_artifact == "papers/Smith2024/transcription.md"
     assert result.record.input_sha256 == input_hash
+    assert result.record.output_artifact == "papers/Smith2024/generated/summary.md"
     assert result.record.output_sha256 == hashlib.sha256(expected.encode()).hexdigest()
     assert provider.calls[0].text_input == transcription.read_text(encoding="utf-8")
     assert provider.calls[0].input_sha256 == input_hash
@@ -100,6 +101,21 @@ def test_pdf_input_uses_source_path_and_hash(library: Library) -> None:
     assert "input: papers/Smith2024/source/paper.pdf\n" in result.staged_path.read_text(
         encoding="utf-8"
     )
+
+
+def test_output_filename_is_recorded_independently_from_recipe_name(library: Library) -> None:
+    recipe = RecipeDefinition(
+        name="custom",
+        version=1,
+        input="transcription",
+        output="different-name.md",
+        prompt="Respond.",
+    )
+
+    result = run_recipe(library, "Smith2024", recipe, FakeLLMProvider(), model="test-model")
+
+    assert result.destination == "papers/Smith2024/generated/different-name.md"
+    assert result.record.output_artifact == result.destination
 
 
 def test_missing_transcription_fails_before_provider_call(library: Library) -> None:

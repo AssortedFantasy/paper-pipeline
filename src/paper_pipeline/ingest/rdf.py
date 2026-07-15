@@ -13,6 +13,7 @@ links) stay inside this module.
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,10 +51,15 @@ def parse_rdf(path: Path) -> list[ImportRecord]:
     """Parse a Zotero RDF file (or directory containing one) into import records."""
     rdf_path = _find_rdf_file(path)
     graph = Graph()
+    logger = logging.getLogger("rdflib.term")
+    uri_filter = _ZoteroFileUriWarningFilter()
+    logger.addFilter(uri_filter)
     try:
         graph.parse(rdf_path, format="xml")
     except Exception as error:
         raise ValueError(f"Could not parse Zotero RDF export {rdf_path}: {error}") from error
+    finally:
+        logger.removeFilter(uri_filter)
 
     records: list[ImportRecord] = []
     items = {
@@ -64,6 +70,18 @@ def parse_rdf(path: Path) -> list[ImportRecord]:
     for subject in sorted(items, key=str):
         records.append(_parse_item(graph, subject, rdf_path.parent))
     return records
+
+
+class _ZoteroFileUriWarningFilter(logging.Filter):
+    """Hide rdflib noise for Zotero's usable but unescaped local file URIs."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        return not (
+            record.name == "rdflib.term"
+            and message.startswith("file:")
+            and "does not look like a valid URI" in message
+        )
 
 
 def _find_rdf_file(path: Path) -> Path:

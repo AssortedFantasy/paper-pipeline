@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from pathlib import Path
 
 import pytest
@@ -132,3 +133,33 @@ def test_attachment_cannot_escape_export_directory(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="escapes the Zotero export directory"):
         parse_rdf(rdf_path)
+
+
+def test_zotero_file_uri_spaces_do_not_emit_rdflib_noise(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    pdf = tmp_path / "paper with spaces.pdf"
+    pdf.write_bytes(b"pdf")
+    file_uri = pdf.as_uri().replace("%20", " ")
+    rdf_path = tmp_path / "library.rdf"
+    rdf_path.write_text(
+        f"""<?xml version="1.0"?>
+        <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:z="http://www.zotero.org/namespaces/export#"
+         xmlns:dc="http://purl.org/dc/elements/1.1/"
+         xmlns:link="http://purl.org/rss/1.0/modules/link/">
+          <rdf:Description rdf:about="urn:item"><z:itemType>journalArticle</z:itemType>
+           <z:citationKey>Spaces2024</z:citationKey><dc:title>Spaces</dc:title>
+           <link:link rdf:resource="#pdf"/></rdf:Description>
+          <z:Attachment rdf:about="#pdf"><z:path rdf:resource="{file_uri}"/>
+           <link:type>application/pdf</link:type></z:Attachment>
+        </rdf:RDF>""",
+        encoding="utf-8",
+    )
+
+    with caplog.at_level(logging.WARNING, logger="rdflib.term"):
+        records = parse_rdf(rdf_path)
+
+    assert len(records) == 1
+    assert records[0].attachment_path == pdf.resolve()
+    assert not any("does not look like a valid URI" in message for message in caplog.messages)

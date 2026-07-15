@@ -22,6 +22,9 @@ from dataclasses import dataclass
 from importlib import resources
 from typing import Literal
 
+import yaml
+from yaml.nodes import MappingNode, ScalarNode
+
 RecipeInput = Literal["transcription", "pdf"]
 
 
@@ -57,25 +60,26 @@ def parse_recipe(text: str) -> RecipeDefinition:
         raise ValueError(f"recipe field {field!r} is required")
 
     name = values["name"]
-    if not _NAME_PATTERN.fullmatch(name):
+    if not isinstance(name, str) or not _NAME_PATTERN.fullmatch(name):
         raise ValueError(
             "recipe field 'name' must be a lowercase identifier containing only "
             "letters, digits, underscores, or hyphens"
         )
 
     raw_version = values["version"]
-    try:
-        version = int(raw_version)
-    except ValueError as exc:
-        raise ValueError("recipe field 'version' must be a positive integer") from exc
-    if version < 1 or str(version) != raw_version:
+    if isinstance(raw_version, bool) or not isinstance(raw_version, int) or raw_version < 1:
         raise ValueError("recipe field 'version' must be a positive integer")
+    version = raw_version
 
     recipe_input = values["input"]
+    if not isinstance(recipe_input, str):
+        raise ValueError("recipe field 'input' must be 'transcription' or 'pdf'")
     if recipe_input not in ("transcription", "pdf"):
         raise ValueError("recipe field 'input' must be 'transcription' or 'pdf'")
 
     output = values["output"]
+    if not isinstance(output, str):
+        raise ValueError("recipe field 'output' must be a bare .md filename")
     if (
         not output.endswith(".md")
         or output == ".md"
@@ -126,20 +130,31 @@ def _split_template(text: str) -> tuple[str, str]:
     raise ValueError("recipe front matter must end with '---'")
 
 
-def _parse_front_matter(front_matter: str) -> dict[str, str]:
-    values: dict[str, str] = {}
-    for line_number, line in enumerate(front_matter.splitlines(), start=2):
-        if not line.strip():
-            continue
-        if ":" not in line:
-            raise ValueError(f"invalid recipe front matter on line {line_number}")
-        field, value = (part.strip() for part in line.split(":", maxsplit=1))
+def _parse_front_matter(front_matter: str) -> dict[str, object]:
+    try:
+        node = yaml.compose(front_matter, Loader=yaml.SafeLoader)
+        loaded = yaml.safe_load(front_matter)
+    except yaml.YAMLError as error:
+        raise ValueError(f"invalid recipe front matter: {error}") from error
+    if not isinstance(node, MappingNode) or not isinstance(loaded, dict):
+        raise ValueError("recipe front matter must be a YAML mapping")
+
+    fields: list[str] = []
+    for key_node, value_node in node.value:
+        if not isinstance(key_node, ScalarNode) or not isinstance(value_node, ScalarNode):
+            raise ValueError("recipe front matter fields must have scalar values")
+        field = key_node.value
         if field not in _FIELDS:
             label = field or "<empty>"
             raise ValueError(f"unknown recipe field {label!r}")
-        if field in values:
+        if field in fields:
             raise ValueError(f"duplicate recipe field {field!r}")
-        if not value:
+        fields.append(field)
+
+    values: dict[str, object] = {}
+    for field in fields:
+        value = loaded.get(field)
+        if value is None or value == "":
             raise ValueError(f"recipe field {field!r} must be non-empty")
         values[field] = value
     return values
