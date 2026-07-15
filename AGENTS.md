@@ -50,7 +50,6 @@ All commands run from the repository root. Use `uv`, never bare `pip`.
 | --- | --- |
 | Setup (core + dev tools) | `uv sync` |
 | Setup with Marker/GPU | `uv sync --extra marker` |
-| Setup with LLM SDK | `uv sync --extra llm` |
 | Install browser runtime | `uv run playwright install chromium` |
 | Format | `uv run ruff format .` |
 | Lint (fix) | `uv run ruff check --fix .` |
@@ -72,7 +71,7 @@ the PDFs to the repository. Real-provider tests read
 `PAPER_PIPELINE_LLM_API_KEY` and `PAPER_PIPELINE_LLM_MODEL` and may spend money.
 
 The default `uv run pytest` must always pass with **no GPU, no network, no
-credentials, and no extras installed**. Never move a test that needs those
+credentials, and no optional extras installed**. Never move a test that needs those
 into the default set; mark it `gpu`, `llm`, or `browser`.
 
 ## Architecture rules

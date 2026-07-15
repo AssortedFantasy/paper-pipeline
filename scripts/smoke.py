@@ -17,6 +17,9 @@ def main() -> int:
         checkout.mkdir()
         _copy_git_visible_files(ROOT, checkout)
         _run(["uv", "sync"], checkout)
+        # The core install must contain the required LLM SDK even though this
+        # smoke uses a fake provider and makes no network calls.
+        _run(["uv", "run", "paper-pipeline", "doctor"], checkout)
         _run(
             ["uv", "run", "pytest", "-m", "slow", "tests/test_smoke.py"],
             checkout,

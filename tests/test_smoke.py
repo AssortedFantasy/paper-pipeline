@@ -7,6 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import openai
 import pytest
 
 from paper_pipeline.convert.runner import ConverterSpec
@@ -27,6 +28,7 @@ FAKE_CONVERTER = "tests.fakes:FakeConverter"
 @pytest.mark.slow
 async def test_core_smoke_builds_and_validates_durable_library(tmp_path: Path) -> None:
     """Exercise real orchestration with deterministic fake external edges."""
+    assert openai.__version__
     provider = FakeLLMProvider(response="A durable smoke-test summary.")
     registry = RuntimeRegistry(provider_factories={"fake": lambda: provider})
     runtime = create_library(

@@ -17,6 +17,7 @@ dependencies = [
     "pydantic-settings>=2.4",
     "pyyaml>=6.0",
     "rdflib>=7.0",
+    "openai>=1.66",
 ]
 
 [project.optional-dependencies]
@@ -26,11 +27,6 @@ marker = [
     "torch==2.10.0+cu128 ; sys_platform == 'win32'",
     "torch==2.10.0 ; sys_platform != 'win32'",
 ]
-# Remote LLM provider SDKs. Never required by the default dev loop.
-llm = [
-    "openai>=1.66",
-]
-
 [dependency-groups]
 dev = [
     "pytest>=8",

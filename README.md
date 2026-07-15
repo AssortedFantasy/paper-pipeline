@@ -29,18 +29,17 @@ release blocker.
 - [`uv`](https://docs.astral.sh/uv/)
 - Chromium installed through Playwright only when running browser tests
 - An NVIDIA GPU and the optional Marker extra only for local PDF conversion
-- The optional LLM extra and provider credentials only for real recipes
+- Provider credentials only for real recipes
 
 ```sh
 uv sync
 ```
 
-The default environment includes the application and development tools, but
-not Marker, PyTorch, or the OpenAI SDK. Install optional edges deliberately:
+The default environment includes the application, development tools, and the
+OpenAI SDK. Marker and PyTorch remain an optional heavy GPU edge:
 
 ```sh
 uv sync --extra marker
-uv sync --extra llm
 ```
 
 ## Configuration

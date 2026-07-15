@@ -49,6 +49,13 @@ def _run_doctor(target: Path | None, config: AppConfig | None = None) -> int:
     else:
         print("Marker extra: not installed (optional; run 'uv sync --extra marker' for conversion)")
 
+    llm_sdk_available = importlib.util.find_spec("openai") is not None
+    print(
+        "LLM SDK: available"
+        if llm_sdk_available
+        else "LLM SDK: missing from this installation (reinstall Paper Pipeline)"
+    )
+
     print(
         "LLM credentials: configured"
         if config.llm_api_key
@@ -70,7 +77,7 @@ def _run_doctor(target: Path | None, config: AppConfig | None = None) -> int:
                 f"Target directory: not writable ({target.expanduser()}); "
                 "choose an existing writable directory or adjust permissions"
             )
-    return 0 if python_ok and target_ok else 1
+    return 0 if python_ok and target_ok and llm_sdk_available else 1
 
 
 def _run_validate(path: Path) -> int:
