@@ -261,6 +261,14 @@ def _validate_result(result: ConversionResult, staging_dir: Path) -> str | None:
             return "converter must return figure paths inside the staging figures directory"
         if not figure_path.is_file():
             return f"converter reported a missing figure: {figure_path.name}"
+    pages_dir = staging_dir / "pages"
+    if pages_dir.is_symlink():
+        return "converter staging pages directory must not be a symlink"
+    for page_path in result.page_paths:
+        if not _is_inside_without_symlinks(page_path, pages_dir):
+            return "converter must return page images inside the staging pages directory"
+        if not page_path.is_file():
+            return f"converter reported a missing page image: {page_path.name}"
     return None
 
 

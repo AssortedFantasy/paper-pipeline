@@ -31,6 +31,7 @@ class ProviderResult:
     model: str = ""
     prompt_tokens: int = 0
     cached_tokens: int = 0
+    cache_write_tokens: int = 0
     completion_tokens: int = 0
     cost_usd: float = 0.0
     error: str | None = None

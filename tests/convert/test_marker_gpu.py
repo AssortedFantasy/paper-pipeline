@@ -88,6 +88,15 @@ def _install_fake_marker(monkeypatch: pytest.MonkeyPatch, *, unsafe_image: bool 
     }.items():
         monkeypatch.setitem(sys.modules, name, module)
 
+    def render_pages(_pdf_path: Path, staging_dir: Path) -> list[Path]:
+        pages = staging_dir / "pages"
+        pages.mkdir()
+        page = pages / "page1.png"
+        page.write_bytes(b"page bytes")
+        return [page]
+
+    monkeypatch.setattr(marker_adapter, "_render_pages", render_pages)
+
 
 def test_adapter_normalizes_mocked_marker_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -114,8 +123,11 @@ def test_adapter_normalizes_mocked_marker_output(
     )
     assert result.figure_paths == [staging / "figures" / "page" / "figure.png"]
     assert result.figure_paths[0].read_bytes() == b"figure bytes"
+    assert result.page_paths == [staging / "pages" / "page1.png"]
+    assert result.page_paths[0].read_bytes() == b"page bytes"
     assert json.loads(result.diagnostics["marker_metadata"])["page_stats"][0]["page_id"] == 0
     assert result.diagnostics["page_count"] == "1"
+    assert float(result.diagnostics["timing_model_load_seconds"]) >= 0
 
 
 def test_adapter_returns_ordinary_failures_without_importing_marker(tmp_path: Path) -> None:
@@ -185,6 +197,7 @@ def test_marker_gpu_smoke_is_manifest_bounded(tmp_path: Path) -> None:
     assert result.transcription_path.read_text(encoding="utf-8").strip()
     assert result.figure_paths, "the manifest's figure page should extract at least one image"
     assert all(path.is_relative_to(staging / "figures") for path in result.figure_paths)
+    assert result.page_paths == [staging / "pages" / "page1.png"]
 
 
 def _sha256(path: Path) -> str:

@@ -19,6 +19,7 @@ Layout (ADR-0002):
                 source/             # source PDF (essential; git-ignored)
                 transcription.md    # source-derived converted text (essential output)
                 figures/            # source-derived converter assets (essential output)
+                pages/              # low-resolution PDF page images (essential output)
                 <recipe>.md         # LLM recipe outputs (derived; provenance in paper.json)
                 .pp/                # per-paper diagnostics and logs (disposable)
 """
@@ -39,11 +40,12 @@ PAPER_FILE = "paper.json"
 SOURCE_DIR = "source"
 TRANSCRIPTION_FILE = "transcription.md"
 FIGURES_DIR = "figures"
+PAGES_DIR = "pages"
 
 # Names recipe outputs may never claim in the flat paper directory. Comparison
 # is case-insensitive because libraries must remain portable to Windows.
 RESERVED_PAPER_NAMES = frozenset(
-    {PAPER_FILE, SOURCE_DIR, TRANSCRIPTION_FILE, FIGURES_DIR, OPERATIONAL_DIR}
+    {PAPER_FILE, SOURCE_DIR, TRANSCRIPTION_FILE, FIGURES_DIR, PAGES_DIR, OPERATIONAL_DIR}
 )
 
 # Current library format version. Bump requires an ADR.

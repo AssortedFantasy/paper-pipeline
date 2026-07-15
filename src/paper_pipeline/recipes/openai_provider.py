@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 from pathlib import Path
 from typing import Any
@@ -9,8 +10,8 @@ from typing import Any
 from paper_pipeline.config import AppConfig
 from paper_pipeline.recipes.provider import ProviderRequest, ProviderResult
 
-# Standard-processing USD per million tokens. GPT-5.6 uncached input is billed
-# as a cache write at 1.25x; cached reads retain the 90% discount. Snapshot
+# Standard-processing USD per million tokens. GPT-5.6 cache writes are billed
+# at 1.25x ordinary input; cached reads retain the 90% discount. Snapshot
 # suffixes inherit their family's rates. Keep this deliberately small and fail
 # visibly for unknown pricing instead of silently reporting a false zero cost.
 _PRICING: tuple[tuple[str, float, float, float, float], ...] = (
@@ -47,16 +48,28 @@ class OpenAIProvider:
 
         try:
             client = self._get_client()
-            content = self._content(client, request)
+            content = self._content(client, request, model)
+            cache_key = _cache_key(request)
+            response_args: dict[str, Any] = {
+                "model": model,
+                "input": [{"role": "user", "content": content}],
+            }
+            if cache_key:
+                response_args["prompt_cache_key"] = cache_key
+            if _uses_explicit_cache_breakpoints(model):
+                response_args["prompt_cache_options"] = {
+                    "mode": "implicit",
+                    "ttl": "30m",
+                }
             response = client.responses.create(
-                model=model,
-                input=[{"role": "user", "content": content}],
+                **response_args,
             )
-            prompt_tokens, cached_tokens, completion_tokens = _usage(response)
+            prompt_tokens, cached_tokens, cache_write_tokens, completion_tokens = _usage(response)
             cost_usd = _cost_usd(
                 model,
                 prompt_tokens=prompt_tokens,
                 cached_tokens=cached_tokens,
+                cache_write_tokens=cache_write_tokens,
                 completion_tokens=completion_tokens,
             )
             return ProviderResult(
@@ -66,6 +79,7 @@ class OpenAIProvider:
                 model=model,
                 prompt_tokens=prompt_tokens,
                 cached_tokens=cached_tokens,
+                cache_write_tokens=cache_write_tokens,
                 completion_tokens=completion_tokens,
                 cost_usd=cost_usd,
             )
@@ -92,10 +106,15 @@ class OpenAIProvider:
         self._client = openai.OpenAI(**kwargs)
         return self._client
 
-    def _content(self, client: Any, request: ProviderRequest) -> list[dict[str, str]]:
+    def _content(self, client: Any, request: ProviderRequest, model: str) -> list[dict[str, Any]]:
+        breakpoint = (
+            {"prompt_cache_breakpoint": {"mode": "explicit"}}
+            if _uses_explicit_cache_breakpoints(model)
+            else {}
+        )
         if request.text_input is not None:
             return [
-                {"type": "input_text", "text": request.text_input},
+                {"type": "input_text", "text": request.text_input, **breakpoint},
                 {"type": "input_text", "text": request.prompt},
             ]
 
@@ -103,7 +122,7 @@ class OpenAIProvider:
         assert pdf_path is not None
         file_id = self._uploaded_file_id(client, pdf_path, request.input_sha256)
         return [
-            {"type": "input_file", "file_id": file_id},
+            {"type": "input_file", "file_id": file_id, **breakpoint},
             {"type": "input_text", "text": request.prompt},
         ]
 
@@ -129,7 +148,7 @@ class OpenAIProvider:
         )
 
 
-def _usage(response: Any) -> tuple[int, int, int]:
+def _usage(response: Any) -> tuple[int, int, int, int]:
     usage = getattr(response, "usage", None)
     if usage is None:
         raise ValueError("OpenAI response contained no token usage")
@@ -137,9 +156,10 @@ def _usage(response: Any) -> tuple[int, int, int]:
     completion = _nonnegative_int(getattr(usage, "output_tokens", None), "output tokens")
     details = getattr(usage, "input_tokens_details", None)
     cached = _nonnegative_int(getattr(details, "cached_tokens", 0), "cached tokens")
-    if cached > prompt:
-        raise ValueError("OpenAI response reported more cached tokens than input tokens")
-    return prompt, cached, completion
+    cache_write = _nonnegative_int(getattr(details, "cache_write_tokens", 0), "cache write tokens")
+    if cached + cache_write > prompt:
+        raise ValueError("OpenAI response reported invalid input token details")
+    return prompt, cached, cache_write, completion
 
 
 def _nonnegative_int(value: Any, label: str) -> int:
@@ -153,6 +173,7 @@ def _cost_usd(
     *,
     prompt_tokens: int,
     cached_tokens: int,
+    cache_write_tokens: int,
     completion_tokens: int,
 ) -> float:
     normalized = model.casefold()
@@ -167,13 +188,26 @@ def _cost_usd(
     if pricing is None:
         raise ValueError(f"OpenAI pricing is not known for model {model!r}")
     input_rate, cached_rate, output_rate, cache_write_multiplier = pricing
-    uncached_tokens = prompt_tokens - cached_tokens
+    ordinary_tokens = prompt_tokens - cached_tokens - cache_write_tokens
     long_context = normalized.startswith("gpt-5.6") and prompt_tokens > 272_000
     input_multiplier = 2.0 if long_context else 1.0
     output_multiplier = 1.5 if long_context else 1.0
     total = (
-        uncached_tokens * input_rate * cache_write_multiplier * input_multiplier
+        ordinary_tokens * input_rate * input_multiplier
+        + cache_write_tokens * input_rate * cache_write_multiplier * input_multiplier
         + cached_tokens * cached_rate * input_multiplier
         + completion_tokens * output_rate * output_multiplier
     ) / 1_000_000
     return round(total, 10)
+
+
+def _cache_key(request: ProviderRequest) -> str:
+    """Return a stable, non-content cache-routing key for one paper input."""
+
+    if not request.input_sha256:
+        return ""
+    return hashlib.sha256(f"paper-pipeline:{request.input_sha256}".encode()).hexdigest()
+
+
+def _uses_explicit_cache_breakpoints(model: str) -> bool:
+    return model.casefold().startswith("gpt-5.6")

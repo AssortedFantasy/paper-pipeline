@@ -69,6 +69,15 @@ class NonCanonicalFigureConverter(FakeConverter):
         return result
 
 
+class NonCanonicalPageConverter(FakeConverter):
+    def convert(self, request: ConversionRequest) -> ConversionResult:
+        result = super().convert(request)
+        page = request.staging_dir / "wrong-page.png"
+        page.write_bytes(b"page")
+        result.page_paths.append(page)
+        return result
+
+
 class SymlinkTranscriptionConverter:
     name = "symlink-success"
 
@@ -116,6 +125,7 @@ def test_success_runs_in_spawned_child_and_preserves_outputs(tmp_path: Path) -> 
     assert result.transcription_path is not None
     assert result.transcription_path.is_file()
     assert len(result.figure_paths) == 2
+    assert result.page_paths == [request.staging_dir / "pages" / "page1.png"]
     assert result.diagnostics == {"stdout": "", "stderr": ""}
     assert_no_converter_children()
 
@@ -261,6 +271,18 @@ def test_false_success_with_figure_outside_figures_directory_is_rejected(
     assert result.error == (
         "converter must return figure paths inside the staging figures directory"
     )
+    assert list(request.staging_dir.iterdir()) == []
+
+
+def test_false_success_with_page_outside_pages_directory_is_rejected(tmp_path: Path) -> None:
+    request = make_request(tmp_path)
+
+    result = run_conversion(
+        ConverterSpec("tests.convert.test_runner:NonCanonicalPageConverter"), request
+    )
+
+    assert not result.ok
+    assert result.error == "converter must return page images inside the staging pages directory"
     assert list(request.staging_dir.iterdir()) == []
 
 

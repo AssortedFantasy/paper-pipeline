@@ -104,6 +104,8 @@ async def queue_conversion(
                         state.log_path = _install_conversion_log(session, job, result)
                         job.log_path = state.log_path
                         raise ProcessingError(result.error or "conversion failed")
+                    state.log_path = _install_conversion_log(session, job, result)
+                    job.log_path = state.log_path
                     if not token.begin_commit():
                         raise asyncio.CancelledError
                     runtime.queue.publish_progress(job.id, "Installing transcription")
@@ -438,7 +440,8 @@ def _install_conversion_log(session: PaperSession, job: Job, result: ConversionR
     relative = f"{PAPERS_DIR}/{session.citekey}/.pp/conversion-{job.id}.log"
     stage = session.stage_dir()
     staged = stage / "conversion.log"
-    lines = [result.error or "conversion failed"]
+    status = "conversion succeeded" if result.ok else result.error or "conversion failed"
+    lines = [status, f"duration_seconds={result.duration_seconds:.3f}"]
     lines.extend(f"[{name}]\n{text}" for name, text in sorted(result.diagnostics.items()) if text)
     staged.write_text("\n\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     try:
@@ -471,19 +474,21 @@ def _recipe_usage_text(
         hit_rate = usage.cached_tokens / usage.prompt_tokens if usage.prompt_tokens else 0.0
         lines.append(
             f"{recipe.name}: prompt={usage.prompt_tokens} cached={usage.cached_tokens} "
-            f"cache_hit_rate={hit_rate:.1%} completion={usage.completion_tokens} "
+            f"cache_write={usage.cache_write_tokens} cache_hit_rate={hit_rate:.1%} "
+            f"completion={usage.completion_tokens} "
             f"cost_usd={usage.cost_usd:.8f}"
         )
     totals = (
         sum(result.record.prompt_tokens for _recipe, result in results),
         sum(result.record.cached_tokens for _recipe, result in results),
+        sum(result.record.cache_write_tokens for _recipe, result in results),
         sum(result.record.completion_tokens for _recipe, result in results),
         sum(result.record.cost_usd for _recipe, result in results),
     )
     hit_rate = totals[1] / totals[0] if totals[0] else 0.0
     lines.append(
         f"total: prompt={totals[0]} cached={totals[1]} cache_hit_rate={hit_rate:.1%} "
-        f"completion={totals[2]} cost_usd={totals[3]:.8f}"
+        f"cache_write={totals[2]} completion={totals[3]} cost_usd={totals[4]:.8f}"
     )
     if error is not None:
         lines.append(f"{type(error).__name__}: {error}")

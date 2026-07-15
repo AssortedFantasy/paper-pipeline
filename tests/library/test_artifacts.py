@@ -95,29 +95,36 @@ def test_install_rejects_symlinked_destination_parent(library_root: Path, tmp_pa
     assert list(outside.iterdir()) == []
 
 
-def test_install_conversion_bundle_with_figures_and_hashes(library_root: Path) -> None:
+def test_install_conversion_bundle_with_figures_pages_and_hashes(library_root: Path) -> None:
     library = _paper_library(library_root)
     stage = library.stage_dir()
     (stage / "transcription.md").write_text("# Paper\n", encoding="utf-8")
     figures = stage / "figures"
     figures.mkdir()
     (figures / "one.png").write_bytes(b"image")
+    pages = stage / "pages"
+    pages.mkdir()
+    (pages / "page1.png").write_bytes(b"page")
 
     hashes = library.install_conversion_bundle("Smith2024", stage)
 
     paper = library_root / "papers" / "Smith2024"
     assert (paper / "transcription.md").read_text(encoding="utf-8") == "# Paper\n"
     assert (paper / "figures" / "one.png").read_bytes() == b"image"
+    assert (paper / "pages" / "page1.png").read_bytes() == b"page"
     assert hashes["papers/Smith2024/transcription.md"] == sha256_file(paper / "transcription.md")
     assert hashes["papers/Smith2024/figures/one.png"] == sha256_file(paper / "figures" / "one.png")
+    assert hashes["papers/Smith2024/pages/page1.png"] == sha256_file(paper / "pages" / "page1.png")
 
 
-def test_bundle_replacement_removes_old_figures(library_root: Path) -> None:
+def test_bundle_replacement_removes_old_figures_and_pages(library_root: Path) -> None:
     library = _paper_library(library_root)
     paper = library_root / "papers" / "Smith2024"
     (paper / "transcription.md").write_text("old", encoding="utf-8")
     (paper / "figures").mkdir()
     (paper / "figures" / "old.png").write_bytes(b"old")
+    (paper / "pages").mkdir()
+    (paper / "pages" / "page1.png").write_bytes(b"old")
     stage = library.stage_dir()
     (stage / "transcription.md").write_text("new", encoding="utf-8")
 
@@ -125,6 +132,7 @@ def test_bundle_replacement_removes_old_figures(library_root: Path) -> None:
 
     assert (paper / "transcription.md").read_text(encoding="utf-8") == "new"
     assert not (paper / "figures").exists()
+    assert not (paper / "pages").exists()
 
 
 def test_bundle_validation_happens_before_installed_content_changes(library_root: Path) -> None:

@@ -68,13 +68,22 @@ class FakeTransport:
         assert timeout > 0
         self.calls.append(("download", host))
         (local_dir / "result.json").write_text(
-            json.dumps({"ok": True, "backend_version": "1.10.2"}),
+            json.dumps(
+                {
+                    "ok": True,
+                    "backend_version": "1.10.2",
+                    "diagnostics": {"timing_conversion_seconds": "1.250"},
+                }
+            ),
             encoding="utf-8",
         )
         (local_dir / "transcription.md").write_text("# Remote result\n", encoding="utf-8")
         figures = local_dir / "figures"
         figures.mkdir()
         (figures / "figure.png").write_bytes(b"figure")
+        pages = local_dir / "pages"
+        pages.mkdir()
+        (pages / "page1.png").write_bytes(b"page")
         if self.unexpected_download:
             (local_dir / "undeclared.txt").write_text("bad", encoding="utf-8")
 
@@ -124,10 +133,16 @@ import json
 import pathlib
 import sys
 output = pathlib.Path(sys.argv[1])
-(output / 'result.json').write_text(json.dumps({'ok': True, 'backend_version': 'fake'}))
+(output / 'result.json').write_text(json.dumps({
+    'ok': True,
+    'backend_version': 'fake',
+    'diagnostics': {'timing_conversion_seconds': '1.250'},
+}))
 (output / 'transcription.md').write_text('# Local remote subprocess\\n')
 (output / 'figures').mkdir()
 (output / 'figures' / 'figure.png').write_bytes(b'figure')
+(output / 'pages').mkdir()
+(output / 'pages' / 'page1.png').write_bytes(b'page')
 """
         completed = subprocess.run(
             [sys.executable, "-c", code, str(self.remote / "output")],
@@ -164,6 +179,9 @@ def test_fake_transport_returns_only_canonical_local_paths(tmp_path: Path) -> No
     assert transcription == tmp_path / "staging" / "transcription.md"
     assert transcription.read_text(encoding="utf-8") == "# Local remote subprocess\n"
     assert result.figure_paths == [tmp_path / "staging" / "figures" / "figure.png"]
+    assert result.page_paths == [tmp_path / "staging" / "pages" / "page1.png"]
+    assert result.diagnostics["timing_conversion_seconds"] == "1.250"
+    assert float(result.diagnostics["timing_remote_worker_seconds"]) >= 0
     assert [name for name, _host in transport.calls] == [
         "prepare",
         "upload",
@@ -280,3 +298,8 @@ def test_real_remote_host_opt_in(tmp_path: Path) -> None:
     assert result.ok, result.error
     assert result.transcription_path is not None
     assert result.transcription_path.stat().st_size > 0
+    assert result.page_paths
+    assert all(path.suffix.casefold() == ".png" for path in result.page_paths)
+    assert "timing_model_load_seconds" in result.diagnostics
+    assert "timing_conversion_seconds" in result.diagnostics
+    print("REMOTE_RUNTIME " + json.dumps(result.diagnostics, sort_keys=True))

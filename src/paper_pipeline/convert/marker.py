@@ -51,6 +51,7 @@ class MarkerConverter:
             from marker.models import create_model_dict  # pyright: ignore[reportMissingImports]
             from marker.output import text_from_rendered  # pyright: ignore[reportMissingImports]
 
+            imports_finished = time.monotonic()
             parser = ConfigParser(dict(self.config))
             converter = PdfConverter(
                 artifact_dict=create_model_dict(),
@@ -59,7 +60,9 @@ class MarkerConverter:
                 llm_service=parser.get_llm_service(),
                 config=parser.generate_config_dict(),
             )
+            models_finished = time.monotonic()
             rendered = converter(str(request.pdf_path))
+            conversion_finished = time.monotonic()
             markdown, extension, images = text_from_rendered(rendered)
             if extension != "md":
                 raise ValueError(f"Marker returned unexpected output format: {extension}")
@@ -69,6 +72,9 @@ class MarkerConverter:
             markdown, figure_paths = _save_figures(markdown, images, request.staging_dir)
             transcription_path = request.staging_dir / "transcription.md"
             transcription_path.write_text(markdown.rstrip() + "\n", encoding="utf-8", newline="\n")
+            serialization_finished = time.monotonic()
+            page_paths = _render_pages(request.pdf_path, request.staging_dir)
+            pages_finished = time.monotonic()
             metadata = getattr(rendered, "metadata", {})
             diagnostics = {
                 "marker_metadata": json.dumps(
@@ -76,7 +82,14 @@ class MarkerConverter:
                     ensure_ascii=False,
                     sort_keys=True,
                     default=str,
-                )
+                ),
+                "timing_import_seconds": _duration(started, imports_finished),
+                "timing_model_load_seconds": _duration(imports_finished, models_finished),
+                "timing_conversion_seconds": _duration(models_finished, conversion_finished),
+                "timing_serialization_seconds": _duration(
+                    conversion_finished, serialization_finished
+                ),
+                "timing_page_render_seconds": _duration(serialization_finished, pages_finished),
             }
             page_count = getattr(converter, "page_count", None)
             if page_count is not None:
@@ -88,6 +101,7 @@ class MarkerConverter:
                 duration_seconds=time.monotonic() - started,
                 transcription_path=transcription_path,
                 figure_paths=figure_paths,
+                page_paths=page_paths,
                 diagnostics=diagnostics,
             )
         except Exception as error:
@@ -133,6 +147,39 @@ def _save_figures(
         markdown = markdown.replace(f'src="{marker_name}"', f'src="{library_reference}"')
         markdown = markdown.replace(f"src='{marker_name}'", f"src='{library_reference}'")
     return markdown, figure_paths
+
+
+def _render_pages(pdf_path: Path, staging_dir: Path) -> list[Path]:
+    """Render compact 96-DPI PNG page images using Marker's PDFium dependency."""
+
+    import pypdfium2 as pdfium  # pyright: ignore[reportMissingImports]
+
+    pages_dir = staging_dir / "pages"
+    pages_dir.mkdir()
+    page_paths: list[Path] = []
+    document = pdfium.PdfDocument(str(pdf_path))
+    try:
+        for index in range(len(document)):
+            page = document[index]
+            try:
+                bitmap = page.render(scale=96 / 72)
+                try:
+                    destination = pages_dir / f"page{index + 1}.png"
+                    bitmap.to_pil().save(destination, format="PNG", optimize=True)
+                    page_paths.append(destination)
+                finally:
+                    bitmap.close()
+            finally:
+                page.close()
+    finally:
+        document.close()
+    if not page_paths:
+        raise ValueError("source PDF has no renderable pages")
+    return page_paths
+
+
+def _duration(started: float, finished: float) -> str:
+    return f"{finished - started:.3f}"
 
 
 def _safe_figure_name(value: str) -> PurePosixPath:

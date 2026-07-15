@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 from pathlib import Path
@@ -36,7 +37,10 @@ class RecordingResponses:
             output_text="Generated response",
             usage=SimpleNamespace(
                 input_tokens=1_000,
-                input_tokens_details=SimpleNamespace(cached_tokens=800),
+                input_tokens_details=SimpleNamespace(
+                    cached_tokens=800,
+                    cache_write_tokens=200,
+                ),
                 output_tokens=100,
             ),
         )
@@ -95,6 +99,7 @@ def test_openai_text_request_uses_responses_api() -> None:
     assert result.text == "Generated response"
     assert result.prompt_tokens == 1_000
     assert result.cached_tokens == 800
+    assert result.cache_write_tokens == 200
     assert result.completion_tokens == 100
     # Luna: 200 cache-write tokens at 1.25x $1/MTok, 800 cached at
     # $0.10/MTok, and 100 output at $6/MTok.
@@ -102,11 +107,17 @@ def test_openai_text_request_uses_responses_api() -> None:
     assert client.responses.calls == [
         {
             "model": "gpt-5.6-luna",
+            "prompt_cache_key": hashlib.sha256(b"paper-pipeline:abc").hexdigest(),
+            "prompt_cache_options": {"mode": "implicit", "ttl": "30m"},
             "input": [
                 {
                     "role": "user",
                     "content": [
-                        {"type": "input_text", "text": "Transcription"},
+                        {
+                            "type": "input_text",
+                            "text": "Transcription",
+                            "prompt_cache_breakpoint": {"mode": "explicit"},
+                        },
                         {"type": "input_text", "text": "Recipe prompt"},
                     ],
                 }
@@ -134,12 +145,21 @@ def test_openai_pdf_upload_is_cached_by_input_hash(tmp_path: Path) -> None:
     upload = client.files.calls[0]
     assert upload["purpose"] == "user_data"
     assert client.responses.calls[0]["input"][0]["content"] == [
-        {"type": "input_file", "file_id": "file-test"},
+        {
+            "type": "input_file",
+            "file_id": "file-test",
+            "prompt_cache_breakpoint": {"mode": "explicit"},
+        },
         {"type": "input_text", "text": "Summary"},
     ]
+    assert (
+        client.responses.calls[0]["prompt_cache_key"]
+        == hashlib.sha256(b"paper-pipeline:same-hash").hexdigest()
+    )
     assert client.responses.calls[1]["input"][0]["content"][0] == {
         "type": "input_file",
         "file_id": "file-test",
+        "prompt_cache_breakpoint": {"mode": "explicit"},
     }
 
 
@@ -270,7 +290,10 @@ def test_gpt_56_cost_includes_long_context_and_cache_write_multipliers() -> None
         output_text="text",
         usage=SimpleNamespace(
             input_tokens=300_000,
-            input_tokens_details=SimpleNamespace(cached_tokens=200_000),
+            input_tokens_details=SimpleNamespace(
+                cached_tokens=200_000,
+                cache_write_tokens=100_000,
+            ),
             output_tokens=1_000,
         ),
     )
@@ -301,3 +324,36 @@ def test_real_openai_text_smoke() -> None:
 
     assert result.ok, result.error
     assert result.text.strip()
+
+
+@pytest.mark.llm
+@pytest.mark.skipif(
+    os.environ.get("PAPER_PIPELINE_CACHE_TEST") != "1",
+    reason="set PAPER_PIPELINE_CACHE_TEST=1 to spend a small amount verifying real caching",
+)
+def test_real_openai_reuses_explicit_transcription_cache() -> None:
+    config = AppConfig()
+    assert config.llm_api_key and config.llm_model
+    text = "Stable academic transcription sentence for cache verification.\n" * 600
+    input_hash = hashlib.sha256(text.encode()).hexdigest()
+    provider = OpenAIProvider(config)
+
+    first = provider.generate(
+        ProviderRequest(
+            prompt="Reply with exactly: first cache check",
+            text_input=text,
+            input_sha256=input_hash,
+        )
+    )
+    second = provider.generate(
+        ProviderRequest(
+            prompt="Reply with exactly: second cache check",
+            text_input=text,
+            input_sha256=input_hash,
+        )
+    )
+
+    assert first.ok, first.error
+    assert second.ok, second.error
+    assert first.cache_write_tokens > 0
+    assert second.cached_tokens > 0

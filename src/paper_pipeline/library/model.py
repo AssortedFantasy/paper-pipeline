@@ -96,11 +96,11 @@ class RecipeRecord(BaseModel):
     # Library-relative path to the installed generated Markdown artifact.
     output_artifact: str | None = None
     output_sha256: str | None = None
-    # Provider-reported usage for the installed run. ``cached_tokens`` is the
-    # subset of prompt tokens served from cache; cache writes remain prompt
-    # tokens and are reflected in ``cost_usd`` by the provider's pricing rule.
+    # Provider-reported usage for the installed run. Cached reads and cache
+    # writes are disjoint subsets of prompt tokens.
     prompt_tokens: int = Field(default=0, ge=0)
     cached_tokens: int = Field(default=0, ge=0)
+    cache_write_tokens: int = Field(default=0, ge=0)
     completion_tokens: int = Field(default=0, ge=0)
     cost_usd: float = Field(default=0.0, ge=0)
     completed_at: datetime | None = None

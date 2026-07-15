@@ -200,14 +200,26 @@ class RemoteConverter:
         deadline = started + request.timeout_seconds
         prepared = True
         execution_completed = False
+        transport_timings: dict[str, str] = {}
+        phase_started = started
         try:
             self.transport.prepare(self.host, run_dir, _remaining(deadline))
+            phase_finished = time.monotonic()
+            transport_timings["timing_ssh_prepare_seconds"] = _duration(
+                phase_started, phase_finished
+            )
+            phase_started = phase_finished
             self.transport.upload(
                 self.host,
                 request.pdf_path,
                 remote_input,
                 _remaining(deadline),
             )
+            phase_finished = time.monotonic()
+            transport_timings["timing_ssh_upload_seconds"] = _duration(
+                phase_started, phase_finished
+            )
+            phase_started = phase_finished
             execution = self.transport.execute(
                 self.host,
                 run_dir,
@@ -215,6 +227,11 @@ class RemoteConverter:
                 request.timeout_seconds,
                 _remaining(deadline),
             )
+            phase_finished = time.monotonic()
+            transport_timings["timing_remote_worker_seconds"] = _duration(
+                phase_started, phase_finished
+            )
+            phase_started = phase_finished
             execution_completed = not execution.connection_lost
             if execution.connection_lost:
                 raise RemoteTransportError("remote SSH connection was lost")
@@ -229,7 +246,16 @@ class RemoteConverter:
                     download,
                     _remaining(deadline),
                 )
-                return _install_download(download, request.staging_dir, started)
+                phase_finished = time.monotonic()
+                transport_timings["timing_ssh_download_seconds"] = _duration(
+                    phase_started, phase_finished
+                )
+                return _install_download(
+                    download,
+                    request.staging_dir,
+                    started,
+                    transport_timings,
+                )
         except RemoteTransportTimeout:
             return self._failure(started, "remote conversion timed out")
         except RemoteTransportError as error:
@@ -263,10 +289,15 @@ class RemoteConverter:
         )
 
 
-def _install_download(download: Path, staging: Path, started: float) -> ConversionResult:
+def _install_download(
+    download: Path,
+    staging: Path,
+    started: float,
+    transport_timings: dict[str, str] | None = None,
+) -> ConversionResult:
     if any(path.is_symlink() for path in download.rglob("*")):
         raise ValueError("download contains symlinks")
-    allowed = {_MANIFEST, "transcription.md", "figures"}
+    allowed = {_MANIFEST, "transcription.md", "figures", "pages"}
     if any(path.name not in allowed for path in download.iterdir()):
         raise ValueError("download contains unexpected entries")
     manifest_path = download / _MANIFEST
@@ -276,6 +307,11 @@ def _install_download(download: Path, staging: Path, started: float) -> Conversi
     backend_version = payload.get("backend_version")
     if not isinstance(backend_version, str) or not backend_version:
         raise ValueError("manifest has no backend version")
+    diagnostics = payload.get("diagnostics", {})
+    if not isinstance(diagnostics, dict) or any(
+        not isinstance(key, str) or not isinstance(value, str) for key, value in diagnostics.items()
+    ):
+        raise ValueError("manifest has invalid diagnostics")
     transcription = download / "transcription.md"
     if not transcription.is_file() or transcription.stat().st_size == 0:
         raise ValueError("download has no transcription")
@@ -292,6 +328,18 @@ def _install_download(download: Path, staging: Path, started: float) -> Conversi
         destination_figures = staging / "figures"
         shutil.copytree(figures, destination_figures)
         figure_paths = sorted(path for path in destination_figures.rglob("*") if path.is_file())
+    page_paths: list[Path] = []
+    pages = download / "pages"
+    if pages.exists():
+        if not pages.is_dir():
+            raise ValueError("pages is not a directory")
+        page_files = sorted(path for path in pages.rglob("*") if path.is_file())
+        if not page_files or any(path.suffix.casefold() != ".png" for path in page_files):
+            raise ValueError("pages contains invalid page images")
+        destination_pages = staging / "pages"
+        shutil.copytree(pages, destination_pages)
+        page_paths = sorted(path for path in destination_pages.rglob("*") if path.is_file())
+    diagnostics.update(transport_timings or {})
     return ConversionResult(
         ok=True,
         backend="remote-marker",
@@ -299,6 +347,8 @@ def _install_download(download: Path, staging: Path, started: float) -> Conversi
         duration_seconds=time.monotonic() - started,
         transcription_path=destination,
         figure_paths=figure_paths,
+        page_paths=page_paths,
+        diagnostics=diagnostics,
     )
 
 
@@ -403,6 +453,11 @@ def _write_remote_manifest(input_path: Path, output_dir: Path, timeout: int) -> 
     payload = {
         "ok": result.ok,
         "backend_version": result.backend_version,
+        "diagnostics": {
+            name: value
+            for name, value in result.diagnostics.items()
+            if name == "page_count" or name.startswith("timing_")
+        },
     }
     (output_dir / _MANIFEST).write_text(
         json.dumps(payload, sort_keys=True) + "\n",
@@ -410,6 +465,10 @@ def _write_remote_manifest(input_path: Path, output_dir: Path, timeout: int) -> 
         newline="\n",
     )
     return 0
+
+
+def _duration(started: float, finished: float) -> str:
+    return f"{finished - started:.3f}"
 
 
 def main(argv: list[str] | None = None) -> int:

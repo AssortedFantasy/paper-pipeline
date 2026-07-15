@@ -80,7 +80,12 @@ async def _read(runtime: LibraryRuntime) -> PaperRecord:
 
 
 async def test_conversion_and_recipe_batch_flow_through_real_queue(tmp_path: Path) -> None:
-    provider = FakeLLMProvider(response="One-line generated result")
+    provider = FakeLLMProvider(
+        response="One-line generated result",
+        prompt_tokens=100,
+        cached_tokens=50,
+        cache_write_tokens=25,
+    )
     runtime = await _runtime(tmp_path, provider)
     await _seed(runtime)
 
@@ -99,6 +104,10 @@ async def test_conversion_and_recipe_batch_flow_through_real_queue(tmp_path: Pat
     )
     assert converted.conversion.last_attempt is not None
     assert converted.conversion.last_attempt.state is AttemptState.SUCCEEDED
+    assert converted.conversion.last_attempt.log_path is not None
+    conversion_log = runtime.root / converted.conversion.last_attempt.log_path
+    assert "conversion succeeded" in conversion_log.read_text(encoding="utf-8")
+    assert (runtime.root / "papers" / "Smith2024" / "pages" / "page1.png").is_file()
 
     recipe_job = (
         await queue_recipes(
@@ -110,6 +119,11 @@ async def test_conversion_and_recipe_batch_flow_through_real_queue(tmp_path: Pat
         )
     )[0]
     assert (await runtime.queue.wait(recipe_job.id)).state is JobState.SUCCEEDED
+    assert recipe_job.log_path is not None
+    usage_log = (runtime.root / recipe_job.log_path).read_text(encoding="utf-8")
+    assert "cached=50 cache_write=25 cache_hit_rate=50.0%" in usage_log
+    assert "total: prompt=200 cached=100" in usage_log
+    assert "cache_write=50" in usage_log
     enriched = await _read(runtime)
     assert set(enriched.recipes) == {"summary", "contributions"}
     assert len(provider.calls) == 2
@@ -118,6 +132,8 @@ async def test_conversion_and_recipe_batch_flow_through_real_queue(tmp_path: Pat
         recipe = enriched.recipes[name]
         assert recipe.last_attempt is not None
         assert recipe.last_attempt.state is AttemptState.SUCCEEDED
+        assert recipe.cached_tokens == 50
+        assert recipe.cache_write_tokens == 25
         assert recipe.output_artifact is not None
         assert (runtime.root / recipe.output_artifact).is_file()
 

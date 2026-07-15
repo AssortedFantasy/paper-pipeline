@@ -219,7 +219,7 @@ class Library:
         *,
         validate: ArtifactValidator | None = None,
     ) -> dict[str, str]:
-        """Install a staged transcription and optional figures as one declared bundle.
+        """Install a staged transcription, figures, and page images as one bundle.
 
         Validation and hashing finish before installed content is touched. Ordinary
         exceptions roll back to the previous bundle. A process-ending interruption
@@ -235,6 +235,7 @@ class Library:
 
         transcription = staging_dir / "transcription.md"
         figures = staging_dir / "figures"
+        pages = staging_dir / "pages"
         paper_root = paper_dir(self.root, citekey)
         _ensure_safe_managed_path(self.root, paper_root)
         if not paper_root.is_dir():
@@ -249,6 +250,11 @@ class Library:
                 for figure in sorted(figures.rglob("*"))
                 if figure.is_file()
             },
+            **{
+                f"papers/{citekey}/pages/{page.relative_to(pages).as_posix()}": sha256_file(page)
+                for page in sorted(pages.rglob("*"))
+                if page.is_file()
+            },
         }
         backup = self.stage_dir()
         installed: list[Path] = []
@@ -256,6 +262,7 @@ class Library:
         targets = [
             (transcription, paper_root / "transcription.md", backup / "transcription.md"),
             (figures if figures.is_dir() else None, paper_root / "figures", backup / "figures"),
+            (pages if pages.is_dir() else None, paper_root / "pages", backup / "pages"),
         ]
         for _source, destination, _prior in targets:
             _ensure_safe_managed_path(self.root, destination)
@@ -452,7 +459,7 @@ def _require_staged_file(root: Path, path: Path) -> None:
 
 
 def _validate_conversion_stage(staging_dir: Path) -> None:
-    allowed = {"transcription.md", "figures"}
+    allowed = {"transcription.md", "figures", "pages"}
     unexpected = sorted(path.name for path in staging_dir.iterdir() if path.name not in allowed)
     if unexpected:
         raise ValueError(f"conversion staging directory contains undeclared entries: {unexpected}")
@@ -469,6 +476,15 @@ def _validate_conversion_stage(staging_dir: Path) -> None:
             raise ValueError("conversion bundle figures entry must be a real directory")
         if any(path.is_symlink() for path in figures.rglob("*")):
             raise ValueError("conversion bundle figures must not contain symlinks")
+    pages = staging_dir / "pages"
+    if pages.exists():
+        if pages.is_symlink() or not pages.is_dir():
+            raise ValueError("conversion bundle pages entry must be a real directory")
+        if any(path.is_symlink() for path in pages.rglob("*")):
+            raise ValueError("conversion bundle pages must not contain symlinks")
+        page_files = sorted(path for path in pages.rglob("*") if path.is_file())
+        if not page_files or any(path.suffix.casefold() != ".png" for path in page_files):
+            raise ValueError("conversion bundle pages must contain only PNG page images")
 
 
 def _remove_path(path: Path) -> None:

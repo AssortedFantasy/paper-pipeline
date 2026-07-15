@@ -63,6 +63,7 @@ def test_success_stages_clean_output_and_records_provenance_usage(library: Libra
     assert result.record.output_sha256 == hashlib.sha256(expected.encode()).hexdigest()
     assert result.record.prompt_tokens == 100
     assert result.record.cached_tokens == 0
+    assert result.record.cache_write_tokens == 0
     assert result.record.completion_tokens == 20
     assert result.record.cost_usd == 0.001
     assert provider.calls[0].text_input == transcription.read_text(encoding="utf-8")

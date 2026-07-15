@@ -122,3 +122,5 @@ def _assert_durable_library(root: Path, citekeys: set[str]) -> None:
 
         figures = list((paper_root / "figures").glob("*.png"))
         assert len(figures) == 1
+        pages = list((paper_root / "pages").glob("page*.png"))
+        assert len(pages) == 1

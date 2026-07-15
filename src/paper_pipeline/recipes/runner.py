@@ -131,6 +131,7 @@ def run_recipe(
             output_sha256=output_sha256,
             prompt_tokens=provider_result.prompt_tokens,
             cached_tokens=provider_result.cached_tokens,
+            cache_write_tokens=provider_result.cache_write_tokens,
             completion_tokens=provider_result.completion_tokens,
             cost_usd=provider_result.cost_usd,
             completed_at=completed_at,

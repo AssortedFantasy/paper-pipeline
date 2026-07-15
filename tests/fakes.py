@@ -29,11 +29,14 @@ class FakeConverter:
 
     mode: FakeConverterMode = "success"
     figure_count: int = 0
+    page_count: int = 1
     hang_seconds: float | None = None
 
     def __post_init__(self) -> None:
         if self.figure_count < 0:
             raise ValueError("figure_count must not be negative")
+        if self.page_count < 0:
+            raise ValueError("page_count must not be negative")
 
     def convert(self, request: ConversionRequest) -> ConversionResult:
         """Produce the configured outcome without reading the input PDF."""
@@ -66,11 +69,13 @@ class FakeConverter:
             encoding="utf-8",
         )
         figure_paths = self._write_figures(request.staging_dir)
+        page_paths = self._write_pages(request.staging_dir)
         return self._result(
             started=started,
             ok=True,
             transcription_path=transcription_path,
             figure_paths=figure_paths,
+            page_paths=page_paths,
         )
 
     def _write_figures(self, staging_dir: Path) -> list[Path]:
@@ -84,6 +89,16 @@ class FakeConverter:
             path.write_bytes(f"fake figure {index}\n".encode())
         return paths
 
+    def _write_pages(self, staging_dir: Path) -> list[Path]:
+        if self.page_count == 0:
+            return []
+        pages_dir = staging_dir / "pages"
+        pages_dir.mkdir()
+        paths = [pages_dir / f"page{index}.png" for index in range(1, self.page_count + 1)]
+        for index, path in enumerate(paths, start=1):
+            path.write_bytes(f"fake page {index}\n".encode())
+        return paths
+
     @staticmethod
     def _result(
         *,
@@ -91,6 +106,7 @@ class FakeConverter:
         ok: bool,
         transcription_path: Path | None = None,
         figure_paths: list[Path] | None = None,
+        page_paths: list[Path] | None = None,
         error: str | None = None,
     ) -> ConversionResult:
         return ConversionResult(
@@ -100,6 +116,7 @@ class FakeConverter:
             duration_seconds=time.perf_counter() - started,
             transcription_path=transcription_path,
             figure_paths=figure_paths or [],
+            page_paths=page_paths or [],
             error=error,
         )
 
@@ -115,6 +132,7 @@ class FakeLLMProvider:
     failure_message: str = "fake provider failure"
     prompt_tokens: int = 100
     cached_tokens: int = 0
+    cache_write_tokens: int = 0
     completion_tokens: int = 20
     cost_usd: float = 0.001
     calls: list[ProviderRequest] = field(default_factory=list, init=False)
@@ -137,6 +155,7 @@ class FakeLLMProvider:
             model=request.model,
             prompt_tokens=self.prompt_tokens,
             cached_tokens=self.cached_tokens,
+            cache_write_tokens=self.cache_write_tokens,
             completion_tokens=self.completion_tokens,
             cost_usd=self.cost_usd,
         )

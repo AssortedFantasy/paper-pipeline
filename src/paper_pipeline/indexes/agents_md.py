@@ -34,7 +34,8 @@ product; no running application or external database is needed to read them.
 
 - `source/` contains the original PDF. It is essential source content but is
   ignored by Git, so a clone may be readable without being reprocessable.
-- `transcription.md` and `figures/` are source-derived converter outputs.
+- `transcription.md`, `figures/`, and low-resolution `pages/pageN.png` images
+  are source-derived converter outputs.
 - Other top-level Markdown files (for example `summary.md`) are LLM-generated
   recipe outputs. Their content contains only the useful result.
 - `paper.json` identifies generated files and records their provenance, token

@@ -39,7 +39,8 @@ def test_success_satisfies_converter_contract(tmp_path: Path) -> None:
         "# Fake transcription\n\nDeterministic converter output.\n"
     )
     assert len(result.figure_paths) == 2
-    for output_path in [result.transcription_path, *result.figure_paths]:
+    assert result.page_paths == [conversion_request.staging_dir / "pages" / "page1.png"]
+    for output_path in [result.transcription_path, *result.figure_paths, *result.page_paths]:
         assert_inside(output_path, conversion_request.staging_dir)
         assert output_path.is_file()
 
@@ -69,6 +70,7 @@ def test_ordinary_failure_returns_failed_result(tmp_path: Path) -> None:
     assert result.error == "fake converter failure"
     assert result.transcription_path is None
     assert result.figure_paths == []
+    assert result.page_paths == []
     assert list(conversion_request.staging_dir.iterdir()) == []
 
 
@@ -116,3 +118,8 @@ def test_explicit_hang_duration_is_supported(
 def test_negative_figure_count_is_rejected() -> None:
     with pytest.raises(ValueError, match="figure_count must not be negative"):
         FakeConverter(figure_count=-1)
+
+
+def test_negative_page_count_is_rejected() -> None:
+    with pytest.raises(ValueError, match="page_count must not be negative"):
+        FakeConverter(page_count=-1)

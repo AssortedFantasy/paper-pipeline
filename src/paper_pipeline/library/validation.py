@@ -27,6 +27,7 @@ from paper_pipeline.library.paths import (
     FIGURES_DIR,
     INDEXES_DIR,
     OPERATIONAL_DIR,
+    PAGES_DIR,
     PAPER_FILE,
     PAPERS_DIR,
     SOURCE_DIR,
@@ -257,6 +258,7 @@ def _validate_paper(library: Library, record, report: ValidationReport) -> None:
         SOURCE_DIR.casefold(),
         TRANSCRIPTION_FILE.casefold(),
         FIGURES_DIR.casefold(),
+        PAGES_DIR.casefold(),
         OPERATIONAL_DIR.casefold(),
         *(PurePosixPath(path).name.casefold() for path in recorded_outputs),
     }
