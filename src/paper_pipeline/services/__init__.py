@@ -6,13 +6,15 @@ and nowhere above (see AGENTS.md architecture rules).
 Operations (implemented by WP-3.1..3.3):
 
 - ``create_library`` / ``open_library`` / ``validate_library``
-- ``preview_import(library, export_path) -> ImportPlan``
-- ``apply_import(library, plan) -> ImportReport``   (copies PDFs, writes records)
-- ``queue_conversion(library, citekeys) -> [Job]``
-- ``queue_recipe(library, recipe_name, citekeys) -> [Job]``
+- ``preview_import(runtime, export_path) -> ImportPlan``
+- ``apply_import(runtime, plan) -> ImportReport``
+- ``queue_conversion(runtime, citekeys) -> [Job]``
+- ``queue_recipes(runtime, recipe_names, citekeys) -> [Job]``
 - ``cancel_job`` / ``retry_job``
 - ``rebuild_indexes(library)``
 
 Services orchestrate; they do not parse RDF, spawn Marker, or format HTTP
-responses. Every mutation goes through library storage's atomic writes.
+responses. A process-wide runtime registry owns each open library and its
+queue. Every paper mutation receives a scoped ``PaperSession`` inside the
+mandatory paper lane, then uses library storage's atomic writes.
 """

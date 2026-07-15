@@ -1,4 +1,4 @@
-"""Job data types. FROZEN for parallel work — changes require an ADR."""
+"""Versioned job data types and scheduling intent (ADR-0004)."""
 
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -7,8 +7,17 @@ from enum import StrEnum
 
 class JobKind(StrEnum):
     CONVERSION = "conversion"  # local, GPU-bound, serialized
-    RECIPE = "recipe"  # remote API, concurrent across papers, sequential per paper
+    RECIPE = "recipe"  # one sequential recipe batch for one paper
+    IMPORT = "import"  # one import add/refresh applied through a paper lane
     MAINTENANCE = "maintenance"  # index rebuild, validation
+
+
+class JobScope(StrEnum):
+    """Resource policy selected through queue entry points, not job labels."""
+
+    PAPER = "paper"
+    LIBRARY_READ = "library_read"
+    LIBRARY_WRITE = "library_write"
 
 
 class JobState(StrEnum):
@@ -37,6 +46,9 @@ class Job:
 
     id: str
     kind: JobKind
+    scope: JobScope
+    # Resolved library-root identity. In-memory only; never serialized into a library.
+    library_key: str
     citekey: str | None  # None for library-wide maintenance jobs
     label: str  # e.g. "convert", "recipe:summary"
     state: JobState = JobState.QUEUED

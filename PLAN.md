@@ -13,9 +13,10 @@ WP here.
    the required checks, set it to `done`.
 3. Stay inside the WP's **Owns** file set. If you must touch a file owned by
    another in-flight WP, coordinate or wait — do not create merge conflicts.
-4. Frozen contracts (see AGENTS.md) are inputs to your WP, not editable
-   surface. A WP that cannot be completed without changing a contract is
-   blocked: write an ADR proposal and flag it.
+4. Versioned contracts (see AGENTS.md) are shared boundaries, not untouchable
+   skeletons. If feedback requires a change, amend/supersede the ADR, review
+   the format version, and update compatibility tests before dependent tracks
+   proceed.
 5. Every WP includes its own tests. A WP without passing tests is not done.
 
 ## Status board
@@ -24,27 +25,29 @@ WP here.
 | --- | --- | --- | --- |
 | 0.1 | Skeleton, tooling, contracts | — | done |
 | 0.2 | Config + `doctor` command | 0.1 | todo |
-| 1.1 | Library storage core | 0.1 | todo |
+| 0.3 | Contract feedback pass: lanes, recovery, source identity | 0.1 | done |
+| 1.1 | Library storage core | 0.3 | todo |
 | 1.2 | Staging + atomic artifact install | 1.1 | todo |
 | 1.3 | Library validator | 1.1 | todo |
-| 2A.1 | Zotero RDF parsing + fixtures | 0.1 | todo |
+| 2A.1 | Zotero RDF parsing + fixtures | 0.3 | todo |
 | 2A.2 | Import planning (preview) | 2A.1, 1.1 | todo |
 | 2B.0 | Marker corpus, pins, runtime characterization | 0.1 | todo |
 | 2B.1 | Fake converter + contract tests | 0.1 | todo |
 | 2B.2 | Child-process conversion runner | 2B.1 | todo |
 | 2B.3 | Marker adapter + GPU smoke test | 2B.0, 2B.2 | todo |
 | 2B.4 | Remote conversion over SSH (conditional) | 2B.3 | conditional |
-| 2C.1 | Recipe template parsing + built-ins | 0.1 | todo |
-| 2C.2 | LLM providers (fake + OpenAI) | 0.1 | todo |
+| 2C.1 | Recipe template parsing + built-ins | 0.3 | todo |
+| 2C.2 | LLM providers (fake + OpenAI) | 0.3 | todo |
 | 2C.3 | Recipe runner + provenance | 2C.1, 2C.2, 1.2 | todo |
-| 2D.1 | Job queue, state machine, events | 0.1 | todo |
+| 2D.1 | Job queue, state machine, events | 0.3 | todo |
 | 2D.2 | Scheduling policies, cancel, retry | 2D.1 | todo |
-| 2D.3 | Completion validation + startup reconciliation | 2D.2, 1.1 | todo |
+| 2D.3 | Attempt markers + completion validation | 2D.2, 1.1 | todo |
 | 2E.1 | Index builders | 1.1 | todo |
 | 2E.2 | Generated library AGENTS.md + .gitignore | 1.1 | todo |
-| 3.1 | Library services + CLI (`validate`, `reindex`) | 1.3, 2E.1, 2E.2 | todo |
-| 3.2 | Import services (preview + apply) | 2A.2, 1.2 | todo |
-| 3.3 | Processing services (convert, recipes, cancel, retry) | 2B.2, 2C.3, 2D.3 | todo |
+| 3.0 | Library runtime registry + paper-session boundary | 1.2, 2D.3 | todo |
+| 3.1 | Library services + CLI (`validate`, `reindex`) | 3.0, 1.3, 2E.1, 2E.2 | todo |
+| 3.2 | Import services (preview + apply) | 3.0, 2A.2 | todo |
+| 3.3 | Processing services (convert, recipes, cancel, retry) | 3.0, 2B.2, 2C.3 | todo |
 | 4.1 | Web API + SSE | 3.1, 3.2, 3.3 | todo |
 | 4.2 | UI shell + papers list + launch actions | 4.1 | todo |
 | 4.3 | Import UI (preview/apply) | 4.1 | todo |
@@ -62,8 +65,9 @@ WP here.
   up to five agents can run concurrently, one per track.
 - **2B.0** (Marker corpus + pins) touches no shared code and can start
   immediately, in parallel with everything.
-- Phase 3 WPs are independent of each other; Phase 4 WPs 4.2–4.5 are
-  independent of each other after 4.1.
+- After **3.0** establishes the one runtime/mutation boundary, Phase 3's
+  user-facing service WPs are independent. Phase 4 WPs 4.2–4.5 are
+  independent after 4.1.
 - File ownership: track A owns `ingest/`, B owns `convert/`, C owns
   `recipes/`, D owns `jobs/`, E owns `indexes/`. `tests/fakes.py` is shared
   between B (FakeConverter) and C (FakeLLMProvider) — keep the classes
@@ -76,7 +80,7 @@ WP here.
 ### WP-0.1 Skeleton, tooling, contracts — DONE
 
 Delivered: `pyproject.toml`, package skeleton with responsibility docstrings,
-frozen contracts (`library/paths.py`, `library/model.py`,
+versioned contracts (`library/paths.py`, `library/model.py`,
 `convert/contract.py`, `recipes/provider.py`, `recipes/model.py`,
 `jobs/model.py`), built-in recipe templates, ADRs 0001–0004, AGENTS.md, this
 plan, sanity tests.
@@ -85,7 +89,8 @@ plan, sanity tests.
 
 - **Owns:** `config.py`, `cli.py` (doctor path only), `tests/test_config.py`,
   `tests/test_doctor.py`.
-- **Goal:** finished `AppConfig` loading (env + `.env`) and a
+- **Goal:** finished `AppConfig` loading (environment over
+  `~/.paper-pipeline/.env`) and a
   `paper-pipeline doctor` command that reports, with actionable messages:
   Python version, package version, whether the `marker` extra is importable,
   whether LLM credentials and a model slug (`llm_model`) are configured
@@ -94,8 +99,17 @@ plan, sanity tests.
 - **Requirements:** doctor never triggers heavy imports at module scope;
   probe the `marker` extra in a subprocess or via `importlib.util.find_spec`.
   Exit code 0 when core is healthy even if optional extras are absent.
-- **Tests:** config precedence (env over `.env` over default); doctor output
+- **Tests:** config precedence (environment over home-directory `.env` over default); doctor output
   with and without extras (monkeypatched); secrets never appear in output.
+
+### WP-0.3 Contract feedback pass: lanes, recovery, source identity — DONE
+
+Amended ADR-0002/0004 and the skeleton contracts before implementation:
+mandatory paper lanes across job categories, recipe batches as the cache-reuse
+unit, disposable in-flight markers instead of durable `running` rewrites,
+separate installed-artifact provenance from the latest attempt, and SHA-256
+input identity so source replacement makes dependent outputs stale by
+comparison rather than scattered invalidation code.
 
 ---
 
@@ -116,7 +130,12 @@ plan, sanity tests.
     into place. Citekey validated against `paths.CITEKEY_PATTERN` plus
     Windows reserved names.
   - All serialized paths are relative POSIX; add an invariant test that
-    scans every written file for absolute paths and drive letters.
+    validates path-typed fields (bibliographic text is not a path).
+  - Source files are hashed with SHA-256 while being staged; `paper.json`
+    stores `source_sha256`. Helpers derive conversion/recipe freshness by
+    comparing recorded input hashes, never by manually toggling stale flags.
+  - Storage's raw write methods are infrastructure APIs. Phase 3 services may
+    mutate papers only through a `PaperSession` supplied inside a paper lane.
   - `list_papers` tolerates and reports (not raises) invalid paper dirs.
 - **Tests:** round-trips, atomicity under simulated interruption (kill
   between temp write and rename → library still opens, no partial files),
@@ -127,15 +146,15 @@ plan, sanity tests.
 
 - **Owns:** artifact-install portion of `library/storage.py`,
   `tests/library/test_artifacts.py`.
-- **Goal:** `Library.stage_dir()` (fresh temp dir under `.pp/tmp`) and
-  `Library.install_artifact(citekey, relative_dest, staged_src)` for files
-  and directories (`figures/`), with validation hooks (e.g. non-empty file).
+- **Goal:** `Library.stage_dir()` (fresh temp dir under `.pp/tmp`) and atomic
+  installation for a single artifact or a declared conversion bundle
+  (`transcription.md` plus `figures/`), with validation hooks and hashes.
 - **Requirements:** install is rename-based on the same filesystem; replaces
   existing artifact atomically; cleans up abandoned staging dirs older than
   the current process on request (`Library.clean_stale_staging()`).
-- **Tests:** file and directory installs, replacement, interrupted install
-  leaves prior artifact intact, staging cleanup never touches installed
-  content.
+- **Tests:** file and bundle installs, replacement, interrupted install leaves
+  the prior recorded artifact valid or a detectable hash mismatch (never a
+  false success), staging cleanup never touches installed content.
 
 ### WP-1.3 Library validator
 
@@ -161,7 +180,8 @@ plan, sanity tests.
 - **Owns:** `ingest/rdf.py`, `tests/fixtures/zotero/`, `tests/ingest/test_rdf.py`.
 - **Goal:** parse a Zotero RDF export directory into `ImportRecord` objects
   (define the dataclass in `ingest/rdf.py`: `metadata: PaperMetadata`,
-  `attachment_path: Path | None`, `problems: list[str]`).
+  `attachment_path: Path | None`, `attachment_sha256: str | None`,
+  `problems: list[str]`). Hash the selected attachment while reading it.
 - **Requirements:**
   - Support journal articles, conference papers, preprints, books/chapters;
     map to `PaperMetadata` fields; unknown item types produce a record with
@@ -180,13 +200,15 @@ plan, sanity tests.
 
 - **Owns:** `ingest/plan.py`, `tests/ingest/test_plan.py`.
 - **Goal:** `build_import_plan(library, records) -> ImportPlan` with
-  `additions`, `refreshes`, `problems`, and duplicate candidates (same DOI
-  or normalized-title match under a different citekey).
+  `additions`, metadata-only `refreshes`, explicit `source_replacements`,
+  `problems`, and duplicate candidates (same DOI or normalized-title match
+  under a different citekey). Identical source hashes are metadata-only;
+  changed bytes are never hidden inside an ordinary refresh.
 - **Requirements:** pure function over data; never touches the filesystem
   beyond reading the library; plan is fully serializable for the preview UI.
-- **Tests:** first import (all additions), re-import (all refreshes), mixed,
-  duplicate candidate surfaced not merged, invalid citekey routed to
-  problems.
+- **Tests:** first import, identical re-import, metadata-only refresh, changed
+  PDF surfaced as source replacement, mixed plan, duplicate candidate surfaced
+  not merged, invalid citekey routed to problems.
 
 ### Track B — Conversion
 
@@ -288,16 +310,18 @@ plan, sanity tests.
 
 - **Owns:** `FakeLLMProvider` in `tests/fakes.py`, OpenAI adapter in
   `recipes/openai_provider.py` (a separate module — `recipes/provider.py`
-  is a frozen contract file and must stay adapter-free),
+  is the versioned contract module and stays adapter-free),
   `tests/recipes/test_providers.py`.
 - **Goal:** fake provider (canned responses, call recording, failure/delay
   modes) and an OpenAI-compatible adapter supporting text input and PDF
   input (file upload), configured from `AppConfig`.
 - **Requirements:** the adapter imports `openai` lazily (`llm` extra);
   errors map to `ok=False` with a safe message — never echo the API key or
-  full request. Respect `llm_base_url` for compatible endpoints.
-- **Tests:** fake provider behavior (default suite); adapter tests marked
-  `llm` are minimal smoke only.
+  full request. Respect `llm_base_url` for compatible endpoints. Provider
+  instances live on `LibraryRuntime`; the adapter may reuse uploaded PDF IDs
+  by `ProviderRequest.input_sha256` during sequential recipe batches.
+- **Tests:** fake provider behavior and mocked-adapter request/cache behavior
+  run in the default suite; a real adapter smoke is marked `llm`.
 
 #### WP-2C.3 Recipe runner + provenance
 
@@ -306,7 +330,8 @@ plan, sanity tests.
   staged output file for `Library.install_artifact` and a `RecipeRecord`.
 - **Requirements:** missing declared input fails fast with a clear error;
   front matter exactly per ADR-0003; provenance recorded in the returned
-  `RecipeRecord`; output validated non-empty before staging succeeds.
+  `RecipeRecord`, including input/output SHA-256; output validated non-empty
+  before staging succeeds.
 - **Tests (FakeLLMProvider):** success with front matter asserted, missing
   transcription input, provider failure, empty response rejected, provenance
   contains no credential-like config values.
@@ -316,40 +341,42 @@ plan, sanity tests.
 #### WP-2D.1 Job queue, state machine, events
 
 - **Owns:** `jobs/queue.py`, `jobs/events.py`, `tests/jobs/test_queue.py`.
-- **Goal:** an async in-process `JobQueue`: enqueue -> `Job`, legal state
-  transitions only (illegal transitions raise), subscription-based event bus
-  publishing every transition plus progress messages.
-- **Requirements:** no HTTP, no library imports; job execution is an
-  injected async callable so tests drive it deterministically.
+- **Goal:** an async in-process `JobQueue`: resource-aware enqueue -> `Job`,
+  legal state transitions only, and a subscription-based event bus.
+- **Requirements:** no HTTP or library imports; expose separate
+  `enqueue_paper`, `enqueue_library_read`, and `enqueue_library_write` methods.
+  `enqueue_paper` acquires the `(library_key, citekey)` lane internally before
+  invoking an injected async callable. There is no unlocked paper enqueue API.
 - **Tests:** transition legality, event ordering, subscriber isolation
   (slow subscriber cannot block the queue).
 
 #### WP-2D.2 Scheduling policies, cancel, retry
 
 - **Owns:** scheduling in `jobs/queue.py`, `tests/jobs/test_scheduling.py`.
-- **Goal:** ADR-0004 policies: conversion concurrency 1; recipe concurrency
-  N across papers with strict per-paper FIFO of 1; mutating maintenance
-  (reindex) exclusive with all other jobs, read-only maintenance (validate)
-  non-exclusive. Cancel queued (immediate) and running (cooperative token +
-  process-tree kill hook). Retry re-enqueues a terminal
-  failed/cancelled/interrupted job.
-- **Tests:** two conversions never overlap; recipes for the same paper are
-  strictly sequential while different papers interleave (assert via
-  FakeLLMProvider call log); reindex excludes others while validate does
-  not block running jobs; cancel and retry paths; queue drains cleanly on
-  shutdown.
+- **Goal:** ADR-0004 policies: conversion concurrency 1; recipe-batch
+  concurrency N across papers; every operation within a paper lane is
+  exclusive across categories; library-write barriers exclude paper lanes;
+  library reads remain non-exclusive. Cancel queued immediately and running
+  work through a cooperative token plus process-tree kill hook.
+- **Tests:** two conversions never overlap; a conversion, recipe batch, and
+  import for one paper can never overlap; different paper recipe batches do;
+  recipe names inside one batch run sequentially on the same provider; reindex
+  excludes paper lanes while validate does not; cancel/retry and clean shutdown.
 
-#### WP-2D.3 Completion validation + startup reconciliation
+#### WP-2D.3 Attempt markers + completion validation
 
-- **Owns:** `jobs/` glue to `library`, `tests/jobs/test_recovery.py`.
-- **Goal:** (a) a job may only reach `SUCCEEDED` after its completion
-  validator confirms expected artifacts on disk; (b)
-  `reconcile_library(library)` rewrites `paper.json` records stuck in a
-  running state to `interrupted` at startup, per ADR-0004.
-- **Tests:** validator rejects missing/empty artifact → job `FAILED` with a
-  clear error; synthesized "crashed mid-run" library reconciles to
-  `interrupted` and shows as retryable; reconciliation never touches healthy
-  records.
+- **Owns:** `jobs/recovery.py`, queue completion hooks,
+  `tests/jobs/test_recovery.py` (no library-model imports; storage callbacks
+  are injected and wired by WP-3.0).
+- **Goal:** a job may only reach `SUCCEEDED` after its completion validator
+  confirms and hashes expected artifacts. Atomically create a disposable
+  `.pp/attempts/<job-id>.json` before external work; remove it only after the
+  completed attempt/artifact record is durable. Startup scans leftover markers
+  into interrupted, retryable views without rewriting `paper.json`.
+- **Tests:** missing/empty or hash-mismatched artifact fails completion; crash
+  before terminal record leaves a marker and preserves the prior artifact
+  record; startup synthesizes interrupted work; a marker whose attempt is
+  already terminal is cleaned as stale; deleting `.pp/` loses only diagnostics.
 
 ### Track E — Indexes and generated guidance
 
@@ -359,8 +386,9 @@ plan, sanity tests.
 - **Goal:** `rebuild_indexes(library)` producing `indexes/titles.md`,
   `authors.md`, `summaries.md` (from `generated/summary.md`: front matter
   stripped, then the first body line — which the summary recipe requires
-  to be a one-sentence TL;DR), `status.md` (papers with missing/failed
-  outputs). Format: one line
+  to be a one-sentence TL;DR), `status.md` (papers with missing, stale, or
+  most-recently-failed outputs). Freshness is derived from recorded input
+  hashes. Format: one line
   per paper, `<citekey>: <value>`, sorted by citekey, LF endings.
 - **Requirements:** deterministic (byte-identical on unchanged input);
   written atomically; entries for missing paper dirs dropped; wholly derived
@@ -383,6 +411,24 @@ plan, sanity tests.
 
 ## Phase 3 — Application services (integration; one implementation for CLI and web)
 
+### WP-3.0 Library runtime registry + paper-session boundary
+
+- **Owns:** `services/runtime.py`, `tests/services/test_runtime.py`.
+- **Goal:** a process-wide registry owns one shared `JobQueue`/event bus and,
+  keyed by resolved library root, returns one `LibraryRuntime` per open
+  library. Each runtime owns provider instances and its raw `Library` storage
+  object while using the application queue.
+- **Requirements:** user-facing services receive a runtime, not an independently
+  opened storage object. `LibraryRuntime.enqueue_paper(...)` delegates to the
+  queue and supplies the worker a citekey-scoped `PaperSession` only after its
+  lane is held. `PaperSession` is the service-layer surface for record updates,
+  staging, and artifact installs. Library-read/write barrier methods are also
+  exposed here. Reopening the same resolved path reuses the runtime.
+- **Tests:** same path (including equivalent relative/case variants) returns the
+  same runtime; different libraries do not share paper lanes; service modules
+  outside `runtime.py` do not open storage directly; deliberate cross-category
+  read-modify-write races preserve every field.
+
 ### WP-3.1 Library services + CLI (`validate`, `reindex`)
 
 - **Owns:** `services/` (library ops), `cli.py` wiring,
@@ -390,37 +436,43 @@ plan, sanity tests.
 - **Goal:** `create_library`, `open_library`, `validate_library`,
   `rebuild_indexes` services (thin orchestration over Phase 1/2E), wired to
   `paper-pipeline validate <path>` and `paper-pipeline reindex <path>`.
-- **Requirements:** reindex also regenerates `AGENTS.md` and `.gitignore`;
-  runs under the maintenance job category when invoked while serving.
+- **Requirements:** reindex also regenerates `AGENTS.md` and `.gitignore` and
+  uses the runtime's library-write barrier; validate uses its read operation.
 - **Tests:** service-level (no HTTP); CLI exit codes and human-readable
   output for healthy and problematic libraries.
 
 ### WP-3.2 Import services (preview + apply)
 
 - **Owns:** `services/` (import ops), `tests/services/test_import_services.py`.
-- **Goal:** `preview_import(library, export_path) -> ImportPlan` and
-  `apply_import(library, plan) -> ImportReport`. Apply: create paper dirs,
-  copy PDFs into `source/` (staged + atomic), write `paper.json`; refresh
-  replaces Zotero-owned metadata wholesale but never touches processing
-  records or artifacts; plan `problems` entries are skipped and reported.
+- **Goal:** `preview_import(runtime, export_path) -> ImportPlan` and
+  `apply_import(runtime, plan) -> ImportReport`. Apply schedules one paper-lane
+  operation per accepted record: create/refresh metadata and stage/copy PDFs.
+  Ordinary refresh preserves processing records. An accepted source replacement
+  updates `source_sha256`; existing outputs remain but automatically read stale
+  because their recorded input hashes no longer match.
 - **Requirements:** import never deletes papers; re-running the same apply
   is idempotent; a failed copy leaves no half-created paper dir.
-- **Tests:** first import, additive re-import, metadata refresh preserving
-  conversion state, missing attachment skip, idempotency, interruption
-  mid-apply leaves the library valid.
+- **Tests:** first import, additive re-import, metadata-only refresh preserving
+  artifact provenance, explicit source replacement becomes stale without
+  deleting old outputs, missing attachment skip, idempotency, and interruption
+  mid-apply leaves the library valid; import cannot overlap conversion for the
+  same citekey.
 
 ### WP-3.3 Processing services (convert, recipes, cancel, retry)
 
 - **Owns:** `services/` (processing ops), `tests/services/test_processing_services.py`.
-- **Goal:** `queue_conversion(library, citekeys)`,
-  `queue_recipe(library, recipe_name, citekeys)`, `cancel_job(id)`,
+- **Goal:** `queue_conversion(runtime, citekeys)`,
+  `queue_recipes(runtime, recipe_names, citekeys)`, `cancel_job(id)`,
   `retry_job(id)`; selection helpers for "all pending". Wires runner +
-  recipes + jobs + storage: mark `paper.json` running → execute → validate →
-  atomic install → terminal record, per ADR-0004 write ordering.
+  recipes + jobs + storage: create attempt marker → execute within paper lane →
+  validate/hash → atomic install → record completed artifact/attempt → remove
+  marker. It never writes `running` into `paper.json`.
 - **Tests (fakes only):** full conversion and recipe flows through the real
   queue into a temp library; failure recorded in `paper.json` with log path
   under `.pp/`; cancel mid-conversion kills the child and records
-  `cancelled`; retry succeeds after transient fake failure.
+  `cancelled`; a failed rerun preserves last-good artifact provenance; retry
+  succeeds after transient fake failure; recipe batches reuse one provider
+  instance/input context per paper.
 
 ---
 
@@ -435,7 +487,9 @@ plan, sanity tests.
   the job event bus. `paper-pipeline serve` starts uvicorn.
 - **Requirements:** routes contain no business logic; API responses are
   service models serialized, not ad-hoc dicts; SSE stream survives client
-  disconnect without affecting jobs. The server binds localhost by default.
+  disconnect without affecting jobs. The app uses the shared runtime registry,
+  never a per-request queue or independently opened library. The server binds
+  localhost by default.
 - **Tests:** API contract tests with httpx + fakes; SSE delivers transition
   events; disconnecting a client does not cancel a running job.
 
@@ -445,7 +499,7 @@ plan, sanity tests.
   `app.css`), `tests/web/test_ui_papers.py` (marked `browser`).
 - **Goal:** base layout with navigation and SSE-driven job status strip;
   papers table with filters (text, conversion state, recipe state), row
-  selection, actions: convert selected, run recipe selected, select-all
+  selection, actions: convert selected, run selected recipe batch, select-all
   -pending. Stable URLs: `/`, `/papers`.
 - **Requirements:** selection is the only client-owned state; all data
   rendering is server-side fragments; designed empty and error states; no
@@ -468,7 +522,7 @@ plan, sanity tests.
 - **Owns:** `web/templates/` (jobs), `tests/web/test_ui_jobs.py` (browser).
 - **Goal:** `/jobs`: queued/running/terminal lists updating via SSE,
   per-job log tail view, cancel and retry buttons; interrupted work rows
-  synthesized from `paper.json` records (ADR-0004), labeled and retryable.
+  synthesized from `.pp/attempts/` markers (ADR-0004), labeled and retryable.
 - **Tests (browser):** live update on state change, cancel and retry flows,
   disconnected state (SSE dropped) shows a designed indicator and recovers.
 

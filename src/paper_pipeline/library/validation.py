@@ -8,6 +8,8 @@ Implemented by WP-1.3. Checks include:
 - Citekeys match ``paths.CITEKEY_PATTERN``.
 - Declared source PDFs exist (a Git clone legitimately lacks them; report
   as "not reprocessable", not corruption).
+- Recorded source/transcription/output hashes match installed files; input-hash
+  mismatches are reported as stale dependent artifacts, not corruption.
 - No absolute paths in any stored record.
 - Indexes reference only papers that still exist (staleness report).
 

@@ -18,7 +18,11 @@ Planned surface (signatures may gain parameters, not lose them):
   (valid papers, plus problem descriptions for invalid paper dirs —
   reported, never raised)
 - ``Library.read_paper(citekey: str) -> PaperRecord``
-- ``Library.write_paper(record: PaperRecord) -> None``          (atomic)
-- ``Library.install_artifact(citekey, relative_dest, staged_src) -> None``  (atomic)
+- ``Library.write_paper(record: PaperRecord) -> None``          (atomic infrastructure API)
+- ``Library.install_artifact(...)`` / ``install_conversion_bundle(...)``   (atomic)
 - ``Library.operational_dir() -> Path``                          (.pp/, created on demand)
+
+Application services never call raw mutation methods directly. A
+``LibraryRuntime`` supplies a citekey-scoped ``PaperSession`` only while the
+shared job queue holds that paper's lane (ADR-0004).
 """

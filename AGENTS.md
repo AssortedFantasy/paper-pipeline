@@ -76,9 +76,9 @@ web client (templates/static)
 - Conversion and recipes share the single job system in `paper_pipeline.jobs`.
   Never build a second queue, worker loop, or status store.
 
-### Frozen contracts
+### Versioned contracts
 
-These may only change via a new/amended ADR in `docs/adr/`:
+These are deliberate compatibility boundaries, not permanently frozen designs:
 
 - Library layout and file names — `library/paths.py` (ADR-0002)
 - Serialized formats `library.json` / `paper.json` — `library/model.py` (ADR-0002)
@@ -87,16 +87,19 @@ These may only change via a new/amended ADR in `docs/adr/`:
 - Recipe template format — `recipes/model.py` (ADR-0003)
 - Job model and scheduling policies — `jobs/model.py` (ADR-0004)
 
-If your work package seems to require changing one, stop and flag it instead
-of quietly editing the contract.
+They may change as implementation feedback arrives. Change them deliberately:
+update or supersede the relevant ADR, review the library format version when
+serialized data changes, and update contract/compatibility tests in the same
+work package. Do not let parallel tracks independently drift the same contract.
 
 ## Library and state ownership
 
 Three kinds of state — keep them distinct:
 
 1. **Library content** (essential): `library.json`, `papers/<citekey>/paper.json`,
-   `source/`, `transcription.md`, `figures/`. Never regenerated silently,
-   never deleted by any operation. Import never deletes papers.
+   `source/`, `transcription.md`, `figures/`. Never regenerated or replaced
+   silently. Explicit reruns/source replacement install atomically; import
+   never deletes papers merely because they disappeared from a later export.
 2. **Derived content** (rebuildable): `indexes/`, library `AGENTS.md`,
    library `.gitignore`, `generated/*`. Must be deterministically
    rebuildable from library content; deleting them loses nothing permanent.
@@ -106,9 +109,10 @@ Three kinds of state — keep them distinct:
 
 Hard rules:
 
-- **No second database.** All durable state lives inside the library.
-  Restart recovery reads `paper.json` files and artifacts, never in-memory
-  or browser state.
+- **No second database.** Durable artifact truth lives in `paper.json` and the
+  artifacts. In-flight attempt markers under `.pp/attempts/` are disposable
+  operational hints used to report interrupted work; losing them must not make
+  a valid artifact invalid.
 - **All stored paths are library-relative POSIX paths.** Writing an absolute
   path into any library file is a bug, always.
 - **All writes are atomic**: stage under the library `.pp/tmp`, validate,
@@ -116,14 +120,19 @@ Hard rules:
   exist.
 - **No secrets in libraries** — not in provenance, not in logs written under
   the library, not in generated files. Secrets come only from `AppConfig`
-  (environment / `.env`).
+  (environment or the user-level config under `~/.paper-pipeline/`; never a
+  library-local `.env`).
 
 ## Heavy work: GPU, child processes, concurrency
 
 - Every conversion runs in a **fresh child process**; one conversion at a
   time globally (default). Cancellation must kill the whole process tree.
-- Recipe jobs: concurrent across papers, **strictly sequential per paper**
-  (provider cache reuse). Do not "optimize" this away.
+- Every paper mutation goes through the shared job system's **paper lane**.
+  A lane is exclusive across conversion, recipe batches, and import apply;
+  callers cannot opt out and must not write `paper.json` directly.
+- Recipe batches are concurrent across papers and **strictly sequential within
+  one paper lane** so the provider can reuse the same input context. Do not
+  "optimize" this away.
 - Never mark work successful from terminal output. Validate the expected
   artifacts on disk (non-empty `transcription.md`, declared `generated/`
   file) before recording success.
@@ -155,7 +164,8 @@ A work package is done when:
 2. All required checks above pass locally, from a clean `uv sync`.
 3. New behavior is covered by tests in the correct marker category.
 4. Success was verified from durable artifacts (files on disk), not logs.
-5. Frozen contracts are unchanged, or an ADR records the change.
+5. Versioned contract changes include the ADR, format-version review, and
+   compatibility-test updates they require.
 6. PLAN.md's status column for the work package is updated.
 7. No stray files: temp outputs, real PDFs, or credentials are not committed.
 

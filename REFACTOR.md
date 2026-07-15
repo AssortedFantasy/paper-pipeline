@@ -158,6 +158,10 @@ them as requirements, equivalent to the **Decided Product Direction** above.
 - **Papers removed from a later Zotero export are retained.** Import never
   deletes library papers. Cleanup policies, if ever needed, are a deliberate
   later feature.
+- **Changed source bytes are explicit.** Re-importing the same citekey with an
+  identical PDF is a metadata refresh. Different PDF bytes are shown as a
+  source replacement before apply, and dependent outputs become stale without
+  being silently deleted.
 - **Version control policy:** everything is committable except logs,
   intermediates, and the source PDFs, which the generated `.gitignore`
   excludes by default. Consequence: a Git *clone* of a library is readable
@@ -353,6 +357,12 @@ sent back-to-back let the second hit it. The scheduler must therefore:
 - allow concurrency across different papers, up to provider limits; and
 - keep GPU conversion serialized and isolated from recipe scheduling.
 
+All operations that mutate one paper — import apply, conversion, and recipe
+execution — share the same per-paper execution lane. This is an enforced
+scheduler boundary, not a lock each caller must remember to acquire. A batch of
+recipes for one paper runs within one lane/provider context so cache reuse is a
+property of the work unit.
+
 The first implementation can use simple task categories and policies. It does
 not require a general workflow graph.
 
@@ -383,7 +393,9 @@ not require a general workflow graph.
   not cancel server-side jobs.
 - Validate outputs on disk before reporting completion.
 - Recover conservatively from application interruption, without trusting a
-  stale in-memory status.
+  stale in-memory status. Completed artifact truth remains durable;
+  disposable operational markers may identify interrupted attempts but never
+  replace that truth.
 
 The UI server itself does not need to be a persistent operating-system service
 in the first version. If the application process exits, active child work may
@@ -467,9 +479,9 @@ machine-specific settings.
 
 ### First Useful Version
 
-- Application configuration lives outside the library, in a small user-level
-  config file and/or environment variables: LLM provider credentials, model
-  selection, and converter/GPU settings.
+- Application configuration lives outside the library, in a small
+  home-directory user config file and/or environment variables: LLM provider
+  credentials, model selection, and converter/GPU settings.
 - Secrets are only ever read from application configuration or the
   environment. They are never written into a library, into logs stored in the
   library, or into recipe provenance metadata.

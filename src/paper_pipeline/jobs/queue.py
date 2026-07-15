@@ -1,13 +1,15 @@
 """Job queue and scheduler.
 
-Implemented by WP-2D.1/2D.2. Enforces the scheduling policies:
+Implemented by WP-2D.1/2D.2. The queue exposes resource-aware entry points so
+callers cannot forget locking:
 
-- ``CONVERSION``: global concurrency 1 (configurable, default 1).
-- ``RECIPE``: up to ``llm_concurrency`` jobs across papers, but never more
-  than one job per paper at a time — same-paper recipes run back-to-back to
-  reuse the provider's input cache.
-- ``MAINTENANCE``: reindex mutates derived files and runs exclusively with
-  all other jobs; validate is read-only and requires no exclusivity.
+- ``enqueue_paper``: one exclusive lane per (library, citekey), shared by
+  conversion, a sequential recipe batch, and import apply.
+- ``enqueue_library_write``: waits for paper lanes and blocks new ones while
+  mutating maintenance runs.
+- ``enqueue_library_read``: read-only validation without a write barrier.
+- Conversion also observes global concurrency 1; recipe batches observe
+  ``llm_concurrency`` across papers.
 
 Supports enqueue, cancel (current and queued), retry, and completion
 validation before a job may report SUCCEEDED. Survives browser disconnects:

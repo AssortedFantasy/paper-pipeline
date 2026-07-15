@@ -12,4 +12,6 @@ Indexes are derived content and never become the canonical paper registry.
 
 First indexes (WP-2E.1): ``titles.md``, ``authors.md``, ``summaries.md``,
 ``status.md`` — one line per paper, ``<citekey>: <value>``, sorted by citekey.
+Status freshness is derived from recorded input hashes, not manually maintained
+stale flags.
 """

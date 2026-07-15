@@ -1,8 +1,9 @@
 """Serialized library data types.
 
 These models define the JSON stored in ``library.json`` and each paper's
-``paper.json``. They are part of the library format contract: changing a
-field here is a format change and requires a version bump plus an ADR.
+``paper.json``. They are a versioned library format contract. Changes require
+an ADR update, compatibility tests, and a format-version review; the schema is
+expected to evolve as implementation feedback arrives.
 
 All stored paths are library-relative POSIX paths (forward slashes).
 """
@@ -40,62 +41,74 @@ class PaperMetadata(BaseModel):
     keywords: list[str] = Field(default_factory=list)
 
 
-class ArtifactState(StrEnum):
-    """Durable state of one processing artifact for one paper.
+class AttemptState(StrEnum):
+    """Terminal state of a completed processing attempt.
 
-    Lifecycle: pending -> running -> succeeded | failed | cancelled |
-    interrupted. ``running`` is written to ``paper.json`` before work starts
-    (ADR-0004 write ordering); startup reconciliation rewrites orphaned
-    ``running`` records to ``interrupted``.
+    Live ``queued``/``running`` state belongs to the in-memory job queue and
+    disposable ``.pp/attempts`` markers, not to durable artifact truth.
     """
 
-    PENDING = "pending"
-    RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
-    INTERRUPTED = "interrupted"
+
+
+class AttemptRecord(BaseModel):
+    """The latest normally completed attempt, whether or not it succeeded."""
+
+    id: str
+    state: AttemptState
+    started_at: datetime
+    finished_at: datetime
+    error: str | None = None
+    # Library-relative path under .pp/. Logs are diagnostics, never artifact truth.
+    log_path: str | None = None
 
 
 class ConversionRecord(BaseModel):
-    """Durable record of the most recent conversion attempt."""
+    """Provenance of the installed transcription plus the latest attempt.
 
-    state: ArtifactState = ArtifactState.PENDING
-    backend: str | None = None  # e.g. "marker"
+    A failed rerun changes ``last_attempt`` without erasing the provenance of
+    an older valid transcription. Freshness is derived by comparing
+    ``source_sha256`` with ``PaperRecord.source_sha256``.
+    """
+
+    source_sha256: str | None = None
+    transcription_sha256: str | None = None
+    backend: str | None = None  # e.g. "marker"; describes installed output
     backend_version: str | None = None
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    error: str | None = None  # short human-readable summary; details in .pp/ logs
+    completed_at: datetime | None = None
+    last_attempt: AttemptRecord | None = None
 
 
 class RecipeRecord(BaseModel):
-    """Durable record of the most recent run of one recipe for one paper.
+    """Provenance of an installed recipe output plus the latest attempt.
 
     Provenance only — never credentials.
     """
 
-    state: ArtifactState = ArtifactState.PENDING
     recipe_version: int | None = None
     provider: str | None = None
     model: str | None = None
     input_artifact: str | None = None  # e.g. "transcription.md" or "source/<file>.pdf"
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    error: str | None = None
+    input_sha256: str | None = None
+    output_sha256: str | None = None
+    completed_at: datetime | None = None
+    last_attempt: AttemptRecord | None = None
 
 
 class PaperRecord(BaseModel):
     """Contents of ``paper.json`` in each paper directory.
 
-    The durable source of truth for per-paper metadata and processing
-    status. Interruption recovery reconciles against this file and the
-    artifacts on disk — never against in-memory job state.
+    The durable source of truth for per-paper metadata and completed artifact
+    provenance. In-flight work is operational state (ADR-0004).
     """
 
     format_version: int
     metadata: PaperMetadata
     # Library-relative path to the source PDF, e.g. "papers/<citekey>/source/foo.pdf".
     source_pdf: str | None = None
+    source_sha256: str | None = None
     imported_at: datetime | None = None
     conversion: ConversionRecord = Field(default_factory=ConversionRecord)
     # Keyed by recipe name, e.g. "summary", "contributions".

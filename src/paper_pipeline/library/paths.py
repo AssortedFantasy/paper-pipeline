@@ -12,6 +12,7 @@ Layout (ADR-0002):
         .gitignore              # generated VCS policy (derived, rebuildable)
         indexes/                # small text indexes (derived, rebuildable)
         .pp/                    # operational noise: logs, temp dirs (disposable)
+            attempts/           # in-flight recovery hints, never artifact truth
         papers/
             <citekey>/
                 paper.json          # metadata + processing record (essential)
@@ -31,6 +32,7 @@ GITIGNORE_FILE = ".gitignore"
 INDEXES_DIR = "indexes"
 PAPERS_DIR = "papers"
 OPERATIONAL_DIR = ".pp"
+ATTEMPTS_DIR = "attempts"
 
 # Per-paper entries
 PAPER_FILE = "paper.json"

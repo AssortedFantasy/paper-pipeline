@@ -10,6 +10,6 @@ Implemented by WP-2C.3. For one (paper, recipe) pair:
    model, created timestamp, input artifact — never credentials).
 5. Return the staged output for atomic installation into ``generated/``.
 
-Scheduling (same-paper sequencing for provider cache reuse) is the job
+Scheduling and same-paper recipe batching for provider cache reuse are the job
 layer's responsibility, not this module's.
 """

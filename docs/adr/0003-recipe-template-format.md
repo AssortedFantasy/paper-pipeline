@@ -40,6 +40,7 @@ recipe_version: 1
 provider: openai
 model: gpt-5
 input: transcription.md
+input_sha256: <sha256-of-transcription>
 created: 2026-07-14T12:00:00Z
 ---
 - The paper introduces ...

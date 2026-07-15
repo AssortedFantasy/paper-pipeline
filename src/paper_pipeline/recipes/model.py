@@ -1,4 +1,4 @@
-"""Recipe definitions. Template contract is FROZEN — changes require an ADR.
+"""Recipe definitions and their versioned template contract.
 
 A recipe is a Markdown file with YAML front matter (ADR-0003):
 

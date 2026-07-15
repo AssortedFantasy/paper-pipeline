@@ -6,9 +6,10 @@ and would be expensive to relitigate.
 
 ## Rules
 
-- Contracts marked FROZEN in source docstrings (converter, provider, recipe
-  template, job model, library format) may only change through a new or
-  amended ADR.
+- Versioned contracts (converter, provider, recipe template, job model, and
+  library format) are expected to improve through feedback. Change them in a
+  new or amended ADR and update their compatibility tests; do not treat an
+  early skeleton as an irreversible design.
 - Number sequentially. Never delete an ADR; supersede it and link both ways.
 - Keep each ADR short: context, decision, consequences.
 

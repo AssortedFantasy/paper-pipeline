@@ -1,6 +1,6 @@
 # ADR-0002: Generated library layout
 
-Status: Accepted (2026-07-14)
+Status: Accepted, amended (2026-07-15)
 
 ## Context
 
@@ -38,8 +38,10 @@ Key choices:
    `papers/*/source/`); and agent lookup is still one predictable hop
    (`papers/<citekey>/`), documented in the generated AGENTS.md.
 2. **`paper.json` is the single canonical per-paper file**: bibliographic
-   metadata plus the durable processing record (conversion state, per-recipe
-   state). This is the source of truth for interruption recovery.
+   metadata, the current source PDF hash, installed artifact provenance, and
+   the latest completed attempt for conversion and each recipe. Live job state
+   does not overwrite completed artifact truth; disposable in-flight markers
+   live under `.pp/attempts/` as specified by ADR-0004.
 3. **Source-derived vs LLM-generated separation is by placement**:
    `transcription.md`/`figures/` come from the paper; everything under
    `generated/` comes from an LLM and carries YAML front matter provenance
@@ -53,6 +55,14 @@ Key choices:
    silently renamed.
 6. `library.json` and `paper.json` carry `format_version` (currently 1).
    Readers reject newer versions with an actionable message.
+7. The source PDF's SHA-256 is recorded in `paper.json`. Conversion records
+   store the source hash they consumed; recipe records store the hash of the
+   PDF or transcription they consumed. Freshness is derived by comparing
+   hashes, so a replaced PDF cannot silently leave downstream work current.
+8. The schema is versioned, not frozen. Before the first stable release,
+   implementation feedback may amend format version 1 while no user libraries
+   exist. Once libraries have been produced for use, incompatible serialized
+   changes bump `format_version` and add a compatibility or migration test.
 
 ## Consequences
 
@@ -62,3 +72,7 @@ Key choices:
   validator reports this and `reindex` repairs it (per REFACTOR.md).
 - A Git clone lacks `source/` PDFs; the validator classifies this as "not
   reprocessable", not an error.
+- Re-importing identical PDF bytes is a metadata-only refresh. Different bytes
+  are shown as a source replacement in the import preview; once accepted, hash
+  comparison makes existing conversion and recipe outputs visibly stale
+  without deleting them.

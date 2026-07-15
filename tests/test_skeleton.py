@@ -6,7 +6,7 @@ tooling loop (uv, pytest, ruff, pyright) works end to end.
 
 import paper_pipeline
 from paper_pipeline.convert.contract import ConversionRequest, ConversionResult, Converter
-from paper_pipeline.jobs.model import Job, JobKind, JobState
+from paper_pipeline.jobs.model import Job, JobKind, JobScope, JobState
 from paper_pipeline.library import paths
 from paper_pipeline.library.model import PaperMetadata, PaperRecord
 from paper_pipeline.recipes.model import RecipeDefinition
@@ -22,7 +22,7 @@ def test_core_contracts_importable() -> None:
     assert LLMProvider is not None
     assert ConversionRequest and ConversionResult
     assert ProviderRequest and ProviderResult
-    assert RecipeDefinition and Job and JobKind and JobState
+    assert RecipeDefinition and Job and JobKind and JobScope and JobState
     assert PaperMetadata and PaperRecord
 
 

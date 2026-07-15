@@ -1,4 +1,4 @@
-"""The converter contract. FROZEN for parallel work — changes require an ADR.
+"""The versioned converter contract.
 
 A converter takes one PDF and produces Markdown plus optional figure assets
 in a staging directory. It knows nothing about libraries, jobs, or HTTP.

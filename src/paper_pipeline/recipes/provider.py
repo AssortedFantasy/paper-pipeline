@@ -1,4 +1,4 @@
-"""LLM provider contract. FROZEN for parallel work — changes require an ADR.
+"""Versioned LLM provider contract.
 
 The default dev loop and test suite use a fake provider; the OpenAI-compatible
 adapter (WP-2C.2) requires the ``llm`` extra and real credentials, and is only
@@ -18,6 +18,9 @@ class ProviderRequest:
     # Exactly one of text_input / pdf_input is set, per the recipe's declared input.
     text_input: str | None = None
     pdf_input: Path | None = None
+    # Hash of the selected PDF or transcription. Adapters may use it to reuse
+    # uploaded files/provider context across one paper's sequential recipe batch.
+    input_sha256: str = ""
     model: str = ""
 
 
