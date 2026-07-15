@@ -91,6 +91,7 @@ async def queue_conversion(
                     state.result = result
                     if not result.ok:
                         state.log_path = _install_conversion_log(session, job, result)
+                        job.log_path = state.log_path
                         raise ProcessingError(result.error or "conversion failed")
                     if not token.begin_commit():
                         raise asyncio.CancelledError
@@ -104,6 +105,7 @@ async def queue_conversion(
                         f"conversion-{job.id}.log",
                         f"{type(error).__name__}: {error}",
                     )
+                    job.log_path = state.log_path
                 raise
 
         def validate(
@@ -221,6 +223,7 @@ async def queue_recipes(
                     f"recipe-{job.id}.log",
                     f"{type(error).__name__}: {error}",
                 )
+                job.log_path = state.log_path
                 raise
             finally:
                 for _recipe, result in staged_results:

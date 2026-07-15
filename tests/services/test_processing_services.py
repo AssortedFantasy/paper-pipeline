@@ -148,6 +148,7 @@ async def test_failed_rerun_preserves_last_good_conversion_and_records_log(
         )
     )[0]
     assert (await runtime.queue.wait(failed.id)).state is JobState.FAILED
+    assert failed.log_path is not None
     failed_record = await _read(runtime)
     assert failed_record.conversion.last_attempt is not None
     assert failed_record.conversion.last_attempt.log_path is not None
@@ -332,6 +333,7 @@ async def test_recipe_failure_records_attempt_and_operational_log(tmp_path: Path
         )
     )[0]
     assert (await runtime.queue.wait(failed.id)).state is JobState.FAILED
+    assert failed.log_path is not None
     after = await _read(runtime)
     attempt = after.recipes["summary"].last_attempt
     assert attempt is not None
