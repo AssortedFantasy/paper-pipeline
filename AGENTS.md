@@ -154,7 +154,7 @@ Run these and ensure they pass before considering work done:
 | Conversion / jobs | Above + child-process failure/timeout/cancellation tests with the fake converter |
 | Recipes / providers | Above + fake-provider tests incl. provenance and per-paper sequencing |
 | Web API | Above + API contract tests |
-| UI (templates/static/routes) | Above + `uv run pytest -m browser` incl. visual regression snapshots |
+| UI (templates/static/routes) | Above + `uv run pytest -m browser` incl. visual regression snapshots; update baselines with `uv run pytest -m browser tests/web/test_visual.py --update-snapshots` |
 | Dependencies (`pyproject.toml`) | Above + confirm default `uv sync` stays GPU-free + `uv lock` committed |
 
 ## Definition of done

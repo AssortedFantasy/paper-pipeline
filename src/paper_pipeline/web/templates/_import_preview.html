@@ -1,0 +1,90 @@
+{% if error %}
+  <div class="alert alert-error" role="alert"><strong>Import could not continue.</strong> {{ error }}</div>
+{% elif message %}
+  <div class="alert alert-success" role="status">{{ message }}</div>
+{% elif report %}
+  <section class="import-result{% if report.failed %} has-errors{% endif %}" role="status">
+    <p class="eyebrow">Apply complete</p>
+    <h2>{{ report.added|length + report.refreshed|length + report.replaced|length }} papers updated</h2>
+    <div class="import-counts">
+      <span><strong>{{ report.added|length }}</strong> added</span>
+      <span><strong>{{ report.refreshed|length }}</strong> refreshed</span>
+      <span><strong>{{ report.replaced|length }}</strong> replaced</span>
+      <span><strong>{{ report.failed|length }}</strong> failed</span>
+    </div>
+    {% if report.failed %}
+      <div class="alert alert-error" role="alert">
+        <strong>Some papers failed.</strong>
+        <ul>{% for citekey, problem in report.failed.items() %}<li><code>{{ citekey }}</code> {{ problem }}</li>{% endfor %}</ul>
+      </div>
+    {% endif %}
+    {% if report.skipped %}
+      <details><summary>{{ report.skipped|length }} skipped item{% if report.skipped|length != 1 %}s{% endif %}</summary><ul>{% for item in report.skipped %}<li>{{ item }}</li>{% endfor %}</ul></details>
+    {% endif %}
+    <a class="button button-quiet" href="/papers">View papers</a>
+  </section>
+{% elif plan %}
+  {% set actionable = plan.additions|length + plan.refreshes|length + plan.source_replacements|length %}
+  <section class="preview-summary">
+    <div><p class="eyebrow">Preview ready</p><h2>{{ actionable }} actionable paper{% if actionable != 1 %}s{% endif %}</h2></div>
+    <div class="import-counts">
+      <span><strong>{{ plan.additions|length }}</strong> additions</span>
+      <span><strong>{{ plan.refreshes|length }}</strong> refreshes</span>
+      <span><strong>{{ plan.source_replacements|length }}</strong> replacements</span>
+    </div>
+  </section>
+
+  {% if plan.problems %}
+    <section class="import-warning import-problems" role="alert">
+      <h2>Problems require attention</h2>
+      <p>These records will be skipped if you apply this preview.</p>
+      <ul>{% for problem in plan.problems %}<li>{{ problem }}</li>{% endfor %}</ul>
+    </section>
+  {% endif %}
+
+  {% if plan.duplicate_candidates %}
+    <section class="import-warning" role="alert">
+      <h2>Possible duplicates</h2>
+      <p>Review these pairs; Paper Pipeline will not merge them automatically.</p>
+      <ul>{% for duplicate in plan.duplicate_candidates %}<li><code>{{ duplicate.citekey }}</code> and <code>{{ duplicate.candidate_citekey }}</code> — {{ duplicate.reason }}</li>{% endfor %}</ul>
+    </section>
+  {% endif %}
+
+  <form hx-post="/import/apply" hx-target="#import-preview" hx-swap="innerHTML" hx-indicator="#apply-progress">
+    {% for heading, items, kind in [
+      ('Additions', plan.additions, 'addition'),
+      ('Metadata refreshes', plan.refreshes, 'refresh'),
+      ('Source replacements', plan.source_replacements, 'replacement')
+    ] %}
+      {% if items %}
+        <section class="import-group">
+          <h2>{{ heading }} <span>{{ items|length }}</span></h2>
+          {% if kind == 'replacement' %}<p class="lede">Replacing a PDF is never automatic. Select each replacement you accept.</p>{% endif %}
+          <div class="table-wrap">
+            <table>
+              <thead><tr>{% if kind == 'replacement' %}<th>Accept</th>{% endif %}<th>Citekey</th><th>Paper</th><th>Attachment</th></tr></thead>
+              <tbody>{% for item in items %}<tr>
+                {% if kind == 'replacement' %}<td class="select-cell"><input type="checkbox" name="source_replacements" value="{{ item.metadata.citekey }}" aria-label="Accept source replacement for {{ item.metadata.citekey }}"></td>{% endif %}
+                <td><code>{{ item.metadata.citekey }}</code></td>
+                <td><strong class="paper-title">{{ item.metadata.title }}</strong>{% if item.metadata.authors %}<small>{{ item.metadata.authors|join(', ') }}</small>{% endif %}</td>
+                <td><small>{{ item.attachment_path.name if item.attachment_path else 'Missing' }}</small></td>
+              </tr>{% endfor %}</tbody>
+            </table>
+          </div>
+        </section>
+      {% endif %}
+    {% endfor %}
+
+    <div class="import-actions">
+      <button class="button button-accent" type="submit"{% if actionable == 0 %} disabled{% endif %}>Apply import</button>
+      <button class="button button-quiet" type="button" hx-post="/import/cancel" hx-target="#import-preview" hx-swap="innerHTML">Cancel</button>
+      <span id="apply-progress" class="request-progress htmx-indicator" role="status">Applying paper changes…</span>
+    </div>
+  </form>
+{% else %}
+  <div class="state-panel compact">
+    <span class="state-icon" aria-hidden="true">↗</span>
+    <h2>No preview yet</h2>
+    <p>Choose a library and RDF export to see additions, refreshes, and problems.</p>
+  </div>
+{% endif %}

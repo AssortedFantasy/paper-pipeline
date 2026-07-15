@@ -1,0 +1,29 @@
+<article class="job-row" data-job-id="{{ job.id }}">
+  <div class="job-main">
+    <span class="badge badge-{{ job.state.value }}">{{ job.state.value }}</span>
+    <div>
+      <strong>{{ job.label }}</strong>
+      <code>{{ job.citekey or 'Library operation' }}</code>
+      {% if job.meta.retry_of %}<small class="retry-note">Retry of {{ job.meta.retry_of }}</small>{% endif %}
+    </div>
+  </div>
+  <div class="job-meta">
+    <span>{{ job.kind.value }}</span>
+    {% if job.started_at %}<time>{{ job.started_at.strftime('%Y-%m-%d %H:%M:%S') }}</time>{% else %}<span>Waiting to start</span>{% endif %}
+  </div>
+  <div class="job-actions">
+    {% if job.log_path %}
+      <button class="button button-quiet" type="button" hx-get="/jobs/{{ job.id }}/log"
+              hx-target="#log-{{ job.id }}" hx-swap="innerHTML">View log</button>
+    {% endif %}
+    {% if job.state.value in ('queued', 'running') %}
+      <button class="button button-danger" type="button" hx-post="/jobs/{{ job.id }}/cancel"
+              hx-target="#jobs-list" hx-swap="innerHTML" hx-disabled-elt="this">Cancel</button>
+    {% elif job.state.value in ('failed', 'cancelled') %}
+      <button class="button button-quiet" type="button" hx-post="/jobs/{{ job.id }}/retry"
+              hx-target="#jobs-list" hx-swap="innerHTML" hx-disabled-elt="this">Retry</button>
+    {% endif %}
+  </div>
+  {% if job.error %}<p class="job-error">{{ job.error }}</p>{% endif %}
+  <div id="log-{{ job.id }}" class="log-slot"></div>
+</article>

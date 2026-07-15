@@ -1,2 +1,34 @@
-<!-- Base layout implemented by WP-4.2. Placeholder file so the
-     templates/ directory exists and ships with the package. -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Paper Pipeline{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
+    <script src="{{ url_for('static', path='/htmx.min.js') }}" defer></script>
+    <script src="{{ url_for('static', path='/htmx-sse.js') }}" defer></script>
+  </head>
+  <body hx-ext="sse"{% if library_root %} sse-connect="/events"{% endif %}>
+    <header class="app-header">
+      <a class="brand" href="/papers" aria-label="Paper Pipeline home">
+        <span class="brand-mark">PP</span>
+        <span><strong>Paper Pipeline</strong><small>Library builder</small></span>
+      </a>
+      <nav aria-label="Main navigation">
+        <a href="/papers"{% if active_page == 'papers' %} aria-current="page"{% endif %}>Papers</a>
+        <a href="/import"{% if active_page == 'import' %} aria-current="page"{% endif %}>Import</a>
+        <a href="/jobs">Jobs</a>
+      </nav>
+      <div class="library-chip" title="{{ library_root or 'No library open' }}">
+        <span class="status-dot{% if library_root %} is-online{% endif %}"></span>
+        {{ library_root.name if library_root else 'No library' }}
+      </div>
+    </header>
+
+    <div class="job-stream"{% if library_root %} hx-get="/fragments/job-strip" hx-trigger="sse:state" hx-swap="innerHTML"{% endif %}>
+      {% include "_job_strip.html" %}
+    </div>
+
+    <main>{% block content %}{% endblock %}</main>
+  </body>
+</html>

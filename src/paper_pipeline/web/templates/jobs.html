@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Jobs · Paper Pipeline{% endblock %}
+{% block content %}
+<section class="page-heading jobs-heading">
+  <div>
+    <p class="eyebrow">Operations</p>
+    <h1>Jobs</h1>
+    <p class="lede">Follow active work, inspect diagnostics, and recover safely.</p>
+  </div>
+  {% if library_root %}
+  <div id="connection-status" class="live-state" aria-live="polite">
+    <span class="status-dot"></span> Connecting to live updates…
+  </div>
+  <template id="live-connected-template">
+    <span class="status-dot is-online"></span> Live updates connected
+  </template>
+  <template id="live-disconnected-template">
+    <span class="status-dot is-offline"></span> Live updates disconnected — reconnecting…
+  </template>
+  {% endif %}
+</section>
+
+{% if no_library %}
+  <section class="state-panel" role="status">
+    <span class="state-icon">↯</span>
+    <h2>No library is open</h2>
+    <p>Open a library before monitoring its work queue.</p>
+  </section>
+{% else %}
+  <div id="jobs-list" hx-get="/jobs/list" hx-trigger="sse:state" hx-swap="innerHTML">
+    {% include "_jobs_list.html" %}
+  </div>
+  <script src="{{ url_for('static', path='/connection-state.js') }}" defer></script>
+{% endif %}
+{% endblock %}

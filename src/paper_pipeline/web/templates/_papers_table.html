@@ -1,0 +1,70 @@
+{% if problems %}
+  <aside class="alert alert-error" role="alert">
+    <strong>Some paper records could not be read.</strong>
+    <ul>{% for problem in problems %}<li>{{ problem }}</li>{% endfor %}</ul>
+  </aside>
+{% endif %}
+
+{% if rows %}
+<form id="paper-selection" class="paper-card">
+  <div class="action-bar">
+    <p><strong>{{ total }}</strong> paper{{ '' if total == 1 else 's' }}</p>
+    <div class="action-controls">
+      <button class="button button-quiet" type="button" hx-get="/papers/table?selection=conversion"
+              hx-include="#paper-filters" hx-target="#paper-results">Select all pending</button>
+      <button class="button" type="button" hx-post="/papers/actions/convert"
+              hx-include="#paper-selection" hx-target="#action-feedback"
+              hx-disabled-elt="this">Convert selected</button>
+      <label class="recipe-picker">
+        <span class="sr-only">Recipe</span>
+        <select name="recipe_names" aria-label="Recipe">
+          <option value="summary">Summary</option>
+          <option value="contributions">Contributions</option>
+        </select>
+      </label>
+      <button class="button button-accent" type="button" hx-post="/papers/actions/recipes"
+              hx-include="#paper-selection" hx-target="#action-feedback"
+              hx-disabled-elt="this">Run recipe</button>
+    </div>
+  </div>
+  <div id="action-feedback" aria-live="polite"></div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="select-cell"><span class="sr-only">Select</span></th>
+          <th>Paper</th>
+          <th>Authors</th>
+          <th>Year</th>
+          <th>Conversion</th>
+          <th>Summary</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in rows %}
+        <tr>
+          <td class="select-cell">
+            <input type="checkbox" name="citekeys" value="{{ row.record.metadata.citekey }}"
+                   aria-label="Select {{ row.record.metadata.title }}"{% if row.selected %} checked{% endif %}>
+          </td>
+          <td>
+            <strong class="paper-title"><a href="{{ url_for('paper_detail_page', citekey=row.record.metadata.citekey) }}">{{ row.record.metadata.title or 'Untitled paper' }}</a></strong>
+            <code>{{ row.record.metadata.citekey }}</code>
+          </td>
+          <td>{{ row.record.metadata.authors | join(', ') or 'Unknown' }}</td>
+          <td>{{ row.record.metadata.year or '—' }}</td>
+          <td><span class="badge badge-{{ row.conversion_state }}">{{ row.conversion_state }}</span></td>
+          <td><span class="badge badge-{{ row.recipe_state }}">{{ row.recipe_state }}</span></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</form>
+{% else %}
+  <section class="state-panel compact" role="status">
+    <span class="state-icon">◇</span>
+    <h2>No papers found</h2>
+    <p>{% if filters and (filters.q or filters.conversion != 'all' or filters.recipe != 'all') %}Try clearing or changing the filters.{% else %}Import papers to start building this library.{% endif %}</p>
+  </section>
+{% endif %}

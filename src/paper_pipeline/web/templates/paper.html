@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% from "_markdown_blocks.html" import render_blocks %}
+{% block title %}{% if paper_view %}{{ paper_view.data.record.metadata.title }}{% else %}Paper{% endif %} · Paper Pipeline{% endblock %}
+{% block content %}
+{% if no_library %}
+  <section class="state-panel" role="status">
+    <span class="state-icon">⌁</span>
+    <h1>No library is open</h1>
+    <p>Open a library before inspecting paper content.</p>
+  </section>
+{% elif missing_paper %}
+  <section class="state-panel" role="status">
+    <span class="state-icon">?</span>
+    <h1>Paper not found</h1>
+    <p>No valid paper record exists for <code>{{ missing_paper }}</code>.</p>
+    <a class="text-link" href="/papers">Return to papers</a>
+  </section>
+{% else %}
+  {% set data = paper_view.data %}
+  {% set paper = data.record %}
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <a href="/papers">Papers</a><span aria-hidden="true">/</span><span>{{ paper.metadata.citekey }}</span>
+  </nav>
+
+  <header class="paper-hero">
+    <div>
+      <p class="eyebrow">Paper detail</p>
+      <h1>{{ paper.metadata.title or 'Untitled paper' }}</h1>
+      <p class="paper-authors">{{ paper.metadata.authors | join(', ') or 'Unknown authors' }}</p>
+    </div>
+    <div class="paper-hero-actions">
+      <span class="badge badge-{{ 'ready' if data.conversion_status.startswith('Ready') else 'pending' }}">{{ data.conversion_status }}</span>
+      {% if data.source_available %}
+        <a class="button button-quiet" href="{{ url_for('paper_source_pdf', citekey=paper.metadata.citekey) }}" target="_blank" rel="noopener">Open source PDF</a>
+      {% else %}
+        <span class="source-unavailable" role="status">Source PDF unavailable in this clone</span>
+      {% endif %}
+    </div>
+  </header>
+
+  {% if data.artifact_warnings %}
+    <aside class="alert alert-error artifact-warning" role="alert">
+      <strong>Some recorded artifacts could not be displayed.</strong>
+      <ul>{% for warning in data.artifact_warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+    </aside>
+  {% endif %}
+
+  <div class="paper-detail-grid">
+    <aside class="metadata-card" aria-label="Paper metadata">
+      <h2>Metadata</h2>
+      <dl>
+        <div><dt>Citekey</dt><dd><code>{{ paper.metadata.citekey }}</code></dd></div>
+        <div><dt>Year</dt><dd>{{ paper.metadata.year or 'Not recorded' }}</dd></div>
+        <div><dt>Venue</dt><dd>{{ paper.metadata.venue or 'Not recorded' }}</dd></div>
+        <div><dt>DOI</dt><dd>{{ paper.metadata.doi or 'Not recorded' }}</dd></div>
+        {% if paper.metadata.url %}<div><dt>URL</dt><dd>{{ paper.metadata.url }}</dd></div>{% endif %}
+        {% if paper.metadata.keywords %}<div><dt>Keywords</dt><dd>{{ paper.metadata.keywords | join(', ') }}</dd></div>{% endif %}
+      </dl>
+      {% if paper.metadata.abstract %}
+        <h3>Abstract</h3>
+        <p>{{ paper.metadata.abstract }}</p>
+      {% endif %}
+    </aside>
+
+    <div class="paper-content-stack">
+      <section class="content-card" id="transcription">
+        <div class="section-heading">
+          <div><p class="eyebrow">Source-derived</p><h2>Transcription</h2></div>
+        </div>
+        {% if paper_view.transcription %}
+          <article class="markdown-body">{{ render_blocks(paper_view.transcription) }}</article>
+        {% else %}
+          <div class="empty-inline" role="status">
+            <span class="state-icon">◇</span>
+            <div><h3>Not converted yet</h3><p>Run conversion to create searchable Markdown and extracted figures.</p></div>
+          </div>
+        {% endif %}
+      </section>
+
+      <section class="content-card" id="generated">
+        <div class="section-heading">
+          <div><p class="eyebrow">Enrichment</p><h2>Generated outputs</h2></div>
+          {% if paper_view.generated %}<span class="llm-badge">LLM-generated</span>{% endif %}
+        </div>
+        {% if paper_view.generated %}
+          <div class="generated-stack">
+          {% for output in paper_view.generated %}
+            <article class="generated-output">
+              <div class="generated-title"><h3>{{ output.title }}</h3><span class="llm-badge">LLM-generated</span></div>
+              <details class="provenance">
+                <summary>Provenance</summary>
+                <dl>{% for label, value in output.provenance %}<div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}</dl>
+              </details>
+              <div class="markdown-body">{{ render_blocks(output.blocks) }}</div>
+            </article>
+          {% endfor %}
+          </div>
+        {% else %}
+          <div class="empty-inline" role="status">
+            <span class="state-icon">✦</span>
+            <div><h3>No generated analysis</h3><p>Run a recipe to add clearly labeled LLM-generated outputs.</p></div>
+          </div>
+        {% endif %}
+      </section>
+
+      <section class="content-card" id="figures">
+        <div class="section-heading"><div><p class="eyebrow">Source-derived</p><h2>Figures</h2></div></div>
+        {% if data.figures %}
+          <div class="figure-gallery">
+          {% for figure in data.figures %}
+            <figure>
+              <a href="{{ url_for('paper_figure', citekey=paper.metadata.citekey, figure=figure) }}" target="_blank" rel="noopener">
+                <img src="{{ url_for('paper_figure', citekey=paper.metadata.citekey, figure=figure) }}" alt="Extracted figure {{ loop.index }}" loading="lazy">
+              </a>
+              <figcaption>{{ figure }}</figcaption>
+            </figure>
+          {% endfor %}
+          </div>
+        {% else %}
+          <p class="quiet-copy">No extracted figures are available.</p>
+        {% endif %}
+      </section>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

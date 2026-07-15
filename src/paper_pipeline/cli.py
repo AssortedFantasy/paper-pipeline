@@ -110,7 +110,9 @@ def main(argv: list[str] | None = None) -> int:
         description="Build portable, agent-searchable paper libraries from Zotero exports.",
     )
     subparsers = parser.add_subparsers(dest="command")
-    subparsers.add_parser("serve", help="run the web dashboard")
+    serve_parser = subparsers.add_parser("serve", help="run the web dashboard")
+    serve_parser.add_argument("--host", default="127.0.0.1", help="bind host")
+    serve_parser.add_argument("--port", type=int, default=8000, help="bind port")
     doctor_parser = subparsers.add_parser("doctor", help="check environment health")
     doctor_parser.add_argument(
         "target",
@@ -129,6 +131,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "doctor":
         return _run_doctor(args.target)
+    if args.command == "serve":
+        import uvicorn
+
+        uvicorn.run(
+            "paper_pipeline.web.app:create_app",
+            factory=True,
+            host=args.host,
+            port=args.port,
+        )
+        return 0
     if args.command == "validate":
         return _run_validate(args.library)
     if args.command == "reindex":

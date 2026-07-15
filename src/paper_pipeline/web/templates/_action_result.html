@@ -1,0 +1,5 @@
+{% if error %}
+  <div class="alert alert-error action-message" role="alert">{{ error }}</div>
+{% elif message %}
+  <div class="alert alert-success action-message" role="status">{{ message }}</div>
+{% endif %}

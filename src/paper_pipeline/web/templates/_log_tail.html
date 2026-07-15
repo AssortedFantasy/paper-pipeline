@@ -1,0 +1,9 @@
+{% if log_error %}
+  <div class="alert alert-error" role="alert">{{ log_error }}</div>
+{% elif tail %}
+  <div class="log-tail">
+    <div><strong>Diagnostic tail</strong><code>{{ tail.path }}</code></div>
+    {% if tail.truncated %}<small>Showing the most recent lines.</small>{% endif %}
+    <pre>{{ tail.text }}</pre>
+  </div>
+{% endif %}

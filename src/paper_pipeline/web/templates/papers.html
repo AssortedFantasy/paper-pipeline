@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Papers · Paper Pipeline{% endblock %}
+{% block content %}
+<section class="page-heading">
+  <div>
+    <p class="eyebrow">Library inventory</p>
+    <h1>Papers</h1>
+    <p class="lede">Choose source papers, then launch conversion or enrichment work.</p>
+  </div>
+</section>
+
+{% if no_library %}
+  <section class="state-panel" role="status">
+    <span class="state-icon">⌁</span>
+    <h2>No library is open</h2>
+    <p>Open or create a library through the API before managing papers.</p>
+  </section>
+{% else %}
+  <form id="paper-filters" class="filters" aria-label="Paper filters">
+    <label class="search-field">
+      <span>Search</span>
+      <input id="paper-query" type="search" name="q" placeholder="Title, author, or citekey"
+             hx-get="/papers/table" hx-trigger="input changed delay:250ms, search"
+             hx-include="#paper-filters" hx-target="#paper-results">
+    </label>
+    <label>
+      <span>Conversion</span>
+      <select name="conversion" hx-get="/papers/table" hx-trigger="change"
+              hx-include="#paper-filters" hx-target="#paper-results">
+        <option value="all">All states</option>
+        <option value="pending">Pending</option>
+        <option value="ready">Ready</option>
+        <option value="failed">Failed</option>
+      </select>
+    </label>
+    <label>
+      <span>Summary</span>
+      <select name="recipe" hx-get="/papers/table" hx-trigger="change"
+              hx-include="#paper-filters" hx-target="#paper-results">
+        <option value="all">All states</option>
+        <option value="pending">Pending</option>
+        <option value="ready">Ready</option>
+        <option value="failed">Failed</option>
+      </select>
+    </label>
+  </form>
+  <div id="paper-results">
+    {% include "_papers_table.html" %}
+  </div>
+{% endif %}
+{% endblock %}

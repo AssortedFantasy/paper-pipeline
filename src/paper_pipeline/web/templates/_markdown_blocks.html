@@ -1,0 +1,15 @@
+{% macro render_blocks(blocks) -%}
+  {% for block in blocks %}
+    {% if block.kind == 'heading' %}
+      {% if block.level <= 2 %}<h2>{{ block.text }}</h2>
+      {% elif block.level == 3 %}<h3>{{ block.text }}</h3>
+      {% else %}<h4>{{ block.text }}</h4>{% endif %}
+    {% elif block.kind == 'list' %}
+      <ul>{% for item in block.items %}<li>{{ item }}</li>{% endfor %}</ul>
+    {% elif block.kind == 'code' %}
+      <pre><code>{{ block.text }}</code></pre>
+    {% else %}
+      <p>{{ block.text }}</p>
+    {% endif %}
+  {% endfor %}
+{%- endmacro %}

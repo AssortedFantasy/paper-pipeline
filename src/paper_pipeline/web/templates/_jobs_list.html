@@ -1,0 +1,58 @@
+{% if error %}<div class="alert alert-error jobs-alert" role="alert">{{ error }}</div>{% endif %}
+{% if message %}<div class="alert alert-success jobs-alert" role="status">{{ message }}</div>{% endif %}
+
+{% if interrupted_jobs %}
+<section class="job-section interrupted-section" aria-labelledby="interrupted-heading">
+  <div class="section-heading">
+    <div><p class="eyebrow">Recovery needed</p><h2 id="interrupted-heading">Interrupted</h2></div>
+    <span class="count-chip">{{ interrupted_jobs | length }}</span>
+  </div>
+  <div class="job-stack">
+  {% for job in interrupted_jobs %}
+    <article class="job-row is-interrupted" data-job-id="{{ job.job_id }}">
+      <div class="job-main">
+        <span class="badge badge-interrupted">Interrupted</span>
+        <div><strong>{{ job.operation }}</strong><code>{{ job.target }}</code></div>
+      </div>
+      <div class="job-meta"><span>{{ job.kind.value }}</span><time>{{ job.started_at.strftime('%Y-%m-%d %H:%M') }}</time></div>
+      <div class="job-actions">
+        <button class="button button-quiet" type="button" hx-post="/jobs/{{ job.job_id }}/retry"
+                hx-target="#jobs-list" hx-swap="innerHTML" hx-disabled-elt="this">Retry</button>
+      </div>
+    </article>
+  {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section class="job-section" aria-labelledby="active-heading">
+  <div class="section-heading">
+    <div><p class="eyebrow">In flight</p><h2 id="active-heading">Active</h2></div>
+    <span class="count-chip">{{ active_jobs | length }}</span>
+  </div>
+  {% if active_jobs %}
+  <div class="job-stack">
+  {% for job in active_jobs %}
+    {% include "_job_row.html" %}
+  {% endfor %}
+  </div>
+  {% else %}
+  <div class="section-empty"><span>Queue is clear.</span><small>New work will appear here immediately.</small></div>
+  {% endif %}
+</section>
+
+<section class="job-section" aria-labelledby="history-heading">
+  <div class="section-heading">
+    <div><p class="eyebrow">Recent history</p><h2 id="history-heading">Terminal</h2></div>
+    <span class="count-chip">{{ terminal_jobs | length }}</span>
+  </div>
+  {% if terminal_jobs %}
+  <div class="job-stack">
+  {% for job in terminal_jobs %}
+    {% include "_job_row.html" %}
+  {% endfor %}
+  </div>
+  {% else %}
+  <div class="section-empty"><span>No completed jobs yet.</span><small>Successes and failures remain visible for this session.</small></div>
+  {% endif %}
+</section>

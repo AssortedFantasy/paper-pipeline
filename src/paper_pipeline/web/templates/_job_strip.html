@@ -1,0 +1,10 @@
+{% if job_error %}
+  <span class="stream-label">Status</span><span>{{ job_error }}</span>
+{% elif job_total %}
+  <span class="stream-label">Jobs</span>
+  <span><strong>{{ job_counts.running or 0 }}</strong> running</span>
+  <span><strong>{{ job_counts.queued or 0 }}</strong> queued</span>
+  {% if job_counts.failed %}<span class="stream-failed"><strong>{{ job_counts.failed }}</strong> failed</span>{% endif %}
+{% else %}
+  <span class="stream-label">Jobs</span><span>Queue is clear</span>
+{% endif %}
