@@ -135,6 +135,10 @@ def test_recipe_input_must_be_library_relative_and_scoped_to_its_paper(
     with pytest.raises(ValueError, match="this paper's library-relative"):
         library.write_paper(record)
 
+    record.recipes["summary"] = RecipeRecord(input_artifact="papers/Smith2024/source")
+    with pytest.raises(ValueError, match="this paper's library-relative"):
+        library.write_paper(record)
+
     record.recipes["summary"] = RecipeRecord(input_artifact="papers/Other2024/transcription.md")
     with pytest.raises(ValueError, match="this paper's library-relative"):
         library.write_paper(record)

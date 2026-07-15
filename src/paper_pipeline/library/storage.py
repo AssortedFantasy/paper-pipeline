@@ -359,7 +359,8 @@ def _validate_paper_record(record: PaperRecord, *, expected_citekey: str) -> Non
             continue
         parts = PurePosixPath(recipe.input_artifact).parts
         if parts[:2] != expected_input_root or (
-            parts[2:] != ("transcription.md",) and parts[2:3] != ("source",)
+            parts[2:] != ("transcription.md",)
+            and not (parts[2:3] == ("source",) and len(parts) > 3)
         ):
             raise ValueError(
                 f"recipes.{recipe_name}.input_artifact must reference this paper's "
