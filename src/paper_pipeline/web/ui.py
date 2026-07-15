@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from paper_pipeline.ingest.plan import ImportPlan
+from paper_pipeline.recipes.model import load_builtin_recipes
 from paper_pipeline.services.import_ops import (
     ImportReport,
     apply_import,
@@ -192,6 +193,8 @@ def create_ui_router(context: WebContext) -> APIRouter:
         q: str = "",
         conversion: str = "all",
         recipe: str = "all",
+        sort: str = "title",
+        direction: str = "asc",
         selection: str = "",
     ) -> HTMLResponse:
         table = await _table_context(
@@ -199,8 +202,11 @@ def create_ui_router(context: WebContext) -> APIRouter:
             q=q,
             conversion=conversion,
             recipe=recipe,
+            sort=sort,
+            direction=direction,
             selection=selection,
         )
+        table["fragment"] = True
         return templates.TemplateResponse(request, "_papers_table.html", table)
 
     @router.get("/fragments/job-strip", response_class=HTMLResponse)
@@ -268,6 +274,19 @@ def create_ui_router(context: WebContext) -> APIRouter:
             request,
             message=f"Queued {len(jobs)} recipe job{'s' if len(jobs) != 1 else ''}.",
         )
+
+    @router.get("/papers/row/{citekey}", response_class=HTMLResponse)
+    async def paper_table_row(request: Request, citekey: str) -> HTMLResponse:
+        if context.runtime is None:
+            raise HTTPException(status_code=404, detail="No library is open")
+        page = await browse_papers(context.runtime, query=citekey)
+        row = next(
+            (item for item in page.rows if item.record.metadata.citekey == citekey),
+            None,
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="Paper not found")
+        return templates.TemplateResponse(request, "_paper_row.html", {"row": row})
 
     @router.get("/papers/{citekey}/source", name="paper_source_pdf")
     async def paper_source_pdf(citekey: str) -> Response:
@@ -342,6 +361,8 @@ async def _table_context(
     q: str = "",
     conversion: str = "all",
     recipe: str = "all",
+    sort: str = "title",
+    direction: str = "asc",
     selection: str = "",
 ) -> dict[str, object]:
     if context.runtime is None:
@@ -352,13 +373,22 @@ async def _table_context(
         query=q,
         conversion=conversion,
         recipe=recipe,
+        sort=sort,
+        direction=direction,
         select_pending_conversion=selection == "conversion",
     )
     return {
         "rows": page.rows,
         "total": len(page.rows),
         "problems": page.problems,
-        "filters": {"q": q, "conversion": conversion, "recipe": recipe},
+        "filters": {
+            "q": q,
+            "conversion": conversion,
+            "recipe": recipe,
+            "sort": sort,
+            "direction": direction,
+        },
+        "recipe_options": tuple(load_builtin_recipes().values()),
         "library_key": runtime.library_key,
     }
 

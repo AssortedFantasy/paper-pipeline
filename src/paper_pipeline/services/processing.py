@@ -74,6 +74,7 @@ async def queue_conversion(
                 if record.source_pdf is None or record.source_sha256 is None:
                     raise ProcessingError(f"paper {session.citekey!r} has no usable source PDF")
                 source = _safe_input_path(session, record.source_pdf)
+                runtime.queue.publish_progress(job.id, "Preparing source PDF")
                 stage = session.stage_dir()
                 input_stage = session.stage_dir()
                 try:
@@ -91,6 +92,7 @@ async def queue_conversion(
                         staging_dir=stage,
                         timeout_seconds=timeout_seconds,
                     )
+                    runtime.queue.publish_progress(job.id, "Converting PDF")
                     result = await asyncio.to_thread(
                         run_conversion,
                         converter_spec,
@@ -104,6 +106,7 @@ async def queue_conversion(
                         raise ProcessingError(result.error or "conversion failed")
                     if not token.begin_commit():
                         raise asyncio.CancelledError
+                    runtime.queue.publish_progress(job.id, "Installing transcription")
                     state.artifacts = session.install_conversion_bundle(stage)
                 finally:
                     shutil.rmtree(stage, ignore_errors=True)
@@ -208,10 +211,14 @@ async def queue_recipes(
             state.log_path = None
             staged_results: list[tuple[RecipeDefinition, RecipeRunResult]] = []
             try:
-                for recipe in selected:
+                for index, recipe in enumerate(selected, start=1):
                     if token.is_set():
                         raise asyncio.CancelledError
                     state.active_recipe = recipe.name
+                    runtime.queue.publish_progress(
+                        job.id,
+                        f"Running {recipe.name} ({index}/{len(selected)})",
+                    )
                     result = await asyncio.to_thread(
                         run_recipe,
                         session,
@@ -225,6 +232,7 @@ async def queue_recipes(
                     if not token.begin_commit():
                         raise asyncio.CancelledError
                     state.active_recipe = recipe.name
+                    runtime.queue.publish_progress(job.id, f"Installing {recipe.name}")
                     session.install_artifact(result.staged_path, result.destination)
                     state.results[recipe.name] = result
                 state.log_path = _install_text_log(

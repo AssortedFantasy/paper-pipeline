@@ -35,7 +35,11 @@ def _config(tmp_path: Path) -> AppConfig:
 
 @pytest.fixture
 def ui_server(tmp_path: Path, page: Page) -> Iterator[str]:
-    provider = FakeLLMProvider(response="A concise generated result.")
+    provider = FakeLLMProvider(
+        response="A concise generated result.",
+        delay_seconds=0.1,
+        cached_tokens=40,
+    )
     registry = RuntimeRegistry(provider_factories={"fake": lambda: provider})
     app = create_app(
         registry=registry,
@@ -114,20 +118,36 @@ def test_papers_load_filter_select_and_launch(page: Page, ui_server: str, tmp_pa
     expect(page.get_by_role("heading", name="Papers", exact=True)).to_be_visible()
     expect(page.locator("tbody tr")).to_have_count(5)
     expect(page.locator("script[src*='htmx.min.js']")).to_have_count(1)
-    expect(page.get_by_label("Recipe").locator("option")).to_have_count(4)
-    assert page.get_by_label("Recipe").locator("option").evaluate_all(
-        "options => options.map(option => option.value)"
-    ) == ["summary", "contributions", "intro", "method"]
+    recipe_checks = page.get_by_role("group", name="Recipes").locator("input")
+    expect(recipe_checks).to_have_count(4)
+    assert recipe_checks.evaluate_all("items => items.map(item => item.value)") == [
+        "contributions",
+        "intro",
+        "method",
+        "summary",
+    ]
+
+    page.get_by_role("button", name="Citekey").click()
+    expect(page.get_by_role("button", name="Citekey ↑")).to_be_visible()
+    citekeys = page.locator("tbody .citekey")
+    ascending = citekeys.all_text_contents()
+    assert ascending == sorted(ascending, key=str.casefold)
+    page.get_by_role("button", name="Citekey").click()
+    expect(page.get_by_role("button", name="Citekey ↓")).to_be_visible()
+    assert citekeys.all_text_contents() == list(reversed(ascending))
 
     page.get_by_placeholder("Title, author, or citekey").fill("journal")
     expect(page.locator("tbody tr")).to_have_count(1)
     page.get_by_placeholder("Title, author, or citekey").fill("")
     expect(page.locator("tbody tr")).to_have_count(5)
 
-    page.get_by_role("button", name="Select all pending").click()
+    page.get_by_role("button", name="Select pending").click()
     expect(page.locator("tbody input[type=checkbox]:checked")).to_have_count(5)
-    for checkbox in page.locator("tbody input[type=checkbox]").all():
-        checkbox.uncheck()
+    page.get_by_role("button", name="Unselect all").click()
+    expect(page.locator("tbody input[type=checkbox]:checked")).to_have_count(0)
+    page.get_by_role("button", name="Select all", exact=True).click()
+    expect(page.locator("tbody input[type=checkbox]:checked")).to_have_count(5)
+    page.get_by_role("button", name="Unselect all").click()
 
     page.get_by_role("button", name="Convert selected").click()
     expect(page.get_by_role("alert")).to_contain_text("Select at least one paper")
@@ -142,9 +162,18 @@ def test_papers_load_filter_select_and_launch(page: Page, ui_server: str, tmp_pa
     page.get_by_label("Conversion").select_option("ready")
     expect(page.locator("tbody tr")).to_have_count(1)
     page.locator("tbody input[type=checkbox]").check()
+    page.get_by_label("Contributions").check()
     page.get_by_role("button", name="Run recipe").click()
     expect(page.get_by_role("status")).to_contain_text("Queued 1 recipe job")
+    expect(page.locator("tbody .live-job-status")).to_contain_text("running")
     _wait_for_jobs(page, ui_server, count=2)
+    expect(page.locator("tbody .spend-cell")).to_contain_text("$0.0020")
+    expect(page.locator("tbody .spend-cell")).to_have_attribute("title", "Cache hit rate: 40.0%")
+
+    citekey = page.locator("tbody .citekey").text_content()
+    assert citekey is not None
+    assert (tmp_path / "library" / "papers" / citekey / "summary.md").is_file()
+    assert (tmp_path / "library" / "papers" / citekey / "contributions.md").is_file()
 
     expect(page.locator(".job-stream")).to_contain_text("running")
 

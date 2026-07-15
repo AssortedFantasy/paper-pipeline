@@ -4,27 +4,31 @@
     <ul>{% for problem in problems %}<li>{{ problem }}</li>{% endfor %}</ul>
   </aside>
 {% endif %}
+{% if fragment %}
+  <input id="paper-sort" type="hidden" name="sort" value="{{ filters.sort }}" hx-swap-oob="outerHTML">
+  <input id="paper-direction" type="hidden" name="direction" value="{{ filters.direction }}" hx-swap-oob="outerHTML">
+{% endif %}
 
 {% if rows %}
 <form id="paper-selection" class="paper-card">
   <input type="hidden" name="library_key" value="{{ library_key }}">
   <div class="action-bar">
-    <p><strong>{{ total }}</strong> paper{{ '' if total == 1 else 's' }}</p>
+    <div class="selection-controls">
+      <strong>{{ total }}</strong> paper{{ '' if total == 1 else 's' }}
+      <button class="text-button" type="button" data-paper-selection="all">Select all</button>
+      <button class="text-button" type="button" data-paper-selection="none">Unselect all</button>
+      <button class="text-button" type="button" data-paper-selection="pending">Select pending</button>
+    </div>
     <div class="action-controls">
-      <button class="button button-quiet" type="button" hx-get="/papers/table?selection=conversion"
-              hx-include="#paper-filters" hx-target="#paper-results">Select all pending</button>
       <button class="button" type="button" hx-post="/papers/actions/convert"
               hx-include="#paper-selection" hx-target="#action-feedback"
               hx-disabled-elt="this">Convert selected</button>
-      <label class="recipe-picker">
-        <span class="sr-only">Recipe</span>
-        <select name="recipe_names" aria-label="Recipe">
-          <option value="summary">Summary</option>
-          <option value="contributions">Contributions</option>
-          <option value="intro">Introduction review</option>
-          <option value="method">Method review</option>
-        </select>
-      </label>
+      <fieldset class="recipe-picker" title="Each checked recipe runs sequentially for every selected paper">
+        <legend>Recipes</legend>
+        {% for recipe_option in recipe_options %}
+          <label><input type="checkbox" name="recipe_names" value="{{ recipe_option.name }}"{% if recipe_option.name == 'summary' %} checked{% endif %}> {{ recipe_option.name | replace('_', ' ') | title }}</label>
+        {% endfor %}
+      </fieldset>
       <button class="button button-accent" type="button" hx-post="/papers/actions/recipes"
               hx-include="#paper-selection" hx-target="#action-feedback"
               hx-disabled-elt="this">Run recipe</button>
@@ -36,29 +40,19 @@
       <thead>
         <tr>
           <th class="select-cell"><span class="sr-only">Select</span></th>
-          <th>Paper</th>
+          <th><button class="sort-button" type="button" data-paper-sort="title" data-paper-direction="{{ 'desc' if filters.sort == 'title' and filters.direction == 'asc' else 'asc' }}" hx-get="/papers/table" hx-include="#paper-filters" hx-target="#paper-results">Paper{% if filters.sort == 'title' %} {{ '↑' if filters.direction == 'asc' else '↓' }}{% endif %}</button></th>
           <th>Authors</th>
-          <th>Year</th>
+          <th><button class="sort-button" type="button" data-paper-sort="citekey" data-paper-direction="{{ 'desc' if filters.sort == 'citekey' and filters.direction == 'asc' else 'asc' }}" hx-get="/papers/table" hx-include="#paper-filters" hx-target="#paper-results">Citekey{% if filters.sort == 'citekey' %} {{ '↑' if filters.direction == 'asc' else '↓' }}{% endif %}</button></th>
+          <th><button class="sort-button" type="button" data-paper-sort="year" data-paper-direction="{{ 'desc' if filters.sort == 'year' and filters.direction == 'asc' else 'asc' }}" hx-get="/papers/table" hx-include="#paper-filters" hx-target="#paper-results">Year{% if filters.sort == 'year' %} {{ '↑' if filters.direction == 'asc' else '↓' }}{% endif %}</button></th>
           <th>Conversion</th>
           <th>Summary</th>
+          <th title="Total recorded LLM recipe spend; hover a value for cache hit rate">Spend</th>
+          <th>Live job</th>
         </tr>
       </thead>
       <tbody>
       {% for row in rows %}
-        <tr>
-          <td class="select-cell">
-            <input type="checkbox" name="citekeys" value="{{ row.record.metadata.citekey }}"
-                   aria-label="Select {{ row.record.metadata.title }}"{% if row.selected %} checked{% endif %}>
-          </td>
-          <td>
-            <strong class="paper-title"><a href="{{ url_for('paper_detail_page', citekey=row.record.metadata.citekey) }}">{{ row.record.metadata.title or 'Untitled paper' }}</a></strong>
-            <code>{{ row.record.metadata.citekey }}</code>
-          </td>
-          <td>{{ row.record.metadata.authors | join(', ') or 'Unknown' }}</td>
-          <td>{{ row.record.metadata.year or '—' }}</td>
-          <td><span class="badge badge-{{ row.conversion_state }}">{{ row.conversion_state }}</span></td>
-          <td><span class="badge badge-{{ row.recipe_state }}">{{ row.recipe_state }}</span></td>
-        </tr>
+        {% include "_paper_row.html" %}
       {% endfor %}
       </tbody>
     </table>

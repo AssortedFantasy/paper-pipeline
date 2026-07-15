@@ -120,6 +120,7 @@ class JobResponse(BaseModel):
     finished_at: datetime | None
     error: str | None
     log_path: str | None
+    progress: str | None
     meta: dict[str, str]
 
     @classmethod
@@ -136,6 +137,7 @@ class JobResponse(BaseModel):
             finished_at=job.finished_at,
             error=job.error,
             log_path=job.log_path,
+            progress=job.progress,
             meta=job.meta,
         )
 
@@ -168,10 +170,20 @@ class JobEventResponse(BaseModel):
     message: str | None
     error: str | None
     created_at: datetime
+    citekey: str | None
+    job_kind: JobKind
+    label: str
+    progress: str | None
 
     @classmethod
-    def from_event(cls, event: JobEvent) -> JobEventResponse:
-        return cls.model_validate(event, from_attributes=True)
+    def from_event(cls, event: JobEvent, job: Job) -> JobEventResponse:
+        return cls(
+            **event.__dict__,
+            citekey=job.citekey,
+            job_kind=job.kind,
+            label=job.label,
+            progress=job.progress,
+        )
 
 
 def create_api_router(context: WebContext) -> APIRouter:
@@ -371,7 +383,7 @@ async def event_stream(request: Request, runtime: LibraryRuntime):  # type: igno
             job = runtime.queue.get(event.job_id)
             if job is None or job.library_key != runtime.library_key:
                 continue
-            payload = JobEventResponse.from_event(event).model_dump_json()
+            payload = JobEventResponse.from_event(event, job).model_dump_json()
             yield f"id: {event.sequence}\nevent: {event.kind.value}\ndata: {payload}\n\n"
     finally:
         subscription.close()

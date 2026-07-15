@@ -365,6 +365,7 @@ class JobQueue:
         """Publish an informational event without changing job state."""
         if job_id not in self._jobs:
             raise KeyError(job_id)
+        self._jobs[job_id].progress = message
         self.events.publish(
             job_id=job_id,
             kind=JobEventKind.PROGRESS,

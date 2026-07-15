@@ -192,6 +192,8 @@ A change is done when:
 ## Working style
 
 - Small, reviewable increments with one coherent concern per branch/PR.
+- Dashboard UI assumes a desktop viewport: prefer compact controls, dense
+  tables, and hover help over persistent explanatory copy.
 - Do not create documentation files without a concrete maintenance need.
 - Do not add configuration options, plugins, or abstractions for
   hypothetical futures — complexity must earn its place.

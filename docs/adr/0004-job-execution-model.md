@@ -71,8 +71,10 @@ hide the fact that an older valid artifact still exists.
    hashed, and recorded. Retry creates a new job addressed by the interrupted
    marker or by `(citekey, operation)`, not by pretending the old job is live.
 
-9. **Events are in-process.** The web layer forwards queue events over SSE.
-   Browser disconnects never affect jobs.
+9. **Events are in-process.** The queue retains only each live job's latest
+   progress message and publishes state/progress over SSE. The papers table and
+   Jobs dashboard render that shared state; they do not maintain a second
+   status store. Browser disconnects never affect jobs.
 
 ## Consequences
 

@@ -70,11 +70,11 @@ gate. The real-SSH smoke likewise remains an optional environment-gated check.
 | Requirement | Status and evidence |
 | --- | --- |
 | Built-in analysis recipes | Delivered as packaged `summary`, `contributions`, `intro`, and `method` recipes; the latter two preserve the v1 PDF-native review prompts. |
-| Run over one or selected papers | Delivered by services/API/dashboard selection. |
+| Run over one or selected papers | Delivered as the selected recipe/paper cartesian product in one queued action. |
 | Simple template defining input and prompt | Delivered as Markdown plus validated YAML front matter. |
 | Predictable Markdown output per paper | Delivered under `papers/<citekey>/`. |
 | Record recipe/provider/model/input/usage provenance | Delivered in `paper.json`, without credentials or output frontmatter. |
-| Show recipe progress/failures with conversion | Delivered by the shared Jobs dashboard. |
+| Show recipe progress/failures with conversion | Delivered live per paper and in the shared Jobs dashboard. |
 | Retry failed recipes | Delivered for individual jobs. |
 | Keep execution linear | Delivered; recipes are sequential within a paper lane. |
 
@@ -100,7 +100,7 @@ gate. The real-SSH smoke likewise remains an optional environment-gated check.
 | Choose or create a library | Delivered through the dashboard library setup panel with browser coverage. |
 | Preview/apply Zotero RDF | Delivered, including problems, duplicates, explicit replacements, progress, and safe cancel. |
 | Browse/filter by metadata and processing state | Delivered. |
-| Select and launch conversion/recipes | Delivered. |
+| Select and launch conversion/recipes | Delivered with all/none/pending controls and multi-recipe checklists. |
 | Show queue, live progress, failures, and logs | Delivered through Jobs, SSE, and safe log tails. |
 | Retry/cancel work | Delivered for individual work and selected failed/cancelled retry batches; interrupted attempts can be retried individually. |
 | Inspect metadata, transcription, recipes, and figures | Delivered by the stable paper detail view. |

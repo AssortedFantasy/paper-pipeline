@@ -287,6 +287,9 @@ async def test_sse_events_and_disconnect_does_not_cancel_job(tmp_path: Path) -> 
         event = await asyncio.wait_for(anext(stream), timeout=1)
         assert "event: state" in event
         assert job.id in event
+        assert '"citekey":"sse-paper"' in event
+        assert '"job_kind":"recipe"' in event
+        assert '"label":"sse-test"' in event
         await started.wait()
 
         await stream.aclose()

@@ -209,5 +209,6 @@ async def test_progress_event_does_not_change_state() -> None:
     assert events[-1].message == "halfway"
     assert events[-1].state is JobState.RUNNING
     assert job.state is JobState.RUNNING
+    assert job.progress == "halfway"
     release.set()
     await queue.wait(job.id)

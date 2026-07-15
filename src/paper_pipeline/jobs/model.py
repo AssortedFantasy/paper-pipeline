@@ -57,4 +57,5 @@ class Job:
     finished_at: datetime | None = None
     error: str | None = None
     log_path: str | None = None  # library-relative path under .pp/
+    progress: str | None = None  # latest in-memory progress from the shared queue
     meta: dict[str, str] = field(default_factory=dict)

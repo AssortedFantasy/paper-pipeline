@@ -1,11 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Papers · Paper Pipeline{% endblock %}
 {% block content %}
-<section class="page-heading">
+<section class="page-heading" title="Select papers, then launch conversion or enrichment work">
   <div>
-    <p class="eyebrow">Library inventory</p>
     <h1>Papers</h1>
-    <p class="lede">Choose source papers, then launch conversion or enrichment work.</p>
   </div>
 </section>
 
@@ -18,6 +16,8 @@
 {% else %}
   {% include "_library_maintenance.html" %}
   <form id="paper-filters" class="filters" aria-label="Paper filters">
+    <input id="paper-sort" type="hidden" name="sort" value="{{ filters.sort }}">
+    <input id="paper-direction" type="hidden" name="direction" value="{{ filters.direction }}">
     <label class="search-field">
       <span>Search</span>
       <input id="paper-query" type="search" name="q" placeholder="Title, author, or citekey"

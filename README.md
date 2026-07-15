@@ -86,11 +86,14 @@ Continue in the dashboard:
    review additions, refreshes, source replacements, problems, and possible
    duplicates.
 3. Apply the accepted plan. Source PDF replacements require explicit opt-in.
-4. Select papers and launch conversion or a built-in recipe.
-5. Use **Jobs** to inspect live state, diagnostic tails, cancel work, retry an
+4. Select all, none, pending, or individual papers; check any combination of
+   built-in recipes; then launch the full selected paper/recipe batch.
+5. Watch per-paper progress in the dense papers table, or use **Jobs** to
+   inspect live state, diagnostic tails, cancel work, retry an
    individual failure or interrupted attempt, or retry selected failed/cancelled
    work as a batch.
-6. Open a paper to inspect metadata, its source PDF, transcription, figures,
+6. Sort by title, citekey, or year; inspect recorded LLM spend/cache hit rate;
+   or open a paper to inspect metadata, its source PDF, transcription, figures,
    recipe output, and provenance.
 7. Validate the active library or deterministically rebuild its indexes and
    generated guidance from the maintenance panel.
