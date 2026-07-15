@@ -12,6 +12,7 @@ from urllib.request import urlopen
 import pytest
 import uvicorn
 from playwright.sync_api import Page, expect
+from pypdf import PdfWriter
 from tests.fakes import FakeLLMProvider
 
 from paper_pipeline.config import AppConfig
@@ -92,6 +93,14 @@ def _import_papers(page: Page, url: str) -> None:
         data={"plan": preview.json()},
     )
     assert applied.ok, applied.text()
+
+
+def _replace_with_pdf(path: Path, pages: int) -> None:
+    writer = PdfWriter()
+    for _ in range(pages):
+        writer.add_blank_page(width=612, height=792)
+    with path.open("wb") as stream:
+        writer.write(stream)
 
 
 def _wait_for_jobs(page: Page, url: str, *, count: int) -> None:
@@ -186,6 +195,33 @@ def test_empty_library_state(page: Page, ui_server: str, tmp_path: Path) -> None
     expect(page.get_by_role("heading", name="No papers found")).to_be_visible()
     expect(page.get_by_text("Import papers to start building this library.")).to_be_visible()
     expect(page.locator("tbody")).to_have_count(0)
+
+
+def test_large_document_page_count_and_bulk_selection_guard(
+    page: Page, ui_server: str, tmp_path: Path
+) -> None:
+    library = tmp_path / "library"
+    _create_library(page, ui_server, library)
+    _import_papers(page, ui_server)
+    book_source = next((library / "papers" / "DoeBook2020" / "source").glob("*.pdf"))
+    _replace_with_pdf(book_source, 100)
+
+    page.goto(f"{ui_server}/papers")
+
+    book_row = page.locator("tr[data-citekey='DoeBook2020']")
+    expect(page.get_by_role("columnheader", name="Pages")).to_be_visible()
+    expect(book_row.locator(".page-count-cell")).to_contain_text("100")
+    expect(book_row.locator(".badge-large")).to_have_text("large")
+    expect(page.get_by_text("1 large document (100+ pages) excluded")).to_be_visible()
+
+    page.get_by_role("button", name="Select all", exact=True).click()
+    expect(page.locator("tbody input[type=checkbox]:checked")).to_have_count(4)
+    expect(book_row.locator("input[type=checkbox]")).not_to_be_checked()
+
+    page.get_by_role("button", name="Select pending").click()
+    expect(page.locator("tbody input[type=checkbox]:checked")).to_have_count(4)
+    book_row.locator("input[type=checkbox]").check()
+    expect(book_row.locator("input[type=checkbox]")).to_be_checked()
 
 
 def test_no_library_error_state(page: Page, ui_server: str) -> None:

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from paper_pipeline.library.model import AttemptState, PaperRecord
 from paper_pipeline.services.library_ops import list_papers
+from paper_pipeline.services.pdf_info import LARGE_DOCUMENT_PAGE_THRESHOLD, pdf_page_count
 from paper_pipeline.services.processing import (
     pending_conversion_citekeys,
     pending_recipe_citekeys,
@@ -20,6 +21,8 @@ class PaperBrowseRow:
     recipe_state: str
     llm_cost_usd: float
     cache_hit_rate: float
+    page_count: int | None
+    is_large_document: bool
     live_state: str | None = None
     live_progress: str | None = None
     selected: bool = False
@@ -61,6 +64,9 @@ async def browse_papers(
     rows: list[PaperBrowseRow] = []
     for paper in page.papers:
         citekey = paper.metadata.citekey
+        source = runtime.root / paper.source_pdf if paper.source_pdf is not None else None
+        page_count = pdf_page_count(source) if source is not None else None
+        is_large_document = page_count is not None and page_count >= LARGE_DOCUMENT_PAGE_THRESHOLD
         conversion_state = _processing_state(
             citekey in conversion_pending,
             paper.conversion.last_attempt.state if paper.conversion.last_attempt else None,
@@ -89,9 +95,15 @@ async def browse_papers(
                 recipe_state=recipe_state,
                 llm_cost_usd=sum(item.cost_usd for item in paper.recipes.values()),
                 cache_hit_rate=cached_tokens / prompt_tokens if prompt_tokens else 0.0,
+                page_count=page_count,
+                is_large_document=is_large_document,
                 live_state=active.state.value if active is not None else None,
                 live_progress=(active.progress or active.label) if active is not None else None,
-                selected=select_pending_conversion and citekey in conversion_pending,
+                selected=(
+                    select_pending_conversion
+                    and citekey in conversion_pending
+                    and not is_large_document
+                ),
             )
         )
     key_functions = {

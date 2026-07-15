@@ -3,12 +3,16 @@
     <input id="paper-select-{{ row.record.metadata.citekey }}" hx-preserve type="checkbox"
            name="citekeys" value="{{ row.record.metadata.citekey }}"
            data-conversion-pending="{{ 'true' if row.conversion_state != 'ready' else 'false' }}"
+           data-bulk-selectable="{{ 'false' if row.is_large_document else 'true' }}"
            aria-label="Select {{ row.record.metadata.title }}"{% if row.selected %} checked{% endif %}>
   </td>
   <td><strong class="paper-title"><a href="{{ url_for('paper_detail_page', citekey=row.record.metadata.citekey) }}">{{ row.record.metadata.title or 'Untitled paper' }}</a></strong></td>
   <td class="authors-cell" title="{{ row.record.metadata.authors | join(', ') or 'Unknown' }}">{{ row.record.metadata.authors | join(', ') or 'Unknown' }}</td>
   <td><code class="citekey">{{ row.record.metadata.citekey }}</code></td>
   <td>{{ row.record.metadata.year or '—' }}</td>
+  <td class="page-count-cell"{% if row.is_large_document %} title="Large document: excluded from bulk selection to avoid unexpected conversion or LLM usage"{% endif %}>
+    {{ row.page_count if row.page_count is not none else '—' }}{% if row.is_large_document %} <span class="badge badge-large">large</span>{% endif %}
+  </td>
   <td><span class="badge badge-{{ row.conversion_state }}">{{ row.conversion_state }}</span></td>
   <td><span class="badge badge-{{ row.recipe_state }}">{{ row.recipe_state }}</span></td>
   <td class="spend-cell" title="Cache hit rate: {{ '%.1f' | format(row.cache_hit_rate * 100) }}%">${{ '%.4f' | format(row.llm_cost_usd) }}</td>

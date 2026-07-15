@@ -101,7 +101,7 @@ gate. The environment-gated real-SSH smoke passed on `noesis`.
 | Choose or create a library | Delivered through the dashboard library setup panel with browser coverage. |
 | Preview/apply Zotero RDF | Delivered, including problems, duplicates, explicit replacements, progress, and safe cancel. |
 | Browse/filter by metadata and processing state | Delivered. |
-| Select and launch conversion/recipes | Delivered with all/none/pending controls and multi-recipe checklists. |
+| Select and launch conversion/recipes | Delivered with all/none/pending controls and multi-recipe checklists. Source page counts are visible; documents with 100+ pages are flagged and excluded from bulk selection while remaining individually selectable. |
 | Show queue, live progress, failures, and logs | Delivered through Jobs, SSE, and safe log tails. |
 | Retry/cancel work | Delivered for individual work and selected failed/cancelled retry batches; interrupted attempts can be retried individually. |
 | Inspect metadata, transcription, recipes, and figures | Delivered by the stable paper detail view. |

@@ -18,6 +18,7 @@
       <button class="text-button" type="button" data-paper-selection="all">Select all</button>
       <button class="text-button" type="button" data-paper-selection="none">Unselect all</button>
       <button class="text-button" type="button" data-paper-selection="pending">Select pending</button>
+      {% if large_document_count %}<span class="bulk-selection-note">{{ large_document_count }} large document{{ '' if large_document_count == 1 else 's' }} (100+ pages) excluded from bulk selection</span>{% endif %}
     </div>
     <div class="action-controls">
       <button class="button" type="button" hx-post="/papers/actions/convert"
@@ -44,6 +45,7 @@
           <th>Authors</th>
           <th><button class="sort-button" type="button" data-paper-sort="citekey" data-paper-direction="{{ 'desc' if filters.sort == 'citekey' and filters.direction == 'asc' else 'asc' }}" hx-get="/papers/table" hx-include="#paper-filters" hx-target="#paper-results">Citekey{% if filters.sort == 'citekey' %} {{ '↑' if filters.direction == 'asc' else '↓' }}{% endif %}</button></th>
           <th><button class="sort-button" type="button" data-paper-sort="year" data-paper-direction="{{ 'desc' if filters.sort == 'year' and filters.direction == 'asc' else 'asc' }}" hx-get="/papers/table" hx-include="#paper-filters" hx-target="#paper-results">Year{% if filters.sort == 'year' %} {{ '↑' if filters.direction == 'asc' else '↓' }}{% endif %}</button></th>
+          <th title="Number of pages in the source PDF">Pages</th>
           <th>Conversion</th>
           <th>Summary</th>
           <th title="Total recorded LLM recipe spend; hover a value for cache hit rate">Spend</th>

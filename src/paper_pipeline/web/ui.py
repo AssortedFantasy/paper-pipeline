@@ -380,6 +380,7 @@ async def _table_context(
     return {
         "rows": page.rows,
         "total": len(page.rows),
+        "large_document_count": sum(row.is_large_document for row in page.rows),
         "problems": page.problems,
         "filters": {
             "q": q,

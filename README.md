@@ -86,8 +86,12 @@ Continue in the dashboard:
    review additions, refreshes, source replacements, problems, and possible
    duplicates.
 3. Apply the accepted plan. Source PDF replacements require explicit opt-in.
-4. Select all, none, pending, or individual papers; check any combination of
-   built-in recipes; then launch the full selected paper/recipe batch.
+4. Review the source page-count column, then select all, none, pending, or
+   individual papers; check any combination of built-in recipes; and launch the
+   selected paper/recipe batch. Documents with 100 or more pages are visibly
+   flagged and excluded from **Select all** and **Select pending** to prevent an
+   accidental book-sized Marker or LLM job. They can still be selected
+   individually when that work is intentional.
 5. Watch per-paper progress in the dense papers table, or use **Jobs** to
    inspect live state, diagnostic tails, cancel work, retry an
    individual failure or interrupted attempt, or retry selected failed/cancelled

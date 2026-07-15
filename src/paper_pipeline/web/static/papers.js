@@ -13,8 +13,9 @@
     if (!control) return;
     var mode = control.dataset.paperSelection;
     document.querySelectorAll("#paper-selection tbody input[name='citekeys']").forEach(function (input) {
-      input.checked = mode === "all" ||
-        (mode === "pending" && input.dataset.conversionPending === "true");
+      var bulkSelectable = input.dataset.bulkSelectable === "true";
+      input.checked = bulkSelectable && (mode === "all" ||
+        (mode === "pending" && input.dataset.conversionPending === "true"));
     });
   });
 

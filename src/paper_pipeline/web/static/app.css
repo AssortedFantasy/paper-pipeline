@@ -91,6 +91,8 @@ code { display: block; margin-top: .15rem; color: var(--muted); font-size: .72re
 .citekey { margin: 0; white-space: nowrap; }
 .authors-cell { max-width: 32ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .spend-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.page-count-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bulk-selection-note { color: var(--muted); font-size: .72rem; }
 .live-job-status { min-width: 145px; }
 .live-job-status small { display: block; margin-top: .2rem; color: var(--muted); white-space: nowrap; }
 .idle-state { color: var(--muted); }
@@ -98,6 +100,7 @@ code { display: block; margin-top: .15rem; color: var(--muted); font-size: .72re
 .badge-ready { background: var(--forest-soft); color: var(--forest); }
 .badge-pending { background: var(--amber-soft); color: #86420f; }
 .badge-failed { background: var(--red-soft); color: var(--red); }
+.badge-large { background: var(--red-soft); color: var(--red); margin-left: .2rem; }
 
 .state-panel { min-height: 330px; padding: 3rem; display: grid; place-items: center; align-content: center; text-align: center; border: 1px dashed #bac4bd; border-radius: 18px; background: rgb(255 254 249 / 60%); }
 .state-panel.compact { min-height: 260px; }
