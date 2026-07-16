@@ -74,7 +74,13 @@ async def test_reindex_builds_all_indexes_and_support_files(tmp_path: Path) -> N
 
     assert job.state is JobState.SUCCEEDED
     assert job.scope is JobScope.LIBRARY_WRITE
-    for filename in ("titles.md", "authors.md", "summaries.md", "status.md"):
+    for filename in (
+        "titles.md",
+        "authors.md",
+        "years.md",
+        "venues.md",
+        "summaries.md",
+    ):
         assert (runtime.root / "indexes" / filename).is_file()
     assert "papers/<citekey>/" in (runtime.root / "AGENTS.md").read_text(encoding="utf-8")
     assert (runtime.root / ".gitignore").read_text(encoding="utf-8") == (

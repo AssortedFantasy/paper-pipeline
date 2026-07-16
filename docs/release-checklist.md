@@ -58,13 +58,14 @@ gate. The environment-gated real-SSH smoke passed on `noesis`.
 
 | Requirement | Status and evidence |
 | --- | --- |
-| Generate root `AGENTS.md` with search guidance | Delivered. |
+| Generate root `AGENTS.md` with search guidance | Delivered as a self-describing guide for consumer agents reading the library directly from the filesystem. |
 | Keep transcription and generated output searchable with `rg` | Delivered as ordinary UTF-8 Markdown. |
-| Generate small rebuildable text indexes | Delivered for titles, authors, summaries, and status. |
-| Include title, citekey, authors, and summaries | Delivered with deterministic index tests. |
+| Generate small rebuildable text indexes | Delivered for titles, authors, publication years, venues, and summaries. Rebuild removes obsolete unsupported indexes. |
+| Include title, citekey, authors, year, venue, and summaries | Delivered with deterministic index and missing-value tests. |
 | Visibly separate source-derived and LLM-generated content | Delivered by `paper.json`: it declares flat recipe outputs and their provenance. |
 | Stable citekey-to-content paths | Delivered as `papers/<citekey>/`. |
 | Generate VCS guidance for operational noise | Delivered as a deterministic `.gitignore`. |
+| Describe standard recipe outputs to reading agents | Delivered with intentionally hardcoded filenames while the product has fixed recipes and no custom-recipe workflow. |
 
 ### Analysis and enrichment recipes
 

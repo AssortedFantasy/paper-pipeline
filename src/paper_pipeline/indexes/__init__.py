@@ -6,12 +6,13 @@ Responsibilities:
 - Produce the ``indexes/`` files, the library's root ``AGENTS.md``, and its
   ``.gitignore``.
 - Rebuild deterministically: same library contents -> byte-identical output.
-- Detect and drop stale entries for manually removed paper directories.
+- Reconcile the index directory to the supported set, dropping obsolete files
+  and entries for manually removed paper directories.
 
 Indexes are derived content and never become the canonical paper registry.
 
-Indexes: ``titles.md``, ``authors.md``, ``summaries.md``,
-``status.md`` — one line per paper, ``<citekey>: <value>``, sorted by citekey.
-Status freshness is derived from recorded input hashes, not manually maintained
-stale flags.
+Indexes: ``titles.md``, ``authors.md``, ``years.md``, ``venues.md``, and
+``summaries.md`` — one line per paper, ``<citekey>: <value>``, sorted by
+citekey. Missing values use explicit placeholders so every paper appears in
+every index.
 """

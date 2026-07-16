@@ -116,6 +116,11 @@ library.json
 AGENTS.md
 .gitignore
 indexes/
+    titles.md
+    authors.md
+    years.md
+    venues.md
+    summaries.md
 papers/<citekey>/
     paper.json
     source/<hash>.pdf
@@ -137,6 +142,13 @@ transcriptions, figures, and low-resolution page images are essential content;
 indexes and recipe outputs are rebuildable; `.pp/` directories are disposable
 operational state. The generated `.gitignore` excludes source PDFs and `.pp/` noise, so a Git clone
 stays searchable but cannot reprocess papers without restoring the source PDFs.
+
+The generated `AGENTS.md` makes each library a self-describing reading
+interface for agents working directly with the filesystem. It explains how to
+map citekeys to paper directories, use the small `rg`-friendly indexes, choose
+among source-derived and generated reading artifacts, and ignore disposable
+operational files. Its listed recipe outputs are currently the fixed standard
+recipes; custom recipes are not yet supported.
 
 ## Development and verification
 

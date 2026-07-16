@@ -5,16 +5,14 @@ from __future__ import annotations
 import shutil
 from pathlib import Path, PurePosixPath
 
-from paper_pipeline.library.model import AttemptState, PaperRecord
-from paper_pipeline.library.paths import INDEXES_DIR, PAPERS_DIR
+from paper_pipeline.library.model import PaperRecord
+from paper_pipeline.library.paths import INDEXES_DIR
 from paper_pipeline.library.storage import (
     Library,
-    conversion_is_fresh,
-    recipe_is_fresh,
     sha256_file,
 )
 
-INDEX_FILES = ("titles.md", "authors.md", "summaries.md", "status.md")
+INDEX_FILES = ("titles.md", "authors.md", "years.md", "venues.md", "summaries.md")
 
 
 def rebuild_indexes(library: Library) -> None:
@@ -24,8 +22,9 @@ def rebuild_indexes(library: Library) -> None:
     contents = {
         "titles.md": _lines(records, _title),
         "authors.md": _lines(records, _authors),
+        "years.md": _lines(records, _year),
+        "venues.md": _lines(records, _venue),
         "summaries.md": _lines(records, lambda record: _summary(library, record)),
-        "status.md": _lines(records, lambda record: _status(library, record)),
     }
 
     stage = library.stage_dir()
@@ -35,6 +34,7 @@ def rebuild_indexes(library: Library) -> None:
             with staged.open("w", encoding="utf-8", newline="\n") as output:
                 output.write(contents[filename])
             library.install_artifact(staged, f"{INDEXES_DIR}/{filename}")
+        _remove_unsupported_indexes(library)
     finally:
         shutil.rmtree(stage, ignore_errors=True)
 
@@ -55,6 +55,14 @@ def _authors(record: PaperRecord) -> str:
     return "; ".join(record.metadata.authors) or "unknown authors"
 
 
+def _year(record: PaperRecord) -> str:
+    return str(record.metadata.year) if record.metadata.year is not None else "unknown year"
+
+
+def _venue(record: PaperRecord) -> str:
+    return record.metadata.venue or "unknown venue"
+
+
 def _summary(library: Library, record: PaperRecord) -> str:
     summary = record.recipes.get("summary")
     if summary is None or summary.output_artifact is None or summary.output_sha256 is None:
@@ -69,57 +77,13 @@ def _summary(library: Library, record: PaperRecord) -> str:
     return next((_one_line(line) for line in text.splitlines() if line.strip()), "no summary yet")
 
 
-def _status(library: Library, record: PaperRecord) -> str:
-    citekey = record.metadata.citekey
-    paper_root = library.root / PAPERS_DIR / citekey
-    issues: list[str] = []
-
-    source = library.root / record.source_pdf if record.source_pdf else None
-    if source is None or not _is_safe_file(library.root, source):
-        issues.append("source missing")
-
-    transcription = paper_root / "transcription.md"
-    if record.conversion.transcription_sha256 is None or not _is_safe_file(
-        library.root, transcription
-    ):
-        issues.append("transcription missing")
-    elif not conversion_is_fresh(record):
-        issues.append("transcription stale")
-    if (
-        record.conversion.last_attempt is not None
-        and record.conversion.last_attempt.state == AttemptState.FAILED
-    ):
-        issues.append("conversion last attempt failed")
-
-    summary = record.recipes.get("summary")
-    summary_path = (
-        library.root.joinpath(*PurePosixPath(summary.output_artifact).parts)
-        if summary is not None and summary.output_artifact is not None
-        else None
-    )
-    if (
-        summary is None
-        or summary.output_sha256 is None
-        or summary_path is None
-        or not _is_safe_file(library.root, summary_path)
-        or sha256_file(summary_path) != summary.output_sha256
-    ):
-        issues.append("summary missing")
-    elif not recipe_is_fresh(record, "summary"):
-        issues.append("summary stale")
-    if (
-        summary is not None
-        and summary.last_attempt is not None
-        and summary.last_attempt.state == AttemptState.FAILED
-    ):
-        issues.append("summary last attempt failed")
-
-    for name, recipe in sorted(record.recipes.items()):
-        if name == "summary":
-            continue
-        if recipe.last_attempt is not None and recipe.last_attempt.state == AttemptState.FAILED:
-            issues.append(f"{name} last attempt failed")
-    return "; ".join(issues) or "ready"
+def _remove_unsupported_indexes(library: Library) -> None:
+    """Remove derived Markdown indexes that are not part of the current set."""
+    indexes = library.root / INDEXES_DIR
+    supported = set(INDEX_FILES)
+    for path in indexes.glob("*.md"):
+        if path.name not in supported:
+            path.unlink()
 
 
 def _is_safe_file(root: Path, path: Path) -> bool:

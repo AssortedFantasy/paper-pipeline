@@ -13,37 +13,45 @@ EXPECTED_GITIGNORE = """**/.pp/
 papers/*/source/
 """
 
-EXPECTED_AGENTS_MD = """# Paper Library Guide
+EXPECTED_AGENTS_MD = """# Paper Library
 
-This folder is a portable Paper Pipeline library. The files in it are the
-product; no running application or external database is needed to read them.
+This folder contains a library of papers converted into formats that agents and
+text-processing tools can read directly.
 
 ## Finding papers
 
-- A paper's citekey maps directly to `papers/<citekey>/`.
-- `papers/<citekey>/paper.json` is the canonical metadata and provenance record.
-- `indexes/titles.md` and `indexes/authors.md` provide quick bibliographic lookup.
-- `indexes/summaries.md` contains one-line generated summaries when available.
-- `indexes/status.md` flags missing, stale, or most-recently-failed processing.
-- Indexes are derived navigation aids. If they disagree with paper directories,
-  trust paper content and rebuild the indexes.
+A paper's citekey maps directly to `papers/<citekey>/`.
 
-## Paper content
+Use the indexes in `indexes/` to discover papers and citekeys. Every index line
+has the form `<citekey>: <value>`.
 
-- `source/` contains the original PDF. It is essential source content but is
-  ignored by Git, so a clone may be readable without being reprocessable.
-- `transcription.md`, `figures/`, and low-resolution `pages/pageN.png` images
-  are source-derived converter outputs.
-- Other top-level Markdown files (for example `summary.md`) are LLM-generated
-  recipe outputs. Their content contains only the useful result.
-- `paper.json` identifies generated files and records their provenance, token
-  usage, spend, and hashes used to determine whether outputs are current.
+- `titles.md`: Paper titles.
+- `authors.md`: Paper authors.
+- `years.md`: Publication years.
+- `venues.md`: Publication venues.
+- `summaries.md`: One-sentence generated summaries.
 
-## Operational files
+Indexes are compact representations for efficient lookups. Use them to find
+relevant citekeys.
 
-- Every `.pp/` directory is disposable operational noise (logs, staging, and
-  interruption hints). Ignore it during research and search.
-- Deleting `.pp/` never removes canonical paper content.
+## Paper directories
+
+A paper directory can contain:
+
+- `paper.json`: Bibliographic metadata and processing records.
+- `source/*.pdf`: The original PDF.
+- `transcription.md`: A complete transcription of the paper.
+- `figures/*.png`: Figures extracted from the PDF.
+- `pages/pageN.png`: Rendered PDF pages.
+- `summary.md`: A generated one-sentence summary.
+- `contributions.md`: Generated notes on the paper's main contributions.
+- `intro_filtered.md`: Generated notes on the introduction, prior work, thesis,
+  methods, and key references.
+- `method_filtered.md`: Generated notes on the approach, setup, and evaluation.
+- `.pp/`: Ignorable operational files.
+
+Some generated or source-derived files may be absent when that processing step
+has not yet completed.
 """
 
 
@@ -51,12 +59,17 @@ def test_generated_agents_md_matches_golden_content() -> None:
     content = render_agents_md()
 
     assert content == EXPECTED_AGENTS_MD
-    assert content.startswith("# Paper Library Guide\n")
+    assert content.startswith("# Paper Library\n")
     assert "`papers/<citekey>/`" in content
-    assert "Other top-level Markdown files" in content
-    assert "provenance" in content
+    assert "compact representations for efficient lookups" in content
+    assert "`summary.md`" in content
+    assert "`method_filtered.md`" in content
     assert "`.pp/`" in content
-    assert all(name in content for name in ("titles.md", "authors.md", "summaries.md", "status.md"))
+    assert all(
+        name in content
+        for name in ("titles.md", "authors.md", "years.md", "venues.md", "summaries.md")
+    )
+    assert "status.md" not in content
     assert len(content.splitlines()) <= 60
     assert "\r" not in content
 

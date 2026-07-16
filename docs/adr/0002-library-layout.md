@@ -15,7 +15,7 @@ per-paper processing status for interruption recovery.
     library.json            # format_version + identity        [essential]
     AGENTS.md               # generated agent guide            [derived]
     .gitignore              # generated VCS policy             [derived]
-    indexes/                # titles/authors/summaries/status  [derived]
+    indexes/                # titles/authors/years/venues/summaries [derived]
     .pp/                    # library-level logs, tmp staging  [disposable]
     papers/
         <citekey>/
@@ -77,11 +77,25 @@ Key choices:
     valid: older recipe records default the new counter to zero, and a normal
     explicit conversion rerun adds pages. No migration path or compatibility
     shim is introduced.
+12. The root `AGENTS.md` is a consumer-agent guide, not application or operator
+    documentation. It makes the library a self-describing reading interface by
+    explaining citekey lookup, the `rg`-friendly indexes, useful artifacts, and
+    disposable noise. It names the fixed standard recipe outputs directly;
+    those filenames may remain hardcoded while custom recipes are out of scope.
+13. The supported indexes are `titles.md`, `authors.md`, `years.md`,
+    `venues.md`, and `summaries.md`. Each contains one
+    `<citekey>: <value>` line per paper with explicit placeholders for missing
+    metadata. Rebuilding reconciles `indexes/` to this set, removing obsolete
+    derived indexes such as the former `status.md`.
 
 ## Consequences
 
 - The generated AGENTS.md must state the `papers/<citekey>/` convention
   since it differs from the flat sketch some may expect.
+- The generated guide optimizes paper discovery and reading rather than
+  explaining provenance internals or processing health.
+- Operational processing state remains available in `paper.json` and the
+  dashboard rather than occupying a research-discovery index.
 - Deleting a paper directory manually leaves stale index lines; the
   validator reports this and `reindex` repairs it.
 - A Git clone lacks `source/` PDFs; the validator classifies this as "not
