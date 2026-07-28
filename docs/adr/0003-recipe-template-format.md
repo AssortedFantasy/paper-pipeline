@@ -1,52 +1,42 @@
 # ADR-0003: Recipe template format
 
-Status: Accepted, amended (2026-07-15)
+Status: Accepted
 
 ## Context
 
-Recipes need to be simple templates declaring input, output, and prompt, with
-recorded provenance and a concrete, inspectable syntax.
+Built-in LLM recipes need a small, inspectable format that declares their input
+and output.
 
 ## Decision
 
-A recipe is a Markdown file with YAML front matter:
+A recipe is Markdown with YAML front matter:
+
+This is a simplified example, and is a poor prompt for a real recipe.
 
 ```markdown
 ---
-name: contributions        # identifier; also the key in paper.json recipes map
-version: 1                 # bump when the prompt changes meaningfully
-input: transcription       # "transcription" | "pdf"
-output: contributions.md   # filename directly inside the paper directory
+name: contributions
+version: 1
+input: transcription
+output: contributions.md
 ---
-Extract the key contributions in this paper.
-Format them as a bulleted list.
-Output only the contributions.
+Extract the paper's key contributions.
 ```
 
-- Built-in recipes ship inside the application package
-  (`paper_pipeline/recipes/builtin/`). Libraries never contain recipe
-  definitions.
-- The body is the literal prompt. No templating language in v1; the input
-  artifact is attached/appended by the runner according to `input`.
-- A result is valid when the provider call succeeds and the response is
-  non-empty text. The runner writes only that output to
-  `papers/<citekey>/<output>`; generated Markdown has no provenance
-  frontmatter.
+`input` is `transcription` or `pdf`. `output` is a Markdown filename directly
+inside the paper directory and must not collide with reserved library names.
+The body is sent to the provider as the prompt; there is no template language.
 
-- Provenance never includes credentials, API endpoints, or raw provider
-  payloads. `paper.json` records the same provenance in its `recipes` map.
-- The `input` path in `paper.json` is always a
-  library-relative POSIX path (`papers/<citekey>/transcription.md` or
-  `papers/<citekey>/source/<file>.pdf`), consistent with ADR-0002. Storage
-  validation enforces this invariant.
-- `paper.json` also records the library-relative installed `output_artifact`.
-  Recipe names and output filenames are intentionally independent contract
-  fields, so validators and indexers never infer one from the other. Tests
-  cover non-matching names.
+Recipes ship with the application. A successful result is non-empty text,
+installed atomically at the declared output path. `paper.json` records the
+recipe version, input and output paths, hashes, provider, model, usage, and
+cost. Generated Markdown contains no provenance front matter.
+
+Stored provenance excludes credentials, API endpoints, and raw provider
+payloads.
 
 ## Consequences
 
-- Structured JSON outputs, recipe chaining, and user-authored recipes are
-  future ADRs; nothing here precludes them.
-- `paper.json`, not the Markdown body or directory placement, identifies which
-  flat files are generated and records their hashes and provenance.
+Recipe names and output filenames are independent contract fields. Libraries
+contain recipe results but not recipe definitions. Structured outputs,
+chaining, and user-authored recipes require a separate design decision.

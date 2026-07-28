@@ -1,15 +1,10 @@
 # AGENTS.md — Paper Pipeline v2
 
-Operational rules for agents developing Paper Pipeline. Read this fully
-before changing anything.
-
-## What this project is
-
 Paper Pipeline builds portable, folder-based paper libraries from Zotero RDF
-exports: metadata, high-quality `transcription.md` files, LLM enrichment
+exports: metadata, `transcription.md` files, LLM enrichment
 outputs, and small text indexes that agents can search with `rg`.
 
-**The generated library is the product.** The application is only the tool
+The generated library is the product. The application is only the tool
 that builds it. Paper Pipeline is a library builder — not a research
 workspace, not a search service, not a note manager.
 
@@ -31,16 +26,10 @@ workspace, not a search service, not a note manager.
   single user-controlled SSH conversion host is the sole remote-execution
   exception.
 
-## Sources of truth
+## Files of Note
 
-| Question | Where to look | Lifetime |
-| --- | --- | --- |
-| What should the product do? | `README.md`, this file, and `docs/release-checklist.md` | permanent |
-| How were contested decisions settled? | `docs/adr/` | permanent |
-| How do I operate in this repo? | This file | permanent |
-
-If a durable product decision is not covered, write an ADR proposal rather
-than improvising a convention.
+`README.md` - high level overview
+`docs/adr/` - architecture decision records
 
 ## Commands
 
@@ -111,28 +100,10 @@ update or supersede the relevant ADR, review the library format version when
 serialized data changes, and update contract/compatibility tests in the same
 work package. Do not let parallel tracks independently drift the same contract.
 
-## Library and state ownership
-
-Three kinds of state — keep them distinct:
-
-1. **Library content** (essential): `library.json`, `papers/<citekey>/paper.json`,
-   `source/`, `transcription.md`, `figures/`, `pages/`. Never regenerated or
-   replaced silently. Explicit reruns/source replacement install atomically; import
-   never deletes papers merely because they disappeared from a later export.
-2. **Derived content** (rebuildable): `indexes/`, library `AGENTS.md`, library
-   `.gitignore`, and recipe outputs declared in `paper.json`. Must be
-   deterministically rebuildable from library content; deleting them loses
-   nothing permanent.
-3. **Operational state** (disposable): everything under any `.pp/`
-   directory — logs, staging temp dirs, diagnostics. Deleting every `.pp/`
-   must always be safe.
-
-Hard rules:
+## Library Rules
 
 - **No second database.** Durable artifact truth lives in `paper.json` and the
-  artifacts. In-flight attempt markers under `.pp/attempts/` are disposable
-  operational hints used to report interrupted work; losing them must not make
-  a valid artifact invalid.
+  artifacts.
 - **All stored paths are library-relative POSIX paths.** Writing an absolute
   path into any library file is a bug, always.
 - **All writes are atomic**: stage under the library `.pp/tmp`, validate,
@@ -160,41 +131,3 @@ Hard rules:
   unmarked tests. Use `tests/fakes.py`.
 - Never leave a test or script holding a spawned child process; tests must
   clean up processes and temp dirs even on failure.
-
-## Required checks by change class
-
-Run these and ensure they pass before considering work done:
-
-| Change | Required checks |
-| --- | --- |
-| Any code change | `uv run ruff format .` && `uv run ruff check --fix .` && `uv run pyright` && `uv run pytest` |
-| Library format / schema / paths | Above + ADR updated or added + format-version review + atomic-write and validation tests updated |
-| Ingestion | Above + fixture-based import tests (first import, re-import, refresh, missing attachment, duplicate candidate) |
-| Conversion / jobs | Above + child-process failure/timeout/cancellation tests with the fake converter |
-| Recipes / providers | Above + fake-provider tests incl. provenance and per-paper sequencing |
-| Web API | Above + API contract tests |
-| UI (templates/static/routes) | Above + `uv run pytest -m browser` incl. visual regression snapshots; update baselines only after intentional review with the command above |
-| Dependencies (`pyproject.toml`) | Above + confirm default `uv sync` stays GPU-free + `uv lock` committed |
-
-## Definition of done
-
-A change is done when:
-
-1. Its requested scope is complete without unrelated expansion.
-2. All applicable checks above pass locally from the intended dependency profile.
-3. New behavior is covered by tests in the correct marker category.
-4. Success is verified from durable artifacts (files on disk), not logs.
-5. Versioned contract changes include the ADR, format-version review, and
-   compatibility-test updates they require.
-6. No stray files, real corpus PDFs, credentials, or operational output are committed.
-
-## Working style
-
-- Small, reviewable increments with one coherent concern per branch/PR.
-- Dashboard UI assumes a desktop viewport: prefer compact controls, dense
-  tables, and hover help over persistent explanatory copy.
-- Do not create documentation files without a concrete maintenance need.
-- Do not add configuration options, plugins, or abstractions for
-  hypothetical futures — complexity must earn its place.
-- When blocked by an ambiguity, prefer the smallest decision consistent with
-  the durable product rules, record it in the PR description, and flag it for review.

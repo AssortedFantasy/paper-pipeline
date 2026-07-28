@@ -1,173 +1,101 @@
 # Paper Pipeline
 
-Paper Pipeline builds portable, folder-based academic-paper libraries from
-Zotero RDF exports. Each generated library contains normalized metadata,
-copied source PDFs, searchable Markdown transcriptions, optional LLM-generated
-analysis, and small text indexes designed for direct use with tools such as
-`rg`.
+Paper Pipeline builds portable paper libraries from Zotero RDF exports. A
+library contains bibliographic metadata, copied source PDFs, Markdown
+transcriptions, optional LLM-generated analysis, and small text indexes.
 
-The generated library is the product. Paper Pipeline is its local builder and
-operations dashboard; it is not a note manager, search service, or research
-workspace.
+Libraries are ordinary folders that can be used by agents for literature search.
 
-## Release status
+## Features
 
-The first useful v2 release includes core storage, RDF import, conversion
-orchestration, recipes, indexes, the web API, and the operational dashboard,
-covered by offline and browser tests. The
-[release checklist](docs/release-checklist.md) records acceptance evidence and
-the explicitly deferred external workflows.
+- Repeatable Zotero RDF import with preview and explicit source replacement
+- PDF-to-Markdown conversion with Marker
+- Built-in summary, contribution, introduction, and method recipes
+- Rebuildable indexes for titles, authors, years, venues, and summaries
+- A local dashboard for importing, processing, inspecting, and retrying work
+- Local or SSH-based conversion
 
-Local GPU/OCR execution on the target laptop is prohibited by owner safety
-direction. The SHA-verified three-document Marker golden suite remains
-available for an approved stronger or remote machine, but is not an offline
-release blocker.
+## Installation
 
-## Requirements and installation
-
-- Python 3.12 or newer
-- [`uv`](https://docs.astral.sh/uv/)
-- Chromium installed through Playwright only when running browser tests
-- An NVIDIA GPU and the optional Marker extra only for local PDF conversion
-- Provider credentials only for real recipes
+Paper Pipeline requires Python 3.12 or newer and
+[`uv`](https://docs.astral.sh/uv/).
 
 ```sh
 uv sync
 ```
 
-The default environment includes the application, development tools, and the
-OpenAI SDK. Marker and PyTorch remain an optional heavy GPU edge:
+Marker and its GPU dependencies are optional:
 
 ```sh
 uv sync --extra marker
 ```
 
+Install Chromium to run browser tests:
+
+```sh
+uv run playwright install chromium
+```
+
 ## Configuration
 
-Settings come from `PAPER_PIPELINE_*` environment variables or
-`~/.paper-pipeline/.env`. Environment variables take precedence. Never put a
-`.env` file or credentials inside a generated library.
+Settings use `PAPER_PIPELINE_*` environment variables or
+`~/.paper-pipeline/.env`. Environment variables take precedence.
+
+To run LLM recipes:
 
 ```dotenv
 PAPER_PIPELINE_LLM_API_KEY=...
 PAPER_PIPELINE_LLM_MODEL=...
-# Optional OpenAI-compatible endpoint:
-PAPER_PIPELINE_LLM_BASE_URL=...
 ```
 
-Conversion defaults to one local Marker child process at a time. Optional SSH
-conversion settings are `PAPER_PIPELINE_REMOTE_CONVERTER_HOST`,
-`PAPER_PIPELINE_REMOTE_CONVERTER_ROOT`, and
-`PAPER_PIPELINE_REMOTE_CONVERTER_PYTHON`. When a host is configured, dashboard
-conversion automatically runs there while the dashboard and library stay
-local. See [Remote conversion on `noesis`](docs/remote-conversion.md).
+`PAPER_PIPELINE_LLM_BASE_URL` may be set for an OpenAI-compatible endpoint.
 
-Check the local environment without making provider or GPU calls:
+## Usage
 
-```sh
-uv run paper-pipeline doctor
-```
-
-## Build a library
-
-Start the local dashboard:
+Start the dashboard:
 
 ```sh
 uv run paper-pipeline serve
 ```
 
-Then open <http://127.0.0.1:8000>. The server binds to localhost by default.
+Open <http://127.0.0.1:8000>, create or open a library, and import a Zotero RDF
+export. The dashboard can then run conversion and recipe jobs, inspect their
+outputs, and retry failures.
 
-Continue in the dashboard:
-
-1. Create a library in a selected folder, or open an existing library, from
-   the library setup panel.
-2. Open **Import**, choose a Zotero RDF export, and
-   review additions, refreshes, source replacements, problems, and possible
-   duplicates.
-3. Apply the accepted plan. Source PDF replacements require explicit opt-in.
-4. Review the source page-count column, then select all, none, pending, or
-   individual papers; check any combination of built-in recipes; and launch the
-   selected paper/recipe batch. Documents with 100 or more pages are visibly
-   flagged and excluded from **Select all** and **Select pending** to prevent an
-   accidental book-sized Marker or LLM job. They can still be selected
-   individually when that work is intentional.
-5. Watch per-paper progress in the dense papers table, or use **Jobs** to
-   inspect live state, diagnostic tails, cancel work, retry an
-   individual failure or interrupted attempt, or retry selected failed/cancelled
-   work as a batch.
-6. Sort by title, citekey, or year; inspect recorded LLM spend/cache hit rate;
-   or open a paper to inspect metadata, its source PDF, transcription, figures,
-   recipe output, and provenance.
-7. Validate the active library or deterministically rebuild its indexes and
-   generated guidance from the maintenance panel.
-
-The same maintenance operations are also available through the API and CLI:
+The CLI also provides maintenance commands:
 
 ```sh
+uv run paper-pipeline doctor
 uv run paper-pipeline validate "D:/Papers/My Library"
 uv run paper-pipeline reindex "D:/Papers/My Library"
 ```
 
-## Generated library
+## Library layout
 
 ```text
 library.json
 AGENTS.md
-.gitignore
 indexes/
-    titles.md
-    authors.md
-    years.md
-    venues.md
-    summaries.md
 papers/<citekey>/
     paper.json
     source/<hash>.pdf
     transcription.md
     figures/
-    pages/page1.png
-    pages/page2.png
-    summary.md
-    contributions.md
-    .pp/
-.pp/
+    pages/
+    <recipe-output>.md
 ```
 
-All stored paths are library-relative POSIX paths. Recipe Markdown sits beside
-`transcription.md` and contains only the useful output; `paper.json` identifies
-which flat files are regenerable and records their provenance, token usage,
-cache hits, and spend. `library.json`, paper records, copied sources,
-transcriptions, figures, and low-resolution page images are essential content;
-indexes and recipe outputs are rebuildable; `.pp/` directories are disposable
-operational state. The generated `.gitignore` excludes source PDFs and `.pp/` noise, so a Git clone
-stays searchable but cannot reprocess papers without restoring the source PDFs.
+Paths stored in library metadata are relative POSIX paths. Generated
+`AGENTS.md` and index files describe how to browse the library.
 
-The generated `AGENTS.md` makes each library a self-describing reading
-interface for agents working directly with the filesystem. It explains how to
-map citekeys to paper directories, use the small `rg`-friendly indexes, choose
-among source-derived and generated reading artifacts, and ignore disposable
-operational files. Its listed recipe outputs are currently the fixed standard
-recipes; custom recipes are not yet supported.
-
-## Development and verification
+## Development
 
 ```sh
 uv run ruff format .
 uv run ruff check --fix .
 uv run pyright
 uv run pytest
-uv run python scripts/smoke.py
 ```
 
-Browser, GPU, and real-provider tests are explicit workflows. See
-[AGENTS.md](AGENTS.md) for the authoritative commands and safety rules.
-
-## Project documents
-
-| File | Purpose |
-| --- | --- |
-| [AGENTS.md](AGENTS.md) | Development commands, invariants, and required checks |
-| [docs/adr/](docs/adr/) | Durable architecture decisions |
-| [docs/release-checklist.md](docs/release-checklist.md) | Delivered requirements, deferrals, and release gates |
-| [docs/remote-conversion.md](docs/remote-conversion.md) | Set up and verify SSH Marker conversion on `noesis` |
+See [AGENTS.md](AGENTS.md) for repository rules and optional test suites.
+Architecture decisions are recorded in [docs/adr/](docs/adr/).

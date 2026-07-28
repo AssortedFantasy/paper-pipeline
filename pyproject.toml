@@ -70,7 +70,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.pyright]
 include = ["src", "tests"]
-exclude = [".venv"]
+exclude = [".venv", "**/node_modules", "**/__pycache__", "**/.*"]
 # "standard", not "strict": rdflib and marker-pdf are poorly typed, and
 # pyright cannot scope strictness per package; standard mode avoids letting
 # poorly typed external edges dictate the checking policy for the core.

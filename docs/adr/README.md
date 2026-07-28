@@ -1,17 +1,6 @@
 # Architecture Decision Records
 
-Durable implementation decisions for Paper Pipeline v2. `README.md`,
-`AGENTS.md`, and the release checklist define product behavior; ADRs define
-*how* where a choice is not obvious and would be expensive to relitigate.
-
-## Rules
-
-- Versioned contracts (converter, provider, recipe template, job model, and
-  library format) are expected to improve through feedback. Change them in a
-  new or amended ADR and update their compatibility tests; do not treat an
-  early skeleton as an irreversible design.
-- Number sequentially. Never delete an ADR; supersede it and link both ways.
-- Keep each ADR short: context, decision, consequences.
+Durable implementation decisions for Paper Pipeline v2.
 
 ## Index
 
