@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Library · Paper Pipeline{% endblock %}
+
+{% block content %}
+  {% include "_library_setup.html" %}
+
+  {% if library_root %}
+    {% include "_library_maintenance.html" %}
+  {% endif %}
+
+  <section aria-labelledby="import-heading">
+    <header class="section-heading">
+      <h2 id="import-heading">Import papers</h2>
+    </header>
+
+    <form class="import-picker" hx-post="/import/preview" hx-target="#import-preview" hx-swap="innerHTML" hx-indicator="#preview-progress">
+      <label>
+        <span>Library folder</span>
+        <input id="import-library-path" type="text" name="library_path" value="{{ library_root or '' }}" placeholder="D:\Papers\My Library" required>
+      </label>
+      <label>
+        <span>Zotero RDF export</span>
+        <input type="text" name="export_path" placeholder="D:\Exports\library.rdf" required>
+      </label>
+      <div class="import-picker-action">
+        <button class="button" type="submit">Preview import</button>
+        <span id="preview-progress" class="request-progress htmx-indicator" role="status">Reading export…</span>
+      </div>
+    </form>
+
+    <section id="import-preview" class="import-preview" aria-live="polite">
+      {% include "_import_preview.html" %}
+    </section>
+  </section>
+{% endblock %}

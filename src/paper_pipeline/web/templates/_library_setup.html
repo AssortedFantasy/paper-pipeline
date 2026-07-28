@@ -1,18 +1,17 @@
 <section id="library-setup" class="library-setup" aria-labelledby="library-setup-heading">
-  <div class="section-heading">
-    <div><p class="eyebrow">Library folder</p><h2 id="library-setup-heading">Create or open a library</h2></div>
-  </div>
+  <header class="section-heading">
+    <h2 id="library-setup-heading">Create or open a library</h2>
+  </header>
   <div class="library-setup-grid">
     <form hx-post="/library/create" hx-target="#library-operation-result" hx-swap="innerHTML">
       <h3>Create new</h3>
       <label><span>New library folder</span><input type="text" name="library_path" placeholder="D:\Papers\My Library" required></label>
-      <label><span>Library name</span><input type="text" name="library_name" placeholder="My paper library"></label>
       <button class="button" type="submit">Create library</button>
     </form>
     <form hx-post="/library/open" hx-target="#library-operation-result" hx-swap="innerHTML">
       <h3>Open existing</h3>
       <label><span>Existing library folder</span><input type="text" name="library_path" value="{{ library_root or '' }}" placeholder="D:\Papers\My Library" required></label>
-      <button class="button button-quiet" type="submit">Open library</button>
+      <button class="button" type="submit">Open library</button>
     </form>
   </div>
   <div id="library-operation-result" class="library-operation-result" aria-live="polite"></div>

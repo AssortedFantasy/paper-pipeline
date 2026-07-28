@@ -1,20 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Papers · Paper Pipeline{% endblock %}
 {% block content %}
-<section class="page-heading" title="Select papers, then launch conversion or enrichment work">
-  <div>
-    <h1>Papers</h1>
-  </div>
-</section>
-
 {% if no_library %}
   <section class="state-panel compact no-library-state" role="status">
-    <span class="state-icon">⌁</span><h2>No library is open</h2>
-    <p>Create a folder-based library or open one you already have.</p>
+    <h2>No library is open</h2>
+    <p>Open a library to view papers.</p>
   </section>
-  {% include "_library_setup.html" %}
 {% else %}
-  {% include "_library_maintenance.html" %}
   <form id="paper-filters" class="filters" aria-label="Paper filters">
     <input id="paper-sort" type="hidden" name="sort" value="{{ filters.sort }}">
     <input id="paper-direction" type="hidden" name="direction" value="{{ filters.direction }}">

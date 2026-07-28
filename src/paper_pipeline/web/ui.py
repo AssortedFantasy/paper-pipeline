@@ -44,16 +44,17 @@ def create_ui_router(context: WebContext) -> APIRouter:
     router = APIRouter(include_in_schema=False)
     import_previews: dict[str, tuple[str, ImportPlan]] = {}
 
-    @router.get("/", response_class=HTMLResponse)
     @router.get("/papers", response_class=HTMLResponse)
     async def papers_page(request: Request) -> HTMLResponse:
         page = await _page_context(context, request)
         return templates.TemplateResponse(request, "papers.html", page)
 
+    @router.get("/", response_class=HTMLResponse)
+    @router.get("/library", response_class=HTMLResponse)
     @router.get("/import", response_class=HTMLResponse)
-    async def import_page(request: Request) -> HTMLResponse:
-        page = _import_page_context(context, request)
-        return templates.TemplateResponse(request, "import.html", page)
+    async def library_page(request: Request) -> HTMLResponse:
+        page = _library_page_context(context, request)
+        return templates.TemplateResponse(request, "library.html", page)
 
     @router.post("/library/create", response_class=HTMLResponse)
     async def create_library_control(request: Request) -> HTMLResponse:
@@ -64,7 +65,6 @@ def create_ui_router(context: WebContext) -> APIRouter:
         try:
             context.runtime = create_library(
                 Path(path),
-                name=_first(values, "library_name"),
                 registry=context.registry,
             )
         except (OSError, ValueError, RuntimeError) as error:
@@ -450,14 +450,15 @@ def _library_result_response(
     )
 
 
-def _import_page_context(
+def _library_page_context(
     context: WebContext,
     request: Request,
 ) -> dict[str, object]:
     result: dict[str, object] = {
         "request": request,
-        "active_page": "import",
+        "active_page": "library",
         "library_root": context.runtime.root if context.runtime is not None else None,
+        "library_key": (context.runtime.library_key if context.runtime is not None else None),
         "plan": None,
     }
     result.update(_job_context(context))

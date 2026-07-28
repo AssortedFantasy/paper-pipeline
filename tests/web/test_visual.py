@@ -314,9 +314,6 @@ def test_visual_papers_table_filled(
 
     page.goto(f"{visual_server.url}/papers")
     expect(page.locator("tbody tr")).to_have_count(5)
-    page.locator(".library-maintenance small").evaluate(
-        "element => element.textContent = 'D:\\\\Libraries\\\\Visual Fixture'"
-    )
     _snapshot(page, "papers-table-filled.png", update=update_snapshots)
 
 
@@ -327,9 +324,6 @@ def test_visual_papers_table_empty(
 
     page.goto(f"{visual_server.url}/papers")
     expect(page.get_by_role("heading", name="No papers found")).to_be_visible()
-    page.locator(".library-maintenance small").evaluate(
-        "element => element.textContent = 'D:\\\\Libraries\\\\Visual Fixture'"
-    )
     _snapshot(page, "papers-table-empty.png", update=update_snapshots)
 
 

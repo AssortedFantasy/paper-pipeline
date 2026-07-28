@@ -87,10 +87,25 @@ def _preview(page: Page, server: ImportServer, fixture: str) -> None:
     page.get_by_role("button", name="Preview import").click()
 
 
+def test_library_is_the_landing_page(page: Page, import_server: ImportServer) -> None:
+    page.goto(f"{import_server.url}/")
+
+    expect(page).to_have_title("Library · Paper Pipeline")
+    expect(page.get_by_role("heading", name="Library", exact=True)).to_have_count(0)
+    expect(page.get_by_role("heading", name="Create or open a library")).to_be_visible()
+    expect(page.get_by_label("Library name")).to_have_count(0)
+    navigation = page.get_by_role("navigation", name="Main navigation")
+    expect(navigation.get_by_role("link")).to_have_text(["Library", "Papers", "Jobs"])
+    expect(navigation.get_by_role("link", name="Library")).to_have_attribute("aria-current", "page")
+    expect(page.get_by_role("heading", name="Import papers")).to_be_visible()
+    expect(page.get_by_role("button", name="Validate library")).to_be_visible()
+    expect(page.get_by_role("button", name="Rebuild indexes")).to_be_visible()
+
+
 def test_fixture_preview_and_apply_flow(page: Page, import_server: ImportServer) -> None:
     _preview(page, import_server, "clean")
 
-    expect(page).to_have_title("Import · Paper Pipeline")
+    expect(page).to_have_title("Library · Paper Pipeline")
     expect(page.get_by_role("heading", name="5 actionable papers")).to_be_visible()
     expect(page.get_by_text("5 additions", exact=True)).to_be_visible()
     expect(page.locator(".import-group tbody tr")).to_have_count(5)

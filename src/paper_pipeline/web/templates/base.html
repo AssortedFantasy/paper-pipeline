@@ -4,23 +4,23 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Paper Pipeline{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}?v=5">
     <script src="{{ url_for('static', path='/htmx.min.js') }}" defer></script>
     <script src="{{ url_for('static', path='/htmx-sse.js') }}" defer></script>
     <script src="{{ url_for('static', path='/papers.js') }}" defer></script>
   </head>
   <body hx-ext="sse"{% if library_root %} sse-connect="/events"{% endif %}>
     <header class="app-header">
-      <a class="brand" href="/papers" aria-label="Paper Pipeline home">
+      <a class="brand" href="/library" aria-label="Paper Pipeline home">
         <span class="brand-mark">PP</span>
         <span><strong>Paper Pipeline</strong><small>Library builder</small></span>
       </a>
       <nav aria-label="Main navigation">
+        <a href="/library"{% if active_page == 'library' %} aria-current="page"{% endif %}>Library</a>
         <a href="/papers"{% if active_page == 'papers' %} aria-current="page"{% endif %}>Papers</a>
-        <a href="/import"{% if active_page == 'import' %} aria-current="page"{% endif %}>Import</a>
-        <a href="/jobs">Jobs</a>
+        <a href="/jobs"{% if active_page == 'jobs' %} aria-current="page"{% endif %}>Jobs</a>
       </nav>
-      <a id="library-chip" class="library-chip" href="/import#library-setup" title="{{ library_root or 'No library open' }}">
+      <a id="library-chip" class="library-chip" href="/library#library-setup" title="{{ library_root or 'No library open' }}">
         <span class="status-dot{% if library_root %} is-online{% endif %}"></span>
         {{ library_root.name if library_root else 'No library' }}
       </a>

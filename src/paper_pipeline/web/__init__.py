@@ -11,8 +11,8 @@ Rules:
 - Server-owned state is never duplicated as independent client truth; the
   client owns only ephemeral interaction state (selections, open panels).
 - Inline DOM manipulation outside htmx/SSE swaps is prohibited.
-- Important views have stable URLs: ``/``, ``/papers``, ``/papers/{citekey}``,
-  ``/jobs``, ``/import``.
+- Important views have stable URLs: ``/``, ``/library``, ``/papers``,
+  ``/papers/{citekey}``, ``/jobs``, ``/import``.
 - Empty, loading, error, disconnected, cancelled, and interrupted states are
   designed, not accidental.
 - Closing the browser must not affect server-side jobs.

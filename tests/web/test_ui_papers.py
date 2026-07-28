@@ -124,7 +124,7 @@ def test_papers_load_filter_select_and_launch(page: Page, ui_server: str, tmp_pa
 
     page.goto(f"{ui_server}/papers")
     expect(page).to_have_title("Papers · Paper Pipeline")
-    expect(page.get_by_role("heading", name="Papers", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="Papers", exact=True)).to_have_count(0)
     expect(page.locator("tbody tr")).to_have_count(5)
     expect(page.locator("script[src*='htmx.min.js']")).to_have_count(1)
     recipe_checks = page.get_by_role("group", name="Recipes").locator("input")
@@ -189,9 +189,9 @@ def test_papers_load_filter_select_and_launch(page: Page, ui_server: str, tmp_pa
 
 def test_empty_library_state(page: Page, ui_server: str, tmp_path: Path) -> None:
     _create_library(page, ui_server, tmp_path / "empty-library")
-    page.goto(f"{ui_server}/")
+    page.goto(f"{ui_server}/papers")
 
-    expect(page).to_have_url(f"{ui_server}/")
+    expect(page).to_have_url(f"{ui_server}/papers")
     expect(page.get_by_role("heading", name="No papers found")).to_be_visible()
     expect(page.get_by_text("Import papers to start building this library.")).to_be_visible()
     expect(page.locator("tbody")).to_have_count(0)
@@ -227,17 +227,18 @@ def test_large_document_page_count_and_bulk_selection_guard(
 def test_no_library_error_state(page: Page, ui_server: str) -> None:
     page.goto(f"{ui_server}/papers")
     expect(page.get_by_role("heading", name="No library is open")).to_be_visible()
+    expect(page.get_by_text("Open a library to view papers.")).to_be_visible()
+    expect(page.locator(".no-library-state .state-icon")).to_have_count(0)
+    expect(page.get_by_role("button", name="Create library")).to_have_count(0)
+    expect(page.get_by_role("button", name="Open library")).to_have_count(0)
     expect(page.locator(".job-stream")).to_contain_text("No library open")
 
 
-def test_no_library_dashboard_can_create_library(
-    page: Page, ui_server: str, tmp_path: Path
-) -> None:
+def test_library_page_can_create_library(page: Page, ui_server: str, tmp_path: Path) -> None:
     library = tmp_path / "created-from-dashboard"
-    page.goto(f"{ui_server}/papers")
+    page.goto(f"{ui_server}/library")
 
     page.get_by_label("New library folder").fill(str(library))
-    page.get_by_label("Library name").fill("Dashboard Library")
     page.get_by_role("button", name="Create library").click()
 
     expect(page.locator(".library-operation-result").get_by_role("status")).to_contain_text(
@@ -255,7 +256,7 @@ def test_active_library_can_validate_and_rebuild(
     library = tmp_path / "maintained-library"
     _create_library(page, ui_server, library)
     _import_papers(page, ui_server)
-    page.goto(f"{ui_server}/papers")
+    page.goto(f"{ui_server}/library")
 
     page.get_by_role("button", name="Validate library").click()
     expect(page.get_by_role("status")).to_contain_text("validation passed")
@@ -289,8 +290,3 @@ def test_stale_papers_tab_cannot_launch_against_new_library(
     jobs = page.request.get(f"{ui_server}/api/jobs")
     assert jobs.ok, jobs.text()
     assert jobs.json()["jobs"] == []
-
-    page.get_by_role("button", name="Validate library").click()
-    expect(page.locator(".library-operation-result").get_by_role("alert")).to_contain_text(
-        "selected library changed"
-    )

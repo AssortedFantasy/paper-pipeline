@@ -1,13 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Jobs · Paper Pipeline{% endblock %}
 {% block content %}
-<section class="page-heading jobs-heading">
-  <div>
-    <p class="eyebrow">Operations</p>
-    <h1>Jobs</h1>
-    <p class="lede">Follow active work, inspect diagnostics, and recover safely.</p>
-  </div>
-  {% if library_root %}
+{% if library_root %}
+<div class="jobs-live-status">
   <div id="connection-status" class="live-state" aria-live="polite">
     <span class="status-dot"></span> Connecting to live updates…
   </div>
@@ -17,12 +12,11 @@
   <template id="live-disconnected-template">
     <span class="status-dot is-offline"></span> Live updates disconnected — reconnecting…
   </template>
-  {% endif %}
-</section>
+</div>
+{% endif %}
 
 {% if no_library %}
   <section class="state-panel" role="status">
-    <span class="state-icon">↯</span>
     <h2>No library is open</h2>
     <p>Open a library before monitoring its work queue.</p>
   </section>

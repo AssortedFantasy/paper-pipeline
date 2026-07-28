@@ -112,7 +112,8 @@ def _queue_conversion(page: Page, server: RunningServer, citekey: str) -> str:
 def test_jobs_update_live_over_sse(page: Page, jobs_server: RunningServer, tmp_path: Path) -> None:
     citekey = _create_and_import(page, jobs_server, tmp_path / "library")
     page.goto(f"{jobs_server.url}/jobs")
-    expect(page.get_by_role("heading", name="Jobs", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="Jobs", exact=True)).to_have_count(0)
+    expect(page.locator(".state-panel .state-icon")).to_have_count(0)
     expect(page.locator("#connection-status")).to_contain_text("connected")
     expect(page.get_by_text("Queue is clear.")).to_be_visible()
 
