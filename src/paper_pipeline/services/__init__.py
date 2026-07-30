@@ -12,9 +12,12 @@ Operations:
 - ``queue_recipes(runtime, recipe_names, citekeys) -> [Job]``
 - ``cancel_job`` / ``retry_job``
 - ``rebuild_indexes(library)``
+- ``refresh_catalog(runtime)``
 
 Services orchestrate; they do not parse RDF, spawn Marker, or format HTTP
 responses. A process-wide runtime registry owns each open library and its
-queue. Every paper mutation receives a scoped ``PaperSession`` inside the
-mandatory paper lane, then uses library storage's atomic writes.
+queue and prepared read catalog. Every paper mutation receives a scoped
+``PaperSession`` inside the mandatory paper lane, then uses library storage's
+atomic writes. Successful paper-record writes update the catalog; explicit
+refresh reconciles changes made outside the process.
 """

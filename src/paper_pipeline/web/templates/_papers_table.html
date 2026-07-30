@@ -4,9 +4,29 @@
     <ul>{% for problem in problems %}<li>{{ problem }}</li>{% endfor %}</ul>
   </aside>
 {% endif %}
+{% if catalog_error %}
+  <aside class="alert alert-error" role="alert">{{ catalog_error }}</aside>
+{% endif %}
 {% if fragment %}
   <input id="paper-sort" type="hidden" name="sort" value="{{ filters.sort }}" hx-swap-oob="outerHTML">
   <input id="paper-direction" type="hidden" name="direction" value="{{ filters.direction }}" hx-swap-oob="outerHTML">
+{% endif %}
+
+{% if not no_library %}
+  <div class="catalog-toolbar">
+    <div class="catalog-status">
+      <span{% if catalog_refreshed_at %} title="Last refreshed at {{ catalog_refreshed_at.strftime('%I:%M:%S %p') }}"{% endif %}>Library view ready</span>
+      {% if catalog_stale %}
+        <strong class="catalog-stale">Changes detected on disk</strong>
+      {% endif %}
+    </div>
+    <button class="text-button catalog-refresh" type="button"
+            hx-post="/papers/refresh" hx-include="#paper-filters"
+            hx-target="#paper-results" hx-disabled-elt="this"
+            title="Refresh library from disk">
+      <span aria-hidden="true">↻</span> Refresh
+    </button>
+  </div>
 {% endif %}
 
 {% if rows %}

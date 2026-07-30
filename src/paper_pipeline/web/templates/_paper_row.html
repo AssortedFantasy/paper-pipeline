@@ -1,6 +1,6 @@
 <tr data-citekey="{{ row.record.metadata.citekey }}">
   <td class="select-cell">
-    <input id="paper-select-{{ row.record.metadata.citekey }}" hx-preserve type="checkbox"
+    <input id="paper-select-{{ row.record.metadata.citekey }}"{% if preserve_selection is not defined or preserve_selection %} hx-preserve{% endif %} type="checkbox"
            name="citekeys" value="{{ row.record.metadata.citekey }}"
            data-conversion-pending="{{ 'true' if row.conversion_state != 'ready' else 'false' }}"
            data-bulk-selectable="{{ 'false' if row.is_large_document else 'true' }}"

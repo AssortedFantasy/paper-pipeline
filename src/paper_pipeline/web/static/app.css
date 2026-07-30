@@ -64,6 +64,18 @@ input[type="search"], select {
 }
 input:focus, select:focus, button:focus-visible { outline: 3px solid rgb(25 79 61 / 22%); outline-offset: 2px; }
 
+.catalog-toolbar {
+  min-height: 32px; margin: 0 .15rem .5rem; display: flex; justify-content: space-between;
+  align-items: center; gap: 1rem; color: var(--muted); font-size: .75rem;
+}
+.catalog-status { display: flex; align-items: center; gap: .65rem; }
+.catalog-stale {
+  padding: .2rem .42rem; border-radius: 999px; background: var(--amber-soft);
+  color: #86420f; font-size: .68rem;
+}
+.catalog-refresh { display: inline-flex; align-items: center; gap: .25rem; }
+.catalog-refresh span { font-size: 1rem; line-height: 1; }
+
 .paper-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-panel); box-shadow: var(--shadow); overflow: hidden; }
 .action-bar { min-height: 48px; padding: .45rem .65rem; display: flex; align-items: center; justify-content: space-between; gap: .75rem; border-bottom: 1px solid var(--line); }
 .action-bar p { margin: 0; color: var(--muted); }

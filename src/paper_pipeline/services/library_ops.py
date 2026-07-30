@@ -104,23 +104,15 @@ async def list_papers(
     offset: int = 0,
     limit: int = 100,
 ) -> PaperPage:
-    """List and filter papers through a nonexclusive library read."""
+    """List and filter papers from the runtime's prepared catalog snapshot."""
     if offset < 0 or limit < 1:
         raise ValueError("paper page offset must be nonnegative and limit must be positive")
-    results: list[tuple[list[PaperRecord], list[str]]] = []
-
-    async def read(session: LibrarySession, job: Job, token: CancellationToken) -> None:
-        del job, token
-        results.append(session.list_papers())
-
-    job = await runtime.enqueue_library_read(JobKind.MAINTENANCE, "papers:list", read)
-    completed = await runtime.queue.wait(job.id)
-    _require_success(completed)
-    papers, problems = results[0]
+    snapshot = runtime.catalog.snapshot()
     query_text = query.casefold().strip() if query else None
     author_text = author.casefold().strip() if author else None
     filtered: list[PaperRecord] = []
-    for paper in papers:
+    for entry in snapshot.papers:
+        paper = entry.record
         metadata = paper.metadata
         searchable = " ".join((metadata.citekey, metadata.title, *metadata.authors)).casefold()
         if query_text and query_text not in searchable:
@@ -132,7 +124,7 @@ async def list_papers(
         filtered.append(paper)
     return PaperPage(
         papers=filtered[offset : offset + limit],
-        problems=problems,
+        problems=list(snapshot.problems),
         total=len(filtered),
     )
 

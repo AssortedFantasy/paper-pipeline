@@ -207,6 +207,7 @@ def test_large_document_page_count_and_bulk_selection_guard(
     _replace_with_pdf(book_source, 100)
 
     page.goto(f"{ui_server}/papers")
+    page.get_by_role("button", name="Refresh").click()
 
     book_row = page.locator("tr[data-citekey='DoeBook2020']")
     expect(page.get_by_role("columnheader", name="Pages")).to_be_visible()
@@ -222,6 +223,23 @@ def test_large_document_page_count_and_bulk_selection_guard(
     expect(page.locator("tbody input[type=checkbox]:checked")).to_have_count(4)
     book_row.locator("input[type=checkbox]").check()
     expect(book_row.locator("input[type=checkbox]")).to_be_checked()
+
+
+def test_papers_refresh_preserves_filters(page: Page, ui_server: str, tmp_path: Path) -> None:
+    _create_library(page, ui_server, tmp_path / "library")
+    _import_papers(page, ui_server)
+    page.goto(f"{ui_server}/papers")
+
+    page.get_by_placeholder("Title, author, or citekey").fill("journal")
+    expect(page.locator("tbody tr")).to_have_count(1)
+    page.get_by_role("button", name="Citekey").click()
+    expect(page.get_by_role("button", name="Citekey ↑")).to_be_visible()
+
+    page.get_by_role("button", name="Refresh").click()
+
+    expect(page.locator("tbody tr")).to_have_count(1)
+    expect(page.get_by_placeholder("Title, author, or citekey")).to_have_value("journal")
+    expect(page.get_by_role("button", name="Citekey ↑")).to_be_visible()
 
 
 def test_no_library_error_state(page: Page, ui_server: str) -> None:

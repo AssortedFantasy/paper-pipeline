@@ -12,3 +12,4 @@ Durable implementation decisions for Paper Pipeline v2.
 | [0004](0004-job-execution-model.md) | Job execution and interruption recovery | Accepted |
 | [0005](0005-remote-conversion-over-ssh.md) | Remote conversion over SSH | Accepted |
 | [0006](0006-llm-usage-and-spend.md) | LLM usage and spend accounting | Accepted |
+| [0007](0007-runtime-library-catalog.md) | Runtime library catalog | Accepted |

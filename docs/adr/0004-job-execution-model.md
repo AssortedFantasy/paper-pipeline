@@ -13,6 +13,8 @@ second durable state store.
 One process-wide job system serves all open libraries.
 
 - Every paper mutation runs in an exclusive `(library, citekey)` lane.
+- Paper-lane sessions update the runtime library catalog at the canonical
+  `paper.json` write boundary (ADR-0007).
 - Conversion is globally limited to one job by default.
 - Recipes run concurrently across papers and sequentially within a paper lane.
 - Library writes wait for active paper lanes and block new ones.
@@ -34,7 +36,7 @@ Server-Sent Events. Closing a browser does not cancel work.
 
 ## Consequences
 
-Callers cannot bypass paper lanes or write `paper.json` directly. A failed or
-cancelled rerun does not invalidate an older artifact whose recorded input hash
-is still current. Deleting `.pp/` removes interruption diagnostics but leaves
-the library valid.
+Callers cannot bypass paper lanes, write `paper.json` directly, or construct a
+mutation session without its runtime catalog. A failed or cancelled rerun does
+not invalidate an older artifact whose recorded input hash is still current.
+Deleting `.pp/` removes interruption diagnostics but leaves the library valid.

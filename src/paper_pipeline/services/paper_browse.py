@@ -3,14 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from paper_pipeline.library.model import AttemptState, PaperRecord
-from paper_pipeline.services.library_ops import list_papers
-from paper_pipeline.services.pdf_info import LARGE_DOCUMENT_PAGE_THRESHOLD, pdf_page_count
-from paper_pipeline.services.processing import (
-    pending_conversion_citekeys,
-    pending_recipe_citekeys,
-)
 from paper_pipeline.services.runtime import LibraryRuntime
 
 
@@ -32,6 +27,8 @@ class PaperBrowseRow:
 class PaperBrowsePage:
     rows: tuple[PaperBrowseRow, ...]
     problems: tuple[str, ...]
+    generation: int
+    refreshed_at: datetime
 
 
 async def browse_papers(
@@ -44,10 +41,8 @@ async def browse_papers(
     direction: str = "asc",
     select_pending_conversion: bool = False,
 ) -> PaperBrowsePage:
-    """Return one filtered paper table with durable processing states."""
-    page = await list_papers(runtime)
-    conversion_pending = set(await pending_conversion_citekeys(runtime))
-    recipe_pending = set(await pending_recipe_citekeys(runtime, "summary"))
+    """Query the runtime's prepared paper catalog without rescanning the library."""
+    snapshot = runtime.catalog.snapshot()
     query_text = query.casefold().strip()
     if sort not in {"title", "citekey", "year"}:
         raise ValueError(f"unsupported paper sort: {sort}")
@@ -62,18 +57,16 @@ async def browse_papers(
             active_by_citekey[job.citekey] = job
 
     rows: list[PaperBrowseRow] = []
-    for paper in page.papers:
+    for entry in snapshot.papers:
+        paper = entry.record
         citekey = paper.metadata.citekey
-        source = runtime.root / paper.source_pdf if paper.source_pdf is not None else None
-        page_count = pdf_page_count(source) if source is not None else None
-        is_large_document = page_count is not None and page_count >= LARGE_DOCUMENT_PAGE_THRESHOLD
         conversion_state = _processing_state(
-            citekey in conversion_pending,
+            entry.conversion_pending,
             paper.conversion.last_attempt.state if paper.conversion.last_attempt else None,
         )
         recipe_record = paper.recipes.get("summary")
         recipe_state = _processing_state(
-            citekey in recipe_pending,
+            recipe_record is None or "summary" in entry.pending_recipes,
             recipe_record.last_attempt.state
             if recipe_record and recipe_record.last_attempt
             else None,
@@ -95,14 +88,14 @@ async def browse_papers(
                 recipe_state=recipe_state,
                 llm_cost_usd=sum(item.cost_usd for item in paper.recipes.values()),
                 cache_hit_rate=cached_tokens / prompt_tokens if prompt_tokens else 0.0,
-                page_count=page_count,
-                is_large_document=is_large_document,
+                page_count=entry.page_count,
+                is_large_document=entry.is_large_document,
                 live_state=active.state.value if active is not None else None,
                 live_progress=(active.progress or active.label) if active is not None else None,
                 selected=(
                     select_pending_conversion
-                    and citekey in conversion_pending
-                    and not is_large_document
+                    and entry.conversion_pending
+                    and not entry.is_large_document
                 ),
             )
         )
@@ -116,7 +109,12 @@ async def browse_papers(
         ),
     }
     rows.sort(key=key_functions[sort], reverse=direction == "desc")
-    return PaperBrowsePage(tuple(rows), tuple(page.problems))
+    return PaperBrowsePage(
+        tuple(rows),
+        snapshot.problems,
+        snapshot.generation,
+        snapshot.refreshed_at,
+    )
 
 
 def _processing_state(pending: bool, attempt: AttemptState | None) -> str:

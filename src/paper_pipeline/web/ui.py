@@ -19,6 +19,7 @@ from paper_pipeline.services.import_ops import (
     select_source_replacements,
 )
 from paper_pipeline.services.job_ops import job_counts
+from paper_pipeline.services.library_catalog import refresh_catalog
 from paper_pipeline.services.library_ops import (
     create_library,
     open_library,
@@ -209,6 +210,40 @@ def create_ui_router(context: WebContext) -> APIRouter:
         table["fragment"] = True
         return templates.TemplateResponse(request, "_papers_table.html", table)
 
+    @router.post("/papers/refresh", response_class=HTMLResponse)
+    async def papers_refresh(request: Request) -> HTMLResponse:
+        values = await _form_values(request)
+        filters = {
+            "q": _first(values, "q"),
+            "conversion": _first(values, "conversion") or "all",
+            "recipe": _first(values, "recipe") or "all",
+            "sort": _first(values, "sort") or "title",
+            "direction": _first(values, "direction") or "asc",
+        }
+        if context.runtime is None:
+            table: dict[str, object] = {
+                "rows": [],
+                "total": 0,
+                "problems": [],
+                "no_library": True,
+                "catalog_error": "Open a library before refreshing.",
+                "filters": filters,
+            }
+        else:
+            try:
+                await refresh_catalog(context.runtime)
+            except RuntimeError as error:
+                table = await _table_context(
+                    context,
+                    **filters,
+                )
+                table["catalog_error"] = str(error)
+            else:
+                table = await _table_context(context, **filters)
+        table["preserve_selection"] = False
+        table["fragment"] = True
+        return templates.TemplateResponse(request, "_papers_table.html", table)
+
     @router.get("/fragments/job-strip", response_class=HTMLResponse)
     async def job_strip(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
@@ -391,6 +426,9 @@ async def _table_context(
         },
         "recipe_options": tuple(load_builtin_recipes().values()),
         "library_key": runtime.library_key,
+        "catalog_refreshed_at": page.refreshed_at.astimezone(),
+        "catalog_generation": page.generation,
+        "catalog_stale": runtime.catalog.is_stale(),
     }
 
 

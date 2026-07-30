@@ -28,6 +28,7 @@ from paper_pipeline.jobs.recovery import (
 from paper_pipeline.library.model import PaperRecord
 from paper_pipeline.library.paths import ATTEMPTS_DIR, PAPERS_DIR
 from paper_pipeline.library.storage import Library, create_library, open_library
+from paper_pipeline.services.library_catalog import LibraryCatalog
 
 T = TypeVar("T")
 type ProviderFactory = Callable[[], object]
@@ -119,11 +120,22 @@ class _LibraryReadView:
 
 
 class PaperSession(_ScopedSession):
-    """Citekey-scoped mutation surface valid only inside one paper lane."""
+    """Citekey-scoped mutation surface valid only inside one paper lane.
 
-    def __init__(self, library: Library, citekey: str) -> None:
+    Runtime-created sessions must carry the catalog so the canonical write
+    boundary also maintains the disposable read projection (ADR-0007).
+    """
+
+    def __init__(
+        self,
+        library: Library,
+        citekey: str,
+        *,
+        catalog: LibraryCatalog,
+    ) -> None:
         super().__init__(library)
         self.citekey = citekey
+        self._catalog = catalog
 
     @property
     def root(self) -> Path:
@@ -154,6 +166,9 @@ class PaperSession(_ScopedSession):
                 f"paper session for {self.citekey!r} cannot write {record.metadata.citekey!r}"
             )
         self._library.write_paper(record)
+        # Keep this beside the canonical write: new mutation workflows must not
+        # publish paper.json without updating the runtime projection (ADR-0007).
+        self._catalog.upsert(record)
 
     def update_record(self, update: Callable[[PaperRecord], PaperRecord | None]) -> PaperRecord:
         """Read-modify-write the record while the queue holds this paper lane."""
@@ -198,6 +213,7 @@ class LibraryRuntime:
         self.library_key = library_key
         self.root = library.root
         self.providers = MappingProxyType(dict(providers))
+        self.catalog = LibraryCatalog(library)
         self._marker_store = AttemptMarkerStore(
             library.operational_dir() / ATTEMPTS_DIR,
             managed_root=library.root,
@@ -244,7 +260,7 @@ class LibraryRuntime:
         """Schedule a paper worker and create its session only inside the lane."""
 
         async def queued_worker(job: Job, token: CancellationToken) -> None:
-            session = PaperSession(self._library, citekey)
+            session = PaperSession(self._library, citekey, catalog=self.catalog)
             try:
                 await worker(session, job, token)
             finally:
@@ -328,7 +344,7 @@ class LibraryRuntime:
         async def validate() -> CompletionResult:
             if validate_completion is None:
                 return CompletionResult()
-            session = PaperSession(self._library, citekey)
+            session = PaperSession(self._library, citekey, catalog=self.catalog)
             try:
                 result = validate_completion(session)
                 return await result if inspect.isawaitable(result) else result
@@ -336,7 +352,7 @@ class LibraryRuntime:
                 session._close()
 
         async def record(outcome: TerminalOutcome) -> None:
-            session = PaperSession(self._library, citekey)
+            session = PaperSession(self._library, citekey, catalog=self.catalog)
             try:
                 result = record_terminal(session, outcome)
                 if inspect.isawaitable(result):

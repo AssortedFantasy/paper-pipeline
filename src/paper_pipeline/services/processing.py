@@ -373,6 +373,10 @@ async def retry_job(
 
 
 async def pending_conversion_citekeys(runtime: LibraryRuntime) -> list[str]:
+    # Queue selection is an explicit integrity check, so it deliberately reads
+    # canonical records and hashes artifacts. Interactive presentation uses the
+    # prepared catalog instead; keep that distinction when adding callers
+    # (ADR-0007).
     return await _select(
         runtime,
         lambda record: (
