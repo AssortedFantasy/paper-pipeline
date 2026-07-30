@@ -153,6 +153,8 @@ def test_import_page_can_open_an_existing_library(
     expect(page.get_by_role("status")).to_contain_text("Opened library")
     expect(page.locator("#library-chip")).to_contain_text("existing-library")
     expect(page.locator("#import-library-path")).to_have_value(str(existing))
+    maintenance = page.get_by_role("region", name="Library maintenance")
+    expect(maintenance.locator("strong")).to_have_text("existing-library")
 
 
 def test_library_control_error_is_designed(

@@ -262,8 +262,11 @@ def test_library_page_can_create_library(page: Page, ui_server: str, tmp_path: P
     page.get_by_label("New library folder").fill(str(library))
     page.get_by_role("button", name="Create library").click()
 
-    expect(page.locator(".library-operation-result").get_by_role("status")).to_contain_text(
+    expect(page.locator("#library-setup-result").get_by_role("status")).to_contain_text(
         "Created and opened library"
+    )
+    expect(page.get_by_role("region", name="Library maintenance")).to_contain_text(
+        "created-from-dashboard"
     )
     expect(page.locator("#library-chip")).to_contain_text("created-from-dashboard")
     assert (library / "library.json").is_file()
@@ -289,7 +292,7 @@ def test_active_library_can_validate_and_rebuild(
     source = next((library / "papers" / "SmithJournal2024" / "source").glob("*.pdf"))
     source.unlink()
     page.get_by_role("button", name="Validate library").click()
-    validation = page.locator(".library-operation-result").get_by_role("alert")
+    validation = page.locator("#library-maintenance-result").get_by_role("alert")
     expect(validation).to_contain_text("Validation found 1 problem")
     expect(validation).to_contain_text("Source PDF is missing")
 

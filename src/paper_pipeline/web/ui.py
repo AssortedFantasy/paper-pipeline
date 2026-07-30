@@ -7,7 +7,7 @@ from urllib.parse import parse_qs
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from paper_pipeline.ingest.plan import ImportPlan
@@ -54,12 +54,19 @@ def create_ui_router(context: WebContext) -> APIRouter:
     @router.get("/", response_class=HTMLResponse)
     @router.get("/library", response_class=HTMLResponse)
     @router.get("/import", response_class=HTMLResponse)
-    async def library_page(request: Request) -> HTMLResponse:
+    async def library_page(request: Request, notice: str = "") -> HTMLResponse:
         page = _library_page_context(context, request)
+        if context.runtime is not None:
+            if notice == "created":
+                page["library_message"] = (
+                    f"Created and opened library {context.runtime.root.name!r}."
+                )
+            elif notice == "opened":
+                page["library_message"] = f"Opened library {context.runtime.root.name!r}."
         return templates.TemplateResponse(request, "library.html", page)
 
     @router.post("/library/create", response_class=HTMLResponse)
-    async def create_library_control(request: Request) -> HTMLResponse:
+    async def create_library_control(request: Request) -> Response:
         values = await _form_values(request)
         path = _first(values, "library_path")
         if not path:
@@ -71,14 +78,10 @@ def create_ui_router(context: WebContext) -> APIRouter:
             )
         except (OSError, ValueError, RuntimeError) as error:
             return _library_result_response(request, error=str(error))
-        return _library_result_response(
-            request,
-            message=f"Created and opened library {context.runtime.root.name!r}.",
-            runtime=context.runtime,
-        )
+        return _library_selected_response(request, notice="created")
 
     @router.post("/library/open", response_class=HTMLResponse)
-    async def open_library_control(request: Request) -> HTMLResponse:
+    async def open_library_control(request: Request) -> Response:
         values = await _form_values(request)
         path = _first(values, "library_path")
         if not path:
@@ -87,11 +90,7 @@ def create_ui_router(context: WebContext) -> APIRouter:
             context.runtime = open_library(Path(path), registry=context.registry)
         except (OSError, ValueError, RuntimeError) as error:
             return _library_result_response(request, error=str(error))
-        return _library_result_response(
-            request,
-            message=f"Opened library {context.runtime.root.name!r}.",
-            runtime=context.runtime,
-        )
+        return _library_selected_response(request, notice="opened")
 
     @router.post("/library/validate", response_class=HTMLResponse)
     async def validate_library_control(request: Request) -> HTMLResponse:
@@ -515,6 +514,14 @@ def _library_result_response(
             "library_root": runtime.root if runtime is not None else None,
         },
     )
+
+
+def _library_selected_response(request: Request, *, notice: str) -> Response:
+    """Reload every library-bound fragment after changing the active library."""
+    location = f"/library?notice={notice}"
+    if request.headers.get("HX-Request", "").casefold() == "true":
+        return HTMLResponse("", headers={"HX-Redirect": location})
+    return RedirectResponse(location, status_code=303)
 
 
 def _library_page_context(
