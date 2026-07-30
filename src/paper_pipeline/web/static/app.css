@@ -113,7 +113,7 @@ code { display: block; margin-top: .15rem; color: var(--muted); font-size: .72re
 .badge-ready { background: var(--forest-soft); color: var(--forest); }
 .badge-pending { background: var(--amber-soft); color: #86420f; }
 .badge-failed { background: var(--red-soft); color: var(--red); }
-.badge-large { background: var(--red-soft); color: var(--red); margin-left: .2rem; }
+.page-count-large { color: var(--red); font-weight: 700; }
 
 .state-panel { min-height: 330px; padding: 3rem; display: grid; place-items: center; align-content: center; text-align: center; border: 1px dashed #bac4bd; border-radius: var(--radius-panel); background: rgb(255 254 249 / 60%); }
 .state-panel.compact { min-height: 260px; }

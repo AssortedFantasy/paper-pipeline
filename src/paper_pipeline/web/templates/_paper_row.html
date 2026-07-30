@@ -12,7 +12,7 @@
   <td><code class="citekey">{{ row.record.metadata.citekey }}</code></td>
   <td>{{ row.record.metadata.year or '—' }}</td>
   <td class="page-count-cell"{% if row.is_large_document %} title="Large document: excluded from bulk selection to avoid unexpected conversion or LLM usage"{% endif %}>
-    {{ row.page_count if row.page_count is not none else '—' }}{% if row.is_large_document %} <span class="badge badge-large">large</span>{% endif %}
+    <span{% if row.is_large_document %} class="page-count-large"{% endif %}>{{ row.page_count if row.page_count is not none else '—' }}</span>
   </td>
   <td><span class="badge badge-{{ row.conversion_state }}">{{ row.conversion_state }}</span></td>
   <td><span class="badge badge-{{ row.page_render_state }}">{{ row.page_render_state }}</span></td>

@@ -195,8 +195,7 @@ def test_large_document_page_count_and_bulk_selection_guard(
 
     book_row = page.locator("tr[data-citekey='DoeBook2020']")
     expect(page.get_by_role("columnheader", name="Pages")).to_be_visible()
-    expect(book_row.locator(".page-count-cell")).to_contain_text("100")
-    expect(book_row.locator(".badge-large")).to_have_text("large")
+    expect(book_row.locator(".page-count-large")).to_have_text("100")
     expect(page.get_by_text("1 large document (100+ pages) excluded")).to_be_visible()
 
     page.get_by_role("button", name="Select all", exact=True).click()
