@@ -86,8 +86,15 @@ input:focus, select:focus, button:focus-visible { outline: 3px solid rgb(25 79 6
 .button-quiet { background: white; color: var(--forest); }
 .button-accent { border-color: var(--amber); background: var(--amber); }
 .selection-controls { display: flex; gap: .55rem; align-items: center; white-space: nowrap; }
-.text-button, .sort-button { padding: 0; border: 0; background: transparent; color: var(--forest); cursor: pointer; font-weight: 700; }
-.text-button:hover, .sort-button:hover { text-decoration: underline; }
+.text-button { padding: 0; border: 0; background: transparent; color: var(--forest); cursor: pointer; font-weight: 700; }
+.text-button:hover { text-decoration: underline; }
+.sort-button {
+  display: inline-flex; align-items: center; gap: .22rem; padding: 0; border: 0;
+  background: transparent; color: inherit; cursor: pointer; font: inherit;
+  letter-spacing: inherit; text-transform: inherit;
+}
+.sort-button:hover { color: var(--forest); }
+.sort-caret { font-size: .72rem; line-height: 1; }
 .recipe-picker { display: flex; gap: .45rem; margin: 0; padding: .25rem .45rem; border: 1px solid var(--line); border-radius: 6px; }
 .recipe-picker legend { float: left; padding: .15rem .25rem 0 0; color: var(--muted); font-size: .68rem; font-weight: 800; text-transform: uppercase; }
 .recipe-picker label { display: flex; gap: .15rem; align-items: center; white-space: nowrap; font-size: .75rem; }
@@ -97,12 +104,61 @@ table { width: 100%; border-collapse: collapse; }
 th { padding: .4rem .55rem; background: #f1f3ee; color: var(--muted); text-align: left; font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
 td { padding: .42rem .55rem; border-top: 1px solid #e7eae6; vertical-align: middle; }
 tbody tr:hover { background: #fafbf7; }
+#paper-results {
+  --paper-column-width: 240px;
+  --authors-column-width: 220px;
+  --citekey-column-width: 285px;
+}
+.papers-table {
+  width: max(100%, calc(var(--paper-column-width) + var(--authors-column-width) + var(--citekey-column-width) + 643px));
+  table-layout: fixed;
+}
+.papers-table .col-select { width: 48px; }
+.papers-table .col-paper { width: var(--paper-column-width); }
+.papers-table .col-authors { width: var(--authors-column-width); }
+.papers-table .col-citekey { width: var(--citekey-column-width); }
+.papers-table .col-year { width: 55px; }
+.papers-table .col-pages { width: 55px; }
+.papers-table .col-conversion { width: 90px; }
+.papers-table .col-page-images { width: 95px; }
+.papers-table .col-summary { width: 80px; }
+.papers-table .col-spend { width: 75px; }
+.papers-table .col-live-job { width: 145px; }
+.resizable-header { position: relative; padding-right: .85rem; }
+.column-header-content { display: flex; align-items: center; gap: .3rem; min-width: 0; }
+.column-wrap-toggle {
+  display: grid; flex: 0 0 auto; place-items: center; width: 18px; height: 18px;
+  margin-left: auto; padding: 0; border: 1px solid transparent; border-radius: 3px;
+  background: transparent; color: #829088; cursor: pointer; font: 800 .8rem/1 sans-serif;
+}
+.column-wrap-toggle:hover { color: var(--forest); }
+.column-wrap-toggle[aria-pressed="true"] {
+  border-color: #bac9c2; background: var(--surface); color: var(--forest);
+}
+.column-resizer {
+  position: absolute; z-index: 2; top: 0; right: -4px; bottom: 0; width: 9px;
+  cursor: col-resize; touch-action: none;
+}
+.column-resizer::after {
+  position: absolute; top: 20%; bottom: 20%; left: 4px; width: 1px;
+  background: transparent; content: "";
+}
+.column-resizer:hover::after, .column-resizer:focus-visible::after { background: var(--forest); }
+body.is-resizing-column { cursor: col-resize; user-select: none; }
 .select-cell { width: 48px; text-align: center; }
 input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--forest); }
-.paper-title { display: block; max-width: 52ch; line-height: 1.2; }
+.paper-title { display: block; line-height: 1.2; }
 code { display: block; margin-top: .15rem; color: var(--muted); font-size: .72rem; }
 .citekey { margin: 0; white-space: nowrap; }
-.authors-cell { max-width: 32ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.papers-table .column-text {
+  display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.papers-table.wrap-paper-text .paper-cell .column-text,
+.papers-table.wrap-authors-text .authors-cell .column-text,
+.papers-table.wrap-citekey-text .citekey-cell .column-text {
+  overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere;
+}
 .spend-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .page-count-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .bulk-selection-note { color: var(--muted); font-size: .72rem; }

@@ -130,13 +130,14 @@ def test_papers_load_filter_select_and_launch(page: Page, ui_server: str, tmp_pa
     expect(page.locator("tbody tr")).to_have_count(5)
     expect(page.locator("script[src*='htmx.min.js']")).to_have_count(1)
 
-    page.get_by_role("button", name="Citekey").click()
-    expect(page.get_by_role("button", name="Citekey ↑")).to_be_visible()
+    expect(page.get_by_role("button", name="Citekey, sorted ascending", exact=True)).to_be_visible()
     citekeys = page.locator("tbody .citekey")
     ascending = citekeys.all_text_contents()
     assert ascending == sorted(ascending, key=str.casefold)
-    page.get_by_role("button", name="Citekey").click()
-    expect(page.get_by_role("button", name="Citekey ↓")).to_be_visible()
+    page.get_by_role("button", name="Citekey, sorted ascending", exact=True).click()
+    expect(
+        page.get_by_role("button", name="Citekey, sorted descending", exact=True)
+    ).to_be_visible()
     assert citekeys.all_text_contents() == list(reversed(ascending))
 
     page.get_by_placeholder("Title, author, or citekey").fill("journal")
@@ -234,14 +235,58 @@ def test_papers_refresh_preserves_filters(page: Page, ui_server: str, tmp_path: 
 
     page.get_by_placeholder("Title, author, or citekey").fill("journal")
     expect(page.locator("tbody tr")).to_have_count(1)
-    page.get_by_role("button", name="Citekey").click()
-    expect(page.get_by_role("button", name="Citekey ↑")).to_be_visible()
+    page.get_by_role("button", name="Citekey, sorted ascending", exact=True).click()
+    expect(
+        page.get_by_role("button", name="Citekey, sorted descending", exact=True)
+    ).to_be_visible()
 
     page.get_by_role("button", name="Refresh").click()
 
     expect(page.locator("tbody tr")).to_have_count(1)
     expect(page.get_by_placeholder("Title, author, or citekey")).to_have_value("journal")
-    expect(page.get_by_role("button", name="Citekey ↑")).to_be_visible()
+    expect(
+        page.get_by_role("button", name="Citekey, sorted descending", exact=True)
+    ).to_be_visible()
+
+
+def test_papers_table_text_display_and_column_resize(
+    page: Page, ui_server: str, tmp_path: Path
+) -> None:
+    _create_library(page, ui_server, tmp_path / "library")
+    _import_papers(page, ui_server)
+    page.goto(f"{ui_server}/papers")
+
+    title = page.locator(".paper-title").first
+    expect(title).to_have_css("white-space", "nowrap")
+    expect(page.locator(".table-view-controls")).to_have_count(0)
+    expect(page.locator(".column-wrap-toggle")).to_have_count(3)
+    expect(page.get_by_role("button", name="Wrap Paper text", exact=True)).to_have_attribute(
+        "aria-pressed", "false"
+    )
+
+    paper_header = page.locator(".paper-column-header")
+    initial_width = paper_header.bounding_box()
+    assert initial_width is not None
+    page.get_by_role("separator", name="Resize Paper column").press("ArrowRight")
+    resized_width = paper_header.bounding_box()
+    assert resized_width is not None
+    assert resized_width["width"] > initial_width["width"]
+
+    page.get_by_role("button", name="Wrap Paper text", exact=True).click()
+    expect(title).to_have_css("white-space", "normal")
+    expect(page.locator(".authors-text").first).to_have_css("white-space", "nowrap")
+    expect(page.get_by_role("button", name="Wrap Paper text", exact=True)).to_have_attribute(
+        "aria-pressed", "true"
+    )
+
+    page.get_by_role("button", name="Citekey, sorted ascending", exact=True).click()
+    expect(page.locator(".paper-title").first).to_have_css("white-space", "normal")
+    expect(page.get_by_role("button", name="Wrap Paper text", exact=True)).to_have_attribute(
+        "aria-pressed", "true"
+    )
+    width_after_sort = page.locator(".paper-column-header").bounding_box()
+    assert width_after_sort is not None
+    assert width_after_sort["width"] == pytest.approx(resized_width["width"], abs=1)
 
 
 def test_no_library_error_state(page: Page, ui_server: str) -> None:

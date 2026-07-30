@@ -61,14 +61,79 @@
   </div>
   <div id="action-feedback" aria-live="polite"></div>
   <div class="table-wrap">
-    <table>
+    <table class="papers-table">
+      <colgroup>
+        <col class="col-select">
+        <col class="col-paper">
+        <col class="col-authors">
+        <col class="col-citekey">
+        <col class="col-year">
+        <col class="col-pages">
+        <col class="col-conversion">
+        <col class="col-page-images">
+        <col class="col-summary">
+        <col class="col-spend">
+        <col class="col-live-job">
+      </colgroup>
       <thead>
         <tr>
           <th class="select-cell"><span class="sr-only">Select</span></th>
-          <th><button class="sort-button" type="button" data-paper-sort="title" data-paper-direction="{{ 'desc' if filters.sort == 'title' and filters.direction == 'asc' else 'asc' }}" hx-get="/papers/table" hx-include="#paper-filters" hx-target="#paper-results">Paper{% if filters.sort == 'title' %} {{ '↑' if filters.direction == 'asc' else '↓' }}{% endif %}</button></th>
-          <th>Authors</th>
-          <th><button class="sort-button" type="button" data-paper-sort="citekey" data-paper-direction="{{ 'desc' if filters.sort == 'citekey' and filters.direction == 'asc' else 'asc' }}" hx-get="/papers/table" hx-include="#paper-filters" hx-target="#paper-results">Citekey{% if filters.sort == 'citekey' %} {{ '↑' if filters.direction == 'asc' else '↓' }}{% endif %}</button></th>
-          <th><button class="sort-button" type="button" data-paper-sort="year" data-paper-direction="{{ 'desc' if filters.sort == 'year' and filters.direction == 'asc' else 'asc' }}" hx-get="/papers/table" hx-include="#paper-filters" hx-target="#paper-results">Year{% if filters.sort == 'year' %} {{ '↑' if filters.direction == 'asc' else '↓' }}{% endif %}</button></th>
+          <th class="resizable-header paper-column-header"
+              aria-sort="{{ filters.direction ~ 'ending' if filters.sort == 'title' else 'none' }}">
+            <span class="column-header-content">
+              <button class="sort-button" type="button"
+                      aria-label="{{ 'Paper, sorted ' ~ filters.direction ~ 'ending' if filters.sort == 'title' else 'Sort by Paper' }}"
+                      data-paper-sort="title"
+                      data-paper-direction="{{ 'desc' if filters.sort == 'title' and filters.direction == 'asc' else 'asc' }}"
+                      hx-get="/papers/table" hx-include="#paper-filters" hx-target="#paper-results">
+                Paper{% if filters.sort == 'title' %}<span class="sort-caret" aria-hidden="true">{{ '▴' if filters.direction == 'asc' else '▾' }}</span>{% endif %}
+              </button>
+              <button class="column-wrap-toggle" type="button" data-paper-wrap="paper"
+                      aria-label="Wrap Paper text" aria-pressed="false"
+                      title="Wrap text in the Paper column"><span aria-hidden="true">↵</span></button>
+            </span>
+            <span class="column-resizer" role="separator" aria-orientation="vertical"
+                  aria-label="Resize Paper column" tabindex="0"
+                  data-paper-resize="paper" data-min-width="150"></span>
+          </th>
+          <th class="resizable-header authors-column-header">
+            <span class="column-header-content">
+              <span>Authors</span>
+              <button class="column-wrap-toggle" type="button" data-paper-wrap="authors"
+                      aria-label="Wrap Authors text" aria-pressed="false"
+                      title="Wrap text in the Authors column"><span aria-hidden="true">↵</span></button>
+            </span>
+            <span class="column-resizer" role="separator" aria-orientation="vertical"
+                  aria-label="Resize Authors column" tabindex="0"
+                  data-paper-resize="authors" data-min-width="140"></span>
+          </th>
+          <th class="resizable-header citekey-column-header"
+              aria-sort="{{ filters.direction ~ 'ending' if filters.sort == 'citekey' else 'none' }}">
+            <span class="column-header-content">
+              <button class="sort-button" type="button"
+                      aria-label="{{ 'Citekey, sorted ' ~ filters.direction ~ 'ending' if filters.sort == 'citekey' else 'Sort by Citekey' }}"
+                      data-paper-sort="citekey"
+                      data-paper-direction="{{ 'desc' if filters.sort == 'citekey' and filters.direction == 'asc' else 'asc' }}"
+                      hx-get="/papers/table" hx-include="#paper-filters" hx-target="#paper-results">
+                Citekey{% if filters.sort == 'citekey' %}<span class="sort-caret" aria-hidden="true">{{ '▴' if filters.direction == 'asc' else '▾' }}</span>{% endif %}
+              </button>
+              <button class="column-wrap-toggle" type="button" data-paper-wrap="citekey"
+                      aria-label="Wrap Citekey text" aria-pressed="false"
+                      title="Wrap text in the Citekey column"><span aria-hidden="true">↵</span></button>
+            </span>
+            <span class="column-resizer" role="separator" aria-orientation="vertical"
+                  aria-label="Resize Citekey column" tabindex="0"
+                  data-paper-resize="citekey" data-min-width="180"></span>
+          </th>
+          <th aria-sort="{{ filters.direction ~ 'ending' if filters.sort == 'year' else 'none' }}">
+            <button class="sort-button" type="button"
+                    aria-label="{{ 'Year, sorted ' ~ filters.direction ~ 'ending' if filters.sort == 'year' else 'Sort by Year' }}"
+                    data-paper-sort="year"
+                    data-paper-direction="{{ 'desc' if filters.sort == 'year' and filters.direction == 'asc' else 'asc' }}"
+                    hx-get="/papers/table" hx-include="#paper-filters" hx-target="#paper-results">
+              Year{% if filters.sort == 'year' %}<span class="sort-caret" aria-hidden="true">{{ '▴' if filters.direction == 'asc' else '▾' }}</span>{% endif %}
+            </button>
+          </th>
           <th title="Number of pages in the source PDF">Pages</th>
           <th>Conversion</th>
           <th>Page images</th>

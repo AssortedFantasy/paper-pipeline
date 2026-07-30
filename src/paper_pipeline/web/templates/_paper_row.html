@@ -7,9 +7,9 @@
            data-bulk-selectable="{{ 'false' if row.is_large_document else 'true' }}"
            aria-label="Select {{ row.record.metadata.title }}"{% if row.selected %} checked{% endif %}>
   </td>
-  <td><strong class="paper-title"><a href="{{ url_for('paper_detail_page', citekey=row.record.metadata.citekey) }}">{{ row.record.metadata.title or 'Untitled paper' }}</a></strong></td>
-  <td class="authors-cell" title="{{ row.record.metadata.authors | join(', ') or 'Unknown' }}">{{ row.record.metadata.authors | join(', ') or 'Unknown' }}</td>
-  <td><code class="citekey">{{ row.record.metadata.citekey }}</code></td>
+  <td class="paper-cell"><strong class="paper-title column-text" title="{{ row.record.metadata.title or 'Untitled paper' }}"><a href="{{ url_for('paper_detail_page', citekey=row.record.metadata.citekey) }}">{{ row.record.metadata.title or 'Untitled paper' }}</a></strong></td>
+  <td class="authors-cell"><span class="authors-text column-text" title="{{ row.record.metadata.authors | join(', ') or 'Unknown' }}">{{ row.record.metadata.authors | join(', ') or 'Unknown' }}</span></td>
+  <td class="citekey-cell"><code class="citekey column-text" title="{{ row.record.metadata.citekey }}">{{ row.record.metadata.citekey }}</code></td>
   <td>{{ row.record.metadata.year or '—' }}</td>
   <td class="page-count-cell"{% if row.is_large_document %} title="Large document: excluded from bulk selection to avoid unexpected conversion or LLM usage"{% endif %}>
     <span{% if row.is_large_document %} class="page-count-large"{% endif %}>{{ row.page_count if row.page_count is not none else '—' }}</span>

@@ -4,10 +4,10 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Paper Pipeline{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}?v=7">
+    <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}?v=9">
     <script src="{{ url_for('static', path='/htmx.min.js') }}" defer></script>
     <script src="{{ url_for('static', path='/htmx-sse.js') }}" defer></script>
-    <script src="{{ url_for('static', path='/papers.js') }}" defer></script>
+    <script src="{{ url_for('static', path='/papers.js') }}?v=3" defer></script>
   </head>
   <body hx-ext="sse"{% if library_root %} sse-connect="/events"{% endif %}>
     <header class="app-header">

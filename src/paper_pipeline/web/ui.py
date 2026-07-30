@@ -194,7 +194,7 @@ def create_ui_router(context: WebContext) -> APIRouter:
         q: str = "",
         conversion: str = "all",
         recipe: str = "all",
-        sort: str = "title",
+        sort: str = "citekey",
         direction: str = "asc",
         selection: str = "",
     ) -> HTMLResponse:
@@ -217,7 +217,7 @@ def create_ui_router(context: WebContext) -> APIRouter:
             "q": _first(values, "q"),
             "conversion": _first(values, "conversion") or "all",
             "recipe": _first(values, "recipe") or "all",
-            "sort": _first(values, "sort") or "title",
+            "sort": _first(values, "sort") or "citekey",
             "direction": _first(values, "direction") or "asc",
         }
         if context.runtime is None:
@@ -423,7 +423,7 @@ async def _table_context(
     q: str = "",
     conversion: str = "all",
     recipe: str = "all",
-    sort: str = "title",
+    sort: str = "citekey",
     direction: str = "asc",
     selection: str = "",
 ) -> dict[str, object]:
