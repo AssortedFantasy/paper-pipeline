@@ -113,7 +113,7 @@ def test_install_rejects_symlinked_destination_parent(library_root: Path, tmp_pa
     assert list(outside.iterdir()) == []
 
 
-def test_conversion_bundle_replaces_prior_content_and_reports_installed_hashes(
+def test_transcription_bundle_replaces_text_and_figures_but_preserves_pages(
     library_root: Path,
 ) -> None:
     library = _paper_library(library_root)
@@ -129,16 +129,11 @@ def test_conversion_bundle_replaces_prior_content_and_reports_installed_hashes(
     figures = stage / "figures" / "charts"
     figures.mkdir(parents=True)
     (figures / "one.png").write_bytes(b"new figure")
-    pages = stage / "pages"
-    pages.mkdir()
-    (pages / "page1.png").write_bytes(b"new page")
-
-    hashes = library.install_conversion_bundle("Smith2024", stage)
+    hashes = library.install_transcription_bundle("Smith2024", stage)
 
     expected = {
         "papers/Smith2024/transcription.md": b"# Paper\n",
         "papers/Smith2024/figures/charts/one.png": b"new figure",
-        "papers/Smith2024/pages/page1.png": b"new page",
     }
     assert set(hashes) == set(expected)
     for relative_path, content in expected.items():
@@ -146,7 +141,74 @@ def test_conversion_bundle_replaces_prior_content_and_reports_installed_hashes(
         assert installed.read_bytes() == content
         assert hashes[relative_path] == sha256_file(installed)
     assert not (paper / "figures" / "old.png").exists()
+    assert (paper / "pages" / "old.png").read_bytes() == b"old page"
+
+
+def test_pages_bundle_replaces_only_pages_and_reports_hashes(library_root: Path) -> None:
+    library = _paper_library(library_root)
+    paper = library_root / "papers" / "Smith2024"
+    (paper / "transcription.md").write_text("keep", encoding="utf-8")
+    (paper / "pages").mkdir()
+    (paper / "pages" / "old.png").write_bytes(b"old")
+    stage = library.stage_dir()
+    pages = stage / "pages"
+    pages.mkdir()
+    (pages / "page1.png").write_bytes(b"new page")
+
+    hashes = library.install_pages_bundle("Smith2024", stage)
+
+    page = paper / "pages" / "page1.png"
+    assert hashes == {"papers/Smith2024/pages/page1.png": sha256_file(page)}
+    assert page.read_bytes() == b"new page"
+    assert (paper / "transcription.md").read_text(encoding="utf-8") == "keep"
     assert not (paper / "pages" / "old.png").exists()
+
+
+def test_pages_bundle_rejects_symlinks_before_replacing_prior_pages(
+    library_root: Path, tmp_path: Path
+) -> None:
+    library = _paper_library(library_root)
+    paper = library_root / "papers" / "Smith2024"
+    (paper / "pages").mkdir()
+    (paper / "pages" / "old.png").write_bytes(b"old")
+    stage = library.stage_dir()
+    pages = stage / "pages"
+    pages.mkdir()
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(b"outside")
+    try:
+        (pages / "page1.png").symlink_to(outside)
+    except OSError as error:
+        pytest.skip(f"file symlinks unavailable: {error}")
+
+    with pytest.raises(ValueError):
+        library.install_pages_bundle("Smith2024", stage)
+
+    assert (paper / "pages" / "old.png").read_bytes() == b"old"
+
+
+def test_pages_bundle_install_failure_restores_prior_pages(
+    library_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    library = _paper_library(library_root)
+    paper = library_root / "papers" / "Smith2024"
+    (paper / "pages").mkdir()
+    (paper / "pages" / "old.png").write_bytes(b"old")
+    stage = library.stage_dir()
+    (stage / "pages").mkdir()
+    (stage / "pages" / "page1.png").write_bytes(b"new")
+    real_replace = os.replace
+
+    def fail_new_install(source: Path, destination: Path) -> None:
+        if Path(source) == stage / "pages" and Path(destination) == paper / "pages":
+            raise OSError("interrupted page install")
+        real_replace(source, destination)
+
+    monkeypatch.setattr("paper_pipeline.library.storage.os.replace", fail_new_install)
+    with pytest.raises(OSError):
+        library.install_pages_bundle("Smith2024", stage)
+
+    assert (paper / "pages" / "old.png").read_bytes() == b"old"
 
 
 def test_bundle_validation_happens_before_installed_content_changes(library_root: Path) -> None:
@@ -160,7 +222,7 @@ def test_bundle_validation_happens_before_installed_content_changes(library_root
     (stage / "transcription.md").write_text("", encoding="utf-8")
 
     with pytest.raises(ValueError):
-        library.install_conversion_bundle("Smith2024", stage)
+        library.install_transcription_bundle("Smith2024", stage)
 
     assert _files_under(paper) == before
 
@@ -170,7 +232,6 @@ def test_bundle_validation_happens_before_installed_content_changes(library_root
     [
         Path("transcription.md"),
         Path("figures") / "linked.png",
-        Path("pages") / "page1.png",
     ],
 )
 def test_conversion_bundle_rejects_symlinked_staged_content(
@@ -190,7 +251,7 @@ def test_conversion_bundle_rejects_symlinked_staged_content(
         pytest.skip(f"file symlinks unavailable: {error}")
 
     with pytest.raises(ValueError):
-        library.install_conversion_bundle("Smith2024", stage)
+        library.install_transcription_bundle("Smith2024", stage)
 
     assert not (library_root / "papers" / "Smith2024" / "transcription.md").exists()
 
@@ -209,8 +270,6 @@ def test_bundle_install_failure_preserves_previous_bundle(
     (stage / "transcription.md").write_text("new", encoding="utf-8")
     (stage / "figures").mkdir()
     (stage / "figures" / "new.png").write_bytes(b"new")
-    (stage / "pages").mkdir()
-    (stage / "pages" / "page1.png").write_bytes(b"new page")
     before = _files_under(paper)
     real_replace = os.replace
 
@@ -221,7 +280,7 @@ def test_bundle_install_failure_preserves_previous_bundle(
 
     monkeypatch.setattr("paper_pipeline.library.storage.os.replace", fail_during_install)
     with pytest.raises(OSError):
-        library.install_conversion_bundle("Smith2024", stage)
+        library.install_transcription_bundle("Smith2024", stage)
 
     assert _files_under(paper) == before
 

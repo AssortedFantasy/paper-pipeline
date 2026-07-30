@@ -37,6 +37,7 @@ from paper_pipeline.library.storage import (
     Library,
     conversion_is_fresh,
     open_library,
+    page_render_is_fresh,
     recipe_is_fresh,
     sha256_file,
     validate_citekey,
@@ -200,6 +201,53 @@ def _validate_paper(library: Library, record, report: ValidationReport) -> None:
             "error",
             "transcription.md exists without installed-artifact provenance.",
             "Rerun conversion so the artifact can be validated and recorded atomically.",
+            citekey,
+        )
+
+    pages_root = paper_root / PAGES_DIR
+    declared_pages = set(record.pages.artifacts)
+    if declared_pages:
+        for stored, expected_hash in sorted(record.pages.artifacts.items()):
+            _check_recorded_artifact(
+                library.root,
+                library.root.joinpath(*PurePosixPath(stored).parts),
+                expected_hash,
+                "rendered page",
+                citekey,
+                report,
+            )
+        if not page_render_is_fresh(record):
+            _add(
+                report,
+                "warning",
+                "Rendered pages are stale relative to the current source PDF.",
+                "Rerun page rendering.",
+                citekey,
+            )
+        actual_pages = (
+            {
+                path.relative_to(library.root).as_posix()
+                for path in pages_root.rglob("*")
+                if path.is_file()
+            }
+            if pages_root.is_dir() and not pages_root.is_symlink()
+            else set()
+        )
+        unexpected_pages = actual_pages - declared_pages
+        if unexpected_pages:
+            _add(
+                report,
+                "error",
+                f"Rendered pages contain {len(unexpected_pages)} unrecorded file(s).",
+                "Rerun page rendering to install one complete declared page set.",
+                citekey,
+            )
+    elif record.pages.page_count or record.pages.source_sha256 is not None:
+        _add(
+            report,
+            "error",
+            "paper.json contains incomplete rendered-page provenance.",
+            "Rerun page rendering.",
             citekey,
         )
 

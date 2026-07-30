@@ -40,6 +40,8 @@ class AppConfig(BaseSettings):
     # Conversion
     converter_timeout_seconds: int = 1800
     conversion_concurrency: int = 1  # keep 1 unless testing proves otherwise
+    # Local CPU page rendering is independent of the Marker backend.
+    page_render_timeout_seconds: int = 600
     # Optional SSH Marker backend. Host aliases and remote paths are user-level
     # machine configuration and are never written into a generated library.
     remote_converter_host: str | None = None

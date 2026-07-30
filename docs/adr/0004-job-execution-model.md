@@ -16,11 +16,15 @@ One process-wide job system serves all open libraries.
 - Paper-lane sessions update the runtime library catalog at the canonical
   `paper.json` write boundary (ADR-0007).
 - Conversion is globally limited to one job by default.
+- Local page rendering is independent of conversion, uses the same paper lane,
+  and is limited to two concurrent jobs.
 - Recipes run concurrently across papers and sequentially within a paper lane.
 - Library writes wait for active paper lanes and block new ones.
 - Read-only validation uses a library read barrier.
 - Conversion runs in a fresh child process; cancellation terminates its process
   tree.
+- Page rendering also runs in a fresh child process so PDFium resources,
+  cancellation, and timeouts remain bounded.
 
 Live jobs move through `queued`, `running`, and a terminal state of
 `succeeded`, `failed`, or `cancelled`. A job succeeds only after its artifacts

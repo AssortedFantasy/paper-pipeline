@@ -7,6 +7,7 @@ import pytest
 
 from paper_pipeline.library.model import (
     ConversionRecord,
+    PageRenderRecord,
     PaperMetadata,
     PaperRecord,
     RecipeRecord,
@@ -160,6 +161,32 @@ def test_stale_input_is_a_warning_but_installed_hash_mismatch_is_an_error(
         for problem in report.problems
         if problem.severity == "warning"
     )
+
+
+def test_rendered_pages_have_independent_freshness_and_integrity(
+    library_root: Path,
+) -> None:
+    library, record = _library_with_source(library_root)
+    page = library_root / "papers" / "Smith2024" / "pages" / "page1.png"
+    page.parent.mkdir()
+    page.write_bytes(b"page")
+    stored = "papers/Smith2024/pages/page1.png"
+    record.pages = PageRenderRecord(
+        source_sha256=record.source_sha256,
+        renderer="fake",
+        renderer_version="1",
+        dpi=96,
+        page_count=1,
+        artifacts={stored: sha256_file(page)},
+    )
+    library.write_paper(record)
+
+    assert validate_library(library).ok
+
+    page.write_bytes(b"tampered")
+    report = validate_library(library)
+    assert not report.ok
+    assert any("rendered page" in problem.message.lower() for problem in report.problems)
 
 
 def test_paper_directory_rejects_unexpected_entries(library_root: Path) -> None:

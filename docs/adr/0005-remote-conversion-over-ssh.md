@@ -19,13 +19,17 @@ For each attempt it:
 2. uploads one source PDF;
 3. runs the Paper Pipeline conversion worker with a configured Python
    executable;
-4. downloads the manifest and conversion artifacts into local staging;
+4. downloads the manifest, transcription, and extracted figures into local staging;
 5. validates them through the normal converter contract; and
 6. removes the remote attempt directory.
 
 The local job system continues to own scheduling, paper lanes, cancellation,
 validation, and atomic artifact installation. Host, remote root, and Python
 executable are user-level settings.
+
+Rendered page images are deliberately excluded from the SSH contract. They
+depend only on the locally owned source PDF and are produced by the independent
+local PDFium page-rendering job.
 
 Downloaded content is untrusted. Symlinks, unexpected files, path traversal,
 malformed manifests, and missing required artifacts fail validation. Remote

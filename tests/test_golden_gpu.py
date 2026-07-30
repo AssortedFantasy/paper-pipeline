@@ -188,15 +188,11 @@ def _read_portable_outputs(result: ConversionResult, staging: Path) -> str:
     assert transcription is not None
     assert transcription.is_relative_to(staging)
     assert transcription.is_file() and transcription.stat().st_size > 0
-    assert result.page_paths
-    for paths, root in (
-        (result.figure_paths, staging / "figures"),
-        (result.page_paths, staging / "pages"),
-    ):
-        assert all(
-            path.is_relative_to(root) and path.is_file() and path.stat().st_size > 0
-            for path in paths
-        )
+    assert all(
+        path.is_relative_to(staging / "figures") and path.is_file() and path.stat().st_size > 0
+        for path in result.figure_paths
+    )
+    assert not (staging / "pages").exists()
     return transcription.read_text(encoding="utf-8")
 
 
@@ -211,7 +207,7 @@ def _assert_portable_image_references(markdown: str) -> None:
             and not path.is_absolute()
             and ".." not in path.parts
             and path.parts[0] == "figures"
-        ), f"image reference is not portable within the conversion bundle: {target!r}"
+        ), f"image reference is not portable within the transcription bundle: {target!r}"
 
 
 def _structural_metrics(markdown: str, extracted_figures: int) -> dict[str, int]:

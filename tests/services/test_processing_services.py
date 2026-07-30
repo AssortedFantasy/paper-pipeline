@@ -19,13 +19,16 @@ from paper_pipeline.library.model import (
     PaperRecord,
 )
 from paper_pipeline.library.paths import FORMAT_VERSION
+from paper_pipeline.pages.runner import PageRendererSpec
 from paper_pipeline.recipes.model import RecipeDefinition
 from paper_pipeline.recipes.provider import ProviderRequest, ProviderResult
 from paper_pipeline.services.processing import (
     cancel_job,
     pending_conversion_citekeys,
+    pending_page_render_citekeys,
     pending_recipe_citekeys,
     queue_conversion,
+    queue_page_render,
     queue_recipes,
     retry_job,
 )
@@ -37,6 +40,7 @@ from paper_pipeline.services.runtime import (
 )
 
 FAKE_CONVERTER = "tests.fakes:FakeConverter"
+FAKE_PAGE_RENDERER = "tests.fakes:FakePageRenderer"
 
 
 async def _runtime(tmp_path: Path, provider: FakeLLMProvider | None = None) -> LibraryRuntime:
@@ -197,6 +201,72 @@ async def test_failed_conversion_rerun_preserves_last_good_artifact(tmp_path: Pa
     assert after.conversion.last_attempt.state is AttemptState.FAILED
 
 
+async def test_page_rendering_is_independent_and_tracks_its_own_artifacts(
+    tmp_path: Path,
+) -> None:
+    runtime = await _runtime(tmp_path)
+    await _seed(runtime)
+
+    job = (
+        await queue_page_render(
+            runtime,
+            ["Smith2024"],
+            renderer_spec=PageRendererSpec(FAKE_PAGE_RENDERER, {"page_count": 2}),
+            timeout_seconds=5,
+        )
+    )[0]
+    assert (await runtime.queue.wait(job.id)).state is JobState.SUCCEEDED
+
+    record = await _read(runtime)
+    assert record.conversion.transcription_sha256 is None
+    assert record.pages.source_sha256 == record.source_sha256
+    assert record.pages.renderer == "fake-pages"
+    assert record.pages.page_count == 2
+    assert set(record.pages.artifacts) == {
+        "papers/Smith2024/pages/page1.png",
+        "papers/Smith2024/pages/page2.png",
+    }
+    assert await pending_page_render_citekeys(runtime) == []
+
+    first_page = runtime.root / "papers" / "Smith2024" / "pages" / "page1.png"
+    first_page.write_bytes(b"tampered")
+    assert await pending_page_render_citekeys(runtime) == ["Smith2024"]
+
+
+async def test_failed_page_rerender_preserves_last_good_pages(tmp_path: Path) -> None:
+    runtime = await _runtime(tmp_path)
+    await _seed(runtime)
+    succeeded = (
+        await queue_page_render(
+            runtime,
+            ["Smith2024"],
+            renderer_spec=PageRendererSpec(FAKE_PAGE_RENDERER),
+            timeout_seconds=5,
+        )
+    )[0]
+    assert (await runtime.queue.wait(succeeded.id)).state is JobState.SUCCEEDED
+    before = await _read(runtime)
+    page = runtime.root / "papers" / "Smith2024" / "pages" / "page1.png"
+    before_bytes = page.read_bytes()
+
+    failed = (
+        await queue_page_render(
+            runtime,
+            ["Smith2024"],
+            renderer_spec=PageRendererSpec(FAKE_PAGE_RENDERER, {"mode": "failure"}),
+            timeout_seconds=5,
+        )
+    )[0]
+    assert (await runtime.queue.wait(failed.id)).state is JobState.FAILED
+
+    after = await _read(runtime)
+    assert page.read_bytes() == before_bytes
+    assert after.pages.artifacts == before.pages.artifacts
+    assert after.pages.last_attempt is not None
+    assert after.pages.last_attempt.state is AttemptState.FAILED
+    assert await pending_page_render_citekeys(runtime) == []
+
+
 async def test_conversion_rejects_source_bytes_that_no_longer_match_record(
     tmp_path: Path,
 ) -> None:
@@ -303,6 +373,31 @@ async def test_retry_reconstructs_interrupted_conversion(tmp_path: Path) -> None
 
     assert retried.meta["retry_of"] == "interrupted-1"
     assert runtime.interrupted_attempts == ()
+    assert (await runtime.queue.wait(retried.id)).state is JobState.SUCCEEDED
+
+
+async def test_retry_reconstructs_interrupted_page_render(tmp_path: Path) -> None:
+    runtime = await _runtime(tmp_path)
+    await _seed(runtime)
+    runtime.interrupted_attempts = (
+        InterruptedAttempt(
+            job_id="interrupted-pages",
+            target="papers/Smith2024",
+            operation="render-pages",
+            kind=JobKind.PAGE_RENDER,
+            scope=JobScope.PAPER,
+            started_at=datetime(2026, 1, 1, tzinfo=UTC),
+        ),
+    )
+
+    retried = await retry_job(
+        runtime,
+        "interrupted-pages",
+        page_renderer_spec=PageRendererSpec(FAKE_PAGE_RENDERER),
+        page_render_timeout_seconds=5,
+    )
+
+    assert retried.meta["retry_of"] == "interrupted-pages"
     assert (await runtime.queue.wait(retried.id)).state is JobState.SUCCEEDED
 
 

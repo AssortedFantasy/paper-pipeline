@@ -19,7 +19,7 @@ Planned surface (signatures may gain parameters, not lose them):
   reported, never raised)
 - ``Library.read_paper(citekey: str) -> PaperRecord``
 - ``Library.write_paper(record: PaperRecord) -> None``          (atomic infrastructure API)
-- ``Library.install_artifact(...)`` / ``install_conversion_bundle(...)``   (atomic)
+- transcription and page bundle installers                       (atomic)
 - ``Library.operational_dir() -> Path``                          (.pp/, created on demand)
 
 Application services never call raw mutation methods directly. A
@@ -88,6 +88,17 @@ def conversion_is_fresh(record: PaperRecord) -> bool:
     """Return whether installed conversion provenance matches the current source."""
     current_hash = record.source_sha256
     return current_hash is not None and record.conversion.source_sha256 == current_hash
+
+
+def page_render_is_fresh(record: PaperRecord) -> bool:
+    """Return whether installed page images were rendered from the current source."""
+    current_hash = record.source_sha256
+    return (
+        current_hash is not None
+        and record.pages.source_sha256 == current_hash
+        and record.pages.page_count > 0
+        and len(record.pages.artifacts) == record.pages.page_count
+    )
 
 
 def recipe_is_fresh(record: PaperRecord, recipe_name: str) -> bool:
@@ -212,14 +223,14 @@ class Library:
         os.replace(staged_path, destination_path)
         return artifact_hash
 
-    def install_conversion_bundle(
+    def install_transcription_bundle(
         self,
         citekey: str,
         staging_dir: Path,
         *,
         validate: ArtifactValidator | None = None,
     ) -> dict[str, str]:
-        """Install a staged transcription, figures, and page images as one bundle.
+        """Install a staged transcription and its referenced figures as one bundle.
 
         Validation and hashing finish before installed content is touched. Ordinary
         exceptions roll back to the previous bundle. A process-ending interruption
@@ -235,7 +246,6 @@ class Library:
 
         transcription = staging_dir / "transcription.md"
         figures = staging_dir / "figures"
-        pages = staging_dir / "pages"
         paper_root = paper_dir(self.root, citekey)
         _ensure_safe_managed_path(self.root, paper_root)
         if not paper_root.is_dir():
@@ -250,11 +260,6 @@ class Library:
                 for figure in sorted(figures.rglob("*"))
                 if figure.is_file()
             },
-            **{
-                f"papers/{citekey}/pages/{page.relative_to(pages).as_posix()}": sha256_file(page)
-                for page in sorted(pages.rglob("*"))
-                if page.is_file()
-            },
         }
         backup = self.stage_dir()
         installed: list[Path] = []
@@ -262,7 +267,6 @@ class Library:
         targets = [
             (transcription, paper_root / "transcription.md", backup / "transcription.md"),
             (figures if figures.is_dir() else None, paper_root / "figures", backup / "figures"),
-            (pages if pages.is_dir() else None, paper_root / "pages", backup / "pages"),
         ]
         for _source, destination, _prior in targets:
             _ensure_safe_managed_path(self.root, destination)
@@ -283,6 +287,46 @@ class Library:
             raise
         finally:
             shutil.rmtree(backup, ignore_errors=True)
+        return hashes
+
+    def install_pages_bundle(self, citekey: str, staging_dir: Path) -> dict[str, str]:
+        """Atomically replace only one paper's independently rendered page images."""
+        validate_citekey(citekey)
+        staging_dir = staging_dir.resolve()
+        _require_staging_dir(self.root, staging_dir)
+        _validate_pages_stage(staging_dir)
+
+        pages = staging_dir / "pages"
+        paper_root = paper_dir(self.root, citekey)
+        _ensure_safe_managed_path(self.root, paper_root)
+        if not paper_root.is_dir():
+            raise FileNotFoundError(f"Paper {citekey!r} does not exist")
+        destination = paper_root / "pages"
+        _ensure_safe_managed_path(self.root, destination)
+        hashes = {
+            f"papers/{citekey}/pages/{page.relative_to(pages).as_posix()}": sha256_file(page)
+            for page in sorted(pages.rglob("*"))
+            if page.is_file()
+        }
+
+        backup_root = self.stage_dir()
+        backup = backup_root / "pages"
+        installed = False
+        backed_up = False
+        try:
+            if destination.exists():
+                os.replace(destination, backup)
+                backed_up = True
+            os.replace(pages, destination)
+            installed = True
+        except BaseException:
+            if installed:
+                _remove_path(destination)
+            if backed_up and backup.exists():
+                os.replace(backup, destination)
+            raise
+        finally:
+            shutil.rmtree(backup_root, ignore_errors=True)
         return hashes
 
 
@@ -346,6 +390,12 @@ def _record_paths(record: PaperRecord) -> Iterator[tuple[str, str | None]]:
         "conversion.last_attempt.log_path",
         (record.conversion.last_attempt.log_path if record.conversion.last_attempt else None),
     )
+    yield (
+        "pages.last_attempt.log_path",
+        (record.pages.last_attempt.log_path if record.pages.last_attempt else None),
+    )
+    for page_path in record.pages.artifacts:
+        yield f"pages.artifacts.{page_path}", page_path
     for recipe_name, recipe in record.recipes.items():
         yield f"recipes.{recipe_name}.input_artifact", recipe.input_artifact
         yield f"recipes.{recipe_name}.output_artifact", recipe.output_artifact
@@ -375,6 +425,21 @@ def _validate_paper_record(record: PaperRecord, *, expected_citekey: str) -> Non
             raise ValueError(
                 "source_pdf must be a library-relative file inside this paper's source directory"
             )
+    for page_path, digest in record.pages.artifacts.items():
+        parts = PurePosixPath(page_path).parts
+        if (
+            parts[:3] != ("papers", expected_citekey, "pages")
+            or len(parts) != 4
+            or not parts[-1].casefold().endswith(".png")
+        ):
+            raise ValueError(
+                "pages.artifacts keys must be library-relative PNG files inside "
+                "this paper's pages directory"
+            )
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ValueError("pages.artifacts values must be lowercase SHA-256 hashes")
+    if record.pages.page_count != len(record.pages.artifacts):
+        raise ValueError("pages.page_count must match the number of declared page artifacts")
     expected_input_root = ("papers", expected_citekey)
     for recipe_name, recipe in record.recipes.items():
         if recipe.input_artifact is not None:
@@ -459,7 +524,7 @@ def _require_staged_file(root: Path, path: Path) -> None:
 
 
 def _validate_conversion_stage(staging_dir: Path) -> None:
-    allowed = {"transcription.md", "figures", "pages"}
+    allowed = {"transcription.md", "figures"}
     unexpected = sorted(path.name for path in staging_dir.iterdir() if path.name not in allowed)
     if unexpected:
         raise ValueError(f"conversion staging directory contains undeclared entries: {unexpected}")
@@ -469,22 +534,34 @@ def _validate_conversion_stage(staging_dir: Path) -> None:
         or not transcription.is_file()
         or transcription.stat().st_size == 0
     ):
-        raise ValueError("conversion bundle requires a non-empty transcription.md")
+        raise ValueError("transcription bundle requires a non-empty transcription.md")
     figures = staging_dir / "figures"
     if figures.exists():
         if figures.is_symlink() or not figures.is_dir():
-            raise ValueError("conversion bundle figures entry must be a real directory")
+            raise ValueError("transcription bundle figures entry must be a real directory")
         if any(path.is_symlink() for path in figures.rglob("*")):
-            raise ValueError("conversion bundle figures must not contain symlinks")
+            raise ValueError("transcription bundle figures must not contain symlinks")
+
+
+def _validate_pages_stage(staging_dir: Path) -> None:
+    unexpected = sorted(path.name for path in staging_dir.iterdir() if path.name != "pages")
+    if unexpected:
+        raise ValueError(f"page-render staging directory contains undeclared entries: {unexpected}")
     pages = staging_dir / "pages"
-    if pages.exists():
-        if pages.is_symlink() or not pages.is_dir():
-            raise ValueError("conversion bundle pages entry must be a real directory")
-        if any(path.is_symlink() for path in pages.rglob("*")):
-            raise ValueError("conversion bundle pages must not contain symlinks")
-        page_files = sorted(path for path in pages.rglob("*") if path.is_file())
-        if not page_files or any(path.suffix.casefold() != ".png" for path in page_files):
-            raise ValueError("conversion bundle pages must contain only PNG page images")
+    if pages.is_symlink() or not pages.is_dir():
+        raise ValueError("page-render bundle requires a real pages directory")
+    if any(path.is_symlink() for path in pages.rglob("*")):
+        raise ValueError("page-render bundle must not contain symlinks")
+    page_files = sorted(path for path in pages.rglob("*") if path.is_file())
+    if not page_files or any(
+        path.suffix.casefold() != ".png" or path.stat().st_size == 0 for path in page_files
+    ):
+        raise ValueError("page-render bundle must contain only non-empty PNG page images")
+    expected_names = {f"page{index}.png" for index in range(1, len(page_files) + 1)}
+    if {path.name for path in page_files} != expected_names or any(
+        path.parent != pages for path in page_files
+    ):
+        raise ValueError("page-render bundle must contain one flat contiguous pageN.png sequence")
 
 
 def _remove_path(path: Path) -> None:

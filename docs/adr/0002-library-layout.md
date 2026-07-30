@@ -30,10 +30,10 @@ and safe to update after interrupted work.
 `library.json` and `paper.json` use library format version 2. Citekeys identify
 papers and must be safe as cross-platform directory names.
 
-Library state has three classes:
+Library state has four classes:
 
-- Essential: library and paper records, source PDFs, transcriptions, figures,
-  and rendered pages
+- Essential: library and paper records, source PDFs, transcriptions, and figures
+- Optional source-derived: independently rendered pages
 - Derived: indexes, generated guidance, ignore rules, and declared recipe
   outputs
 - Disposable: diagnostics, staging files, and attempt markers under `.pp/`

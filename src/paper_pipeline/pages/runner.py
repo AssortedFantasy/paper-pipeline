@@ -1,8 +1,4 @@
-"""Run each converter attempt in an isolated spawned child process.
-
-Backend modules are imported only by :func:`_child_entry`, keeping optional
-GPU dependencies out of the application process.
-"""
+"""Run each page-render attempt in an isolated spawned child process."""
 
 from __future__ import annotations
 
@@ -20,53 +16,45 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol
 
-from paper_pipeline.convert.contract import ConversionRequest, ConversionResult, Converter
+from paper_pipeline.pages.contract import PageRenderer, PageRenderRequest, PageRenderResult
 
 
 @dataclass(frozen=True)
-class ConverterSpec:
-    """Importable converter class and JSON-like constructor arguments.
-
-    ``module_path`` accepts either ``"package.module:ClassName"`` or the
-    equivalent ``"package.module.ClassName"`` form.
-    """
+class PageRendererSpec:
+    """Importable page-renderer class and JSON-like constructor arguments."""
 
     module_path: str
     kwargs: dict[str, Any] = field(default_factory=dict)
 
 
 class CancellationSignal(Protocol):
-    """Minimal interface accepted from the job system's cancellation token."""
-
-    def is_set(self) -> bool:
-        """Return whether cancellation has been requested."""
-        ...
+    def is_set(self) -> bool: ...
 
 
 @dataclass(frozen=True)
 class _ChildMessage:
-    result: ConversionResult | None = None
+    result: PageRenderResult | None = None
     error: str | None = None
 
 
-def run_conversion(
-    converter_spec: ConverterSpec,
-    request: ConversionRequest,
+def run_page_render(
+    renderer_spec: PageRendererSpec,
+    request: PageRenderRequest,
     *,
     cancel_event: CancellationSignal | None = None,
-) -> ConversionResult:
-    """Run one conversion in a fresh process and validate its staged outputs."""
+) -> PageRenderResult:
+    """Run one local page render in a fresh process and validate its output."""
     started = time.monotonic()
     context = multiprocessing.get_context("spawn")
     receive_connection, send_connection = context.Pipe(duplex=False)
 
-    with tempfile.TemporaryDirectory(prefix="paper-pipeline-convert-") as diagnostics_dir:
+    with tempfile.TemporaryDirectory(prefix="paper-pipeline-pages-") as diagnostics_dir:
         stdout_path = Path(diagnostics_dir) / "stdout.txt"
         stderr_path = Path(diagnostics_dir) / "stderr.txt"
         process = context.Process(
             target=_child_entry,
-            args=(converter_spec, request, send_connection, stdout_path, stderr_path),
-            name="paper-pipeline-converter",
+            args=(renderer_spec, request, send_connection, stdout_path, stderr_path),
+            name="paper-pipeline-page-renderer",
         )
         try:
             process.start()
@@ -93,38 +81,29 @@ def run_conversion(
 
     if stopped_reason is not None:
         _clean_staging(request.staging_dir)
-        return _failure_result(
-            converter_spec,
-            started,
-            stopped_reason,
-            diagnostics,
-        )
-
+        return _failure_result(renderer_spec, started, stopped_reason, diagnostics)
     if message is None:
         _clean_staging(request.staging_dir)
-        exit_code = process.exitcode
         return _failure_result(
-            converter_spec,
+            renderer_spec,
             started,
-            f"converter process exited without a result (exit code {exit_code})",
+            f"page-render process exited without a result (exit code {process.exitcode})",
             diagnostics,
         )
-
     if message.error is not None:
         _clean_staging(request.staging_dir)
         return _failure_result(
-            converter_spec,
+            renderer_spec,
             started,
-            f"converter raised an exception: {message.error}",
+            f"page renderer raised an exception: {message.error}",
             diagnostics,
         )
-
     if message.result is None:
         _clean_staging(request.staging_dir)
         return _failure_result(
-            converter_spec,
+            renderer_spec,
             started,
-            "converter child returned an invalid response",
+            "page-render child returned an invalid response",
             diagnostics,
         )
 
@@ -141,15 +120,14 @@ def run_conversion(
 
 
 def _child_entry(
-    converter_spec: ConverterSpec,
-    request: ConversionRequest,
+    renderer_spec: PageRendererSpec,
+    request: PageRenderRequest,
     connection: Any,
     stdout_path: Path,
     stderr_path: Path,
 ) -> None:
     if os.name != "nt":
         os.setsid()
-
     with (
         stdout_path.open("w", encoding="utf-8", buffering=1) as stdout,
         stderr_path.open("w", encoding="utf-8", buffering=1) as stderr,
@@ -157,9 +135,8 @@ def _child_entry(
         contextlib.redirect_stderr(stderr),
     ):
         try:
-            converter = _load_converter(converter_spec)
-            result = converter.convert(request)
-            connection.send(_ChildMessage(result=result))
+            renderer = _load_renderer(renderer_spec)
+            connection.send(_ChildMessage(result=renderer.render(request)))
         except BaseException as exc:
             traceback.print_exc()
             with contextlib.suppress(Exception):
@@ -168,18 +145,18 @@ def _child_entry(
             connection.close()
 
 
-def _load_converter(converter_spec: ConverterSpec) -> Converter:
-    module_name, separator, class_name = converter_spec.module_path.partition(":")
+def _load_renderer(renderer_spec: PageRendererSpec) -> PageRenderer:
+    module_name, separator, class_name = renderer_spec.module_path.partition(":")
     if not separator:
-        module_name, separator, class_name = converter_spec.module_path.rpartition(".")
+        module_name, separator, class_name = renderer_spec.module_path.rpartition(".")
     if not module_name or not class_name:
         raise ValueError(
-            "converter module_path must be 'package.module:ClassName' or 'package.module.ClassName'"
+            "page renderer module_path must be "
+            "'package.module:ClassName' or 'package.module.ClassName'"
         )
-
     module = importlib.import_module(module_name)
-    converter_class = getattr(module, class_name)
-    return converter_class(**converter_spec.kwargs)
+    renderer_class = getattr(module, class_name)
+    return renderer_class(**renderer_spec.kwargs)
 
 
 def _wait_for_child(
@@ -195,7 +172,7 @@ def _wait_for_child(
             process.join(timeout=1)
             if process.is_alive():
                 _terminate_process_tree(process)
-                return None, "converter process did not exit after returning a result"
+                return None, "page-render process did not exit after returning a result"
             return message, None
         if not process.is_alive():
             process.join()
@@ -204,10 +181,10 @@ def _wait_for_child(
             return None, None
         if cancel_event is not None and cancel_event.is_set():
             _terminate_process_tree(process)
-            return None, "conversion cancelled"
+            return None, "page rendering cancelled"
         if time.monotonic() >= deadline:
             _terminate_process_tree(process)
-            return None, f"conversion timed out after {timeout_seconds} seconds"
+            return None, f"page rendering timed out after {timeout_seconds} seconds"
 
 
 def _receive_message(connection: Any) -> _ChildMessage | None:
@@ -220,47 +197,46 @@ def _receive_message(connection: Any) -> _ChildMessage | None:
 def _terminate_process_tree(process: Any) -> None:
     if process.pid is None:
         return
-
     if os.name == "nt":
-        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         subprocess.run(
             ["taskkill", "/PID", str(process.pid), "/T", "/F"],
             capture_output=True,
             check=False,
-            creationflags=creation_flags,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             text=True,
         )
     else:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGKILL)
-
     process.join(timeout=5)
     if process.is_alive():
         process.kill()
         process.join(timeout=5)
 
 
-def _validate_result(result: ConversionResult, staging_dir: Path) -> str | None:
+def _validate_result(result: PageRenderResult, staging_dir: Path) -> str | None:
     if not result.ok:
         return None
-    if result.transcription_path is None:
-        return "converter reported success without a transcription path"
-    expected_transcription = (staging_dir / "transcription.md").absolute()
-    if (
-        result.transcription_path.absolute() != expected_transcription
-        or result.transcription_path.is_symlink()
-    ):
-        return "converter must return the canonical staging transcription.md path"
-    if not result.transcription_path.is_file() or result.transcription_path.stat().st_size == 0:
-        return "converter reported success without a non-empty transcription"
-    figures_dir = staging_dir / "figures"
-    if figures_dir.is_symlink():
-        return "converter staging figures directory must not be a symlink"
-    for figure_path in result.figure_paths:
-        if not _is_inside_without_symlinks(figure_path, figures_dir):
-            return "converter must return figure paths inside the staging figures directory"
-        if not figure_path.is_file():
-            return f"converter reported a missing figure: {figure_path.name}"
+    if not result.page_paths:
+        return "page renderer reported success without page images"
+    pages_dir = staging_dir / "pages"
+    if pages_dir.is_symlink():
+        return "page-render staging pages directory must not be a symlink"
+    expected_names = {f"page{index}.png" for index in range(1, len(result.page_paths) + 1)}
+    if {path.name for path in result.page_paths} != expected_names:
+        return "page renderer must return one contiguous pageN.png sequence"
+    actual_files = {path.absolute() for path in pages_dir.rglob("*") if path.is_file()}
+    if actual_files != {path.absolute() for path in result.page_paths}:
+        return "page renderer result must declare every staged page image"
+    for page_path in result.page_paths:
+        if not _is_inside_without_symlinks(page_path, pages_dir):
+            return "page renderer must return paths inside the staging pages directory"
+        if page_path.parent.absolute() != pages_dir.absolute():
+            return "page renderer must return flat page images directly inside pages"
+        if page_path.suffix.casefold() != ".png":
+            return f"page renderer returned a non-PNG image: {page_path.name}"
+        if not page_path.is_file() or page_path.stat().st_size == 0:
+            return f"page renderer reported a missing or empty image: {page_path.name}"
     return None
 
 
@@ -273,7 +249,7 @@ def _is_inside_without_symlinks(path: Path, directory: Path) -> bool:
     if current.is_symlink():
         return False
     for part in relative.parts:
-        current = current / part
+        current /= part
         if current.is_symlink():
             return False
     return True
@@ -290,15 +266,15 @@ def _clean_staging(staging_dir: Path) -> None:
 
 
 def _failure_result(
-    converter_spec: ConverterSpec,
+    renderer_spec: PageRendererSpec,
     started: float,
     error: str,
     diagnostics: dict[str, str],
-) -> ConversionResult:
-    return ConversionResult(
+) -> PageRenderResult:
+    return PageRenderResult(
         ok=False,
-        backend=converter_spec.module_path,
-        backend_version="unknown",
+        renderer=renderer_spec.module_path,
+        renderer_version="unknown",
         duration_seconds=time.monotonic() - started,
         error=error,
         diagnostics=diagnostics,

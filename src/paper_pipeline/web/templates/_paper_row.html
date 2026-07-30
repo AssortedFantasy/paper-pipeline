@@ -3,6 +3,7 @@
     <input id="paper-select-{{ row.record.metadata.citekey }}"{% if preserve_selection is not defined or preserve_selection %} hx-preserve{% endif %} type="checkbox"
            name="citekeys" value="{{ row.record.metadata.citekey }}"
            data-conversion-pending="{{ 'true' if row.conversion_state != 'ready' else 'false' }}"
+           data-pages-pending="{{ 'true' if row.page_render_state != 'ready' else 'false' }}"
            data-bulk-selectable="{{ 'false' if row.is_large_document else 'true' }}"
            aria-label="Select {{ row.record.metadata.title }}"{% if row.selected %} checked{% endif %}>
   </td>
@@ -14,6 +15,7 @@
     {{ row.page_count if row.page_count is not none else '—' }}{% if row.is_large_document %} <span class="badge badge-large">large</span>{% endif %}
   </td>
   <td><span class="badge badge-{{ row.conversion_state }}">{{ row.conversion_state }}</span></td>
+  <td><span class="badge badge-{{ row.page_render_state }}">{{ row.page_render_state }}</span></td>
   <td><span class="badge badge-{{ row.recipe_state }}">{{ row.recipe_state }}</span></td>
   <td class="spend-cell" title="Cache hit rate: {{ '%.1f' | format(row.cache_hit_rate * 100) }}%">${{ '%.4f' | format(row.llm_cost_usd) }}</td>
   <td class="live-job-status">

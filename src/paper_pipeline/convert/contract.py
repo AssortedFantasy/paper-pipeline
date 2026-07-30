@@ -1,8 +1,8 @@
-"""The versioned converter contract.
+"""The versioned transcription converter contract.
 
-A converter takes one PDF and produces Markdown, optional extracted figures,
-and low-resolution page images in a staging directory. It knows nothing about
-libraries, jobs, or HTTP.
+A converter takes one PDF and produces Markdown plus optional extracted
+figures in a staging directory. Rendered PDF pages are a separate,
+backend-independent processing contract.
 """
 
 from dataclasses import dataclass, field
@@ -40,7 +40,6 @@ class ConversionResult:
     duration_seconds: float
     transcription_path: Path | None = None  # inside staging_dir
     figure_paths: list[Path] = field(default_factory=list)  # inside staging_dir/figures
-    page_paths: list[Path] = field(default_factory=list)  # inside staging_dir/pages
     error: str | None = None
     # Free-form diagnostics destined for the paper's .pp/ directory.
     diagnostics: dict[str, str] = field(default_factory=dict)

@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from paper_pipeline.config import AppConfig, load_config
 from paper_pipeline.convert.runner import ConverterSpec
+from paper_pipeline.pages.runner import PageRendererSpec
 from paper_pipeline.recipes.openai_provider import OpenAIProvider
 from paper_pipeline.services.runtime import RuntimeRegistry
 from paper_pipeline.web.api import WebContext, create_api_router
@@ -24,6 +25,7 @@ def create_app(
     registry: RuntimeRegistry | None = None,
     config: AppConfig | None = None,
     converter_spec: ConverterSpec | None = None,
+    page_renderer_spec: PageRendererSpec | None = None,
     provider_name: str = "openai",
 ) -> FastAPI:
     """Create one web app over the process-shared runtime registry."""
@@ -48,6 +50,8 @@ def create_app(
         registry=registry,
         config=config,
         converter_spec=converter_spec or _configured_converter(config),
+        page_renderer_spec=page_renderer_spec
+        or PageRendererSpec("paper_pipeline.pages.pdfium:PdfiumPageRenderer"),
         provider_name=provider_name,
     )
     app.state.web_context = context

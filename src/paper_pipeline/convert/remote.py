@@ -297,7 +297,7 @@ def _install_download(
 ) -> ConversionResult:
     if any(path.is_symlink() for path in download.rglob("*")):
         raise ValueError("download contains symlinks")
-    allowed = {_MANIFEST, "transcription.md", "figures", "pages"}
+    allowed = {_MANIFEST, "transcription.md", "figures"}
     if any(path.name not in allowed for path in download.iterdir()):
         raise ValueError("download contains unexpected entries")
     manifest_path = download / _MANIFEST
@@ -321,14 +321,6 @@ def _install_download(
             raise ValueError("figures is not a directory")
         if any(not path.is_file() and not path.is_dir() for path in figures.rglob("*")):
             raise ValueError("figures contains an unsupported entry")
-    pages = download / "pages"
-    if pages.exists():
-        if not pages.is_dir():
-            raise ValueError("pages is not a directory")
-        page_files = sorted(path for path in pages.rglob("*") if path.is_file())
-        if not page_files or any(path.suffix.casefold() != ".png" for path in page_files):
-            raise ValueError("pages contains invalid page images")
-
     destination = staging / "transcription.md"
     shutil.copy2(transcription, destination)
     figure_paths: list[Path] = []
@@ -336,11 +328,6 @@ def _install_download(
         destination_figures = staging / "figures"
         shutil.copytree(figures, destination_figures)
         figure_paths = sorted(path for path in destination_figures.rglob("*") if path.is_file())
-    page_paths: list[Path] = []
-    if pages.exists():
-        destination_pages = staging / "pages"
-        shutil.copytree(pages, destination_pages)
-        page_paths = sorted(path for path in destination_pages.rglob("*") if path.is_file())
     diagnostics.update(transport_timings or {})
     return ConversionResult(
         ok=True,
@@ -349,7 +336,6 @@ def _install_download(
         duration_seconds=time.monotonic() - started,
         transcription_path=destination,
         figure_paths=figure_paths,
-        page_paths=page_paths,
         diagnostics=diagnostics,
     )
 

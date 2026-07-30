@@ -19,7 +19,7 @@ Layout (ADR-0002):
                 source/             # source PDF (essential; git-ignored)
                 transcription.md    # source-derived converted text (essential output)
                 figures/            # source-derived converter assets (essential output)
-                pages/              # low-resolution PDF page images (essential output)
+                pages/              # independently rendered PDF pages (optional output)
                 <recipe>.md         # LLM recipe outputs (derived; provenance in paper.json)
                 .pp/                # per-paper diagnostics and logs (disposable)
 """

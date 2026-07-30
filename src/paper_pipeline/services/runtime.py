@@ -189,9 +189,13 @@ class PaperSession(_ScopedSession):
         self._require_paper_path(relative)
         return self._library.install_artifact(staged_path, relative)
 
-    def install_conversion_bundle(self, staging_dir: Path) -> dict[str, str]:
+    def install_transcription_bundle(self, staging_dir: Path) -> dict[str, str]:
         self._require_active()
-        return self._library.install_conversion_bundle(self.citekey, staging_dir)
+        return self._library.install_transcription_bundle(self.citekey, staging_dir)
+
+    def install_pages_bundle(self, staging_dir: Path) -> dict[str, str]:
+        self._require_active()
+        return self._library.install_pages_bundle(self.citekey, staging_dir)
 
     def _require_paper_path(self, path: PurePosixPath) -> None:
         if path.parts[:2] != (PAPERS_DIR, self.citekey):
@@ -375,6 +379,8 @@ class LibraryRuntime:
                 record.conversion.last_attempt is not None
                 and record.conversion.last_attempt.id == attempt_id
             ):
+                return True
+            if record.pages.last_attempt is not None and record.pages.last_attempt.id == attempt_id:
                 return True
             if any(
                 recipe.last_attempt is not None and recipe.last_attempt.id == attempt_id

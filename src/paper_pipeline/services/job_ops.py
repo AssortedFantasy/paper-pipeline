@@ -8,6 +8,7 @@ from pathlib import PurePosixPath, PureWindowsPath
 from paper_pipeline.convert.runner import ConverterSpec
 from paper_pipeline.jobs.model import Job, JobKind, JobState
 from paper_pipeline.jobs.recovery import InterruptedAttempt
+from paper_pipeline.pages.runner import PageRendererSpec
 from paper_pipeline.services.processing import retry_job
 from paper_pipeline.services.runtime import LibraryRuntime
 
@@ -77,7 +78,9 @@ async def retry_selected_jobs(
     job_ids: list[str],
     *,
     converter_spec: ConverterSpec,
+    page_renderer_spec: PageRendererSpec | None = None,
     timeout_seconds: int,
+    page_render_timeout_seconds: int | None = None,
     provider_name: str,
     model: str = "",
 ) -> tuple[Job, ...]:
@@ -102,7 +105,9 @@ async def retry_selected_jobs(
                 runtime,
                 job.id,
                 converter_spec=converter_spec,
+                page_renderer_spec=page_renderer_spec,
                 timeout_seconds=timeout_seconds,
+                page_render_timeout_seconds=page_render_timeout_seconds,
                 provider_name=provider_name,
                 model=model,
             )

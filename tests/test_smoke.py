@@ -14,14 +14,16 @@ from paper_pipeline.indexes.build import INDEX_FILES
 from paper_pipeline.jobs.model import JobState
 from paper_pipeline.library.model import PaperRecord
 from paper_pipeline.library.storage import sha256_file
+from paper_pipeline.pages.runner import PageRendererSpec
 from paper_pipeline.services.import_ops import apply_import, preview_import
 from paper_pipeline.services.library_ops import create_library
-from paper_pipeline.services.processing import queue_conversion, queue_recipes
+from paper_pipeline.services.processing import queue_conversion, queue_page_render, queue_recipes
 from paper_pipeline.services.runtime import RuntimeRegistry
 from tests.fakes import FakeLLMProvider
 
 FIXTURE_EXPORT = Path(__file__).parent / "fixtures" / "zotero" / "clean"
 FAKE_CONVERTER = "tests.fakes:FakeConverter"
+FAKE_PAGE_RENDERER = "tests.fakes:FakePageRenderer"
 
 
 @pytest.mark.slow
@@ -54,6 +56,15 @@ async def test_core_smoke_builds_and_validates_durable_library(tmp_path: Path) -
     )
     assert conversions
     for job in conversions:
+        assert (await runtime.queue.wait(job.id)).state is JobState.SUCCEEDED
+
+    page_renders = await queue_page_render(
+        runtime,
+        imported.added,
+        renderer_spec=PageRendererSpec(FAKE_PAGE_RENDERER),
+        timeout_seconds=5,
+    )
+    for job in page_renders:
         assert (await runtime.queue.wait(job.id)).state is JobState.SUCCEEDED
 
     recipes = await queue_recipes(
@@ -117,3 +128,5 @@ def _assert_durable_library(root: Path, citekey: str) -> None:
     assert summary_record.output_sha256 == sha256_file(summary)
 
     assert any((paper_root / "pages").glob("*.png"))
+    assert record.pages.page_count == 1
+    assert set(record.pages.artifacts) == {f"papers/{citekey}/pages/page1.png"}

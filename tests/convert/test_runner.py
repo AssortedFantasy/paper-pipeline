@@ -218,11 +218,7 @@ def test_success_runs_in_spawned_child_and_preserves_outputs(tmp_path: Path) -> 
         path.is_file() and path.parent == request.staging_dir / "figures"
         for path in result.figure_paths
     )
-    assert len(result.page_paths) == 1
-    assert all(
-        path.is_file() and path.parent == request.staging_dir / "pages"
-        for path in result.page_paths
-    )
+    assert not (request.staging_dir / "pages").exists()
     assert_no_converter_children()
 
 

@@ -15,6 +15,7 @@ from paper_pipeline.config import AppConfig
 from paper_pipeline.convert.runner import ConverterSpec
 from paper_pipeline.jobs.model import Job, JobKind, JobState
 from paper_pipeline.jobs.queue import CancellationToken
+from paper_pipeline.pages.runner import PageRendererSpec
 from paper_pipeline.services.runtime import PaperSession, RuntimeRegistry
 from paper_pipeline.web.api import WebContext
 from paper_pipeline.web.app import create_app
@@ -61,6 +62,7 @@ async def _client(
         registry=registry,
         config=_config(tmp_path),
         converter_spec=ConverterSpec("tests.fakes:FakeConverter"),
+        page_renderer_spec=PageRendererSpec("tests.fakes:FakePageRenderer"),
     )
     context = cast(WebContext, app.state.web_context)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -104,6 +106,8 @@ async def test_job_requests_reject_ambiguous_or_duplicate_work(tmp_path: Path) -
         ("/api/jobs/conversion", {}),
         ("/api/jobs/conversion", {"citekeys": ["Smith2024"], "pending": True}),
         ("/api/jobs/conversion", {"citekeys": ["Smith2024", "Smith2024"]}),
+        ("/api/jobs/pages", {}),
+        ("/api/jobs/pages", {"citekeys": ["Smith2024"], "pending": True}),
         (
             "/api/jobs/recipes",
             {"citekeys": ["Smith2024"], "recipe_names": []},
@@ -205,6 +209,13 @@ async def test_conversion_recipe_and_job_list_contract(tmp_path: Path) -> None:
         assert context.runtime is not None
         converted = await context.runtime.queue.wait(conversion_id)
         assert converted.state is JobState.SUCCEEDED
+
+        pages = await client.post("/api/jobs/pages", json={"citekeys": [citekey]})
+        assert pages.status_code == 202, pages.text
+        pages_id = pages.json()["jobs"][0]["id"]
+        rendered = await context.runtime.queue.wait(pages_id)
+        assert rendered.state is JobState.SUCCEEDED
+        assert rendered.kind is JobKind.PAGE_RENDER
 
         recipes = await client.post(
             "/api/jobs/recipes",

@@ -17,10 +17,18 @@ from paper_pipeline.library.model import (
     AttemptRecord,
     AttemptState,
     ConversionRecord,
+    PageRenderRecord,
     RecipeRecord,
 )
 from paper_pipeline.library.paths import PAPERS_DIR
-from paper_pipeline.library.storage import conversion_is_fresh, recipe_is_fresh, sha256_file
+from paper_pipeline.library.storage import (
+    conversion_is_fresh,
+    page_render_is_fresh,
+    recipe_is_fresh,
+    sha256_file,
+)
+from paper_pipeline.pages.contract import PageRenderRequest, PageRenderResult
+from paper_pipeline.pages.runner import PageRendererSpec, run_page_render
 from paper_pipeline.recipes.model import RecipeDefinition, load_builtin_recipes
 from paper_pipeline.recipes.provider import LLMProvider
 from paper_pipeline.recipes.runner import RecipeRunResult, run_recipe
@@ -43,6 +51,14 @@ class _ConversionState:
 class _RecipeBatchState:
     results: dict[str, RecipeRunResult] = field(default_factory=dict)
     active_recipe: str | None = None
+    log_path: str | None = None
+
+
+@dataclass
+class _PageRenderState:
+    source_sha256: str | None = None
+    result: PageRenderResult | None = None
+    artifacts: dict[str, str] = field(default_factory=dict)
     log_path: str | None = None
 
 
@@ -109,7 +125,7 @@ async def queue_conversion(
                     if not token.begin_commit():
                         raise asyncio.CancelledError
                     runtime.queue.publish_progress(job.id, "Installing transcription")
-                    state.artifacts = session.install_conversion_bundle(stage)
+                    state.artifacts = session.install_transcription_bundle(stage)
                 finally:
                     shutil.rmtree(stage, ignore_errors=True)
                     shutil.rmtree(input_stage, ignore_errors=True)
@@ -162,6 +178,131 @@ async def queue_conversion(
                 citekey,
                 JobKind.CONVERSION,
                 "convert",
+                worker,
+                validate_completion=validate,
+                record_terminal=record_terminal,
+            )
+        )
+    return jobs
+
+
+async def queue_page_render(
+    runtime: LibraryRuntime,
+    citekeys: list[str],
+    *,
+    renderer_spec: PageRendererSpec,
+    timeout_seconds: int,
+    dpi: int = 96,
+) -> list[Job]:
+    """Queue one local, isolated page-render job per citekey."""
+    jobs: list[Job] = []
+    for citekey in citekeys:
+        state = _PageRenderState()
+
+        async def worker(
+            session: PaperSession,
+            job: Job,
+            token: CancellationToken,
+            *,
+            state: _PageRenderState = state,
+        ) -> None:
+            state.source_sha256 = None
+            state.result = None
+            state.artifacts.clear()
+            state.log_path = None
+            try:
+                record = session.read_record()
+                if record.source_pdf is None or record.source_sha256 is None:
+                    raise ProcessingError(f"paper {session.citekey!r} has no usable source PDF")
+                source = _safe_input_path(session, record.source_pdf)
+                runtime.queue.publish_progress(job.id, "Preparing source PDF")
+                stage = session.stage_dir()
+                input_stage = session.stage_dir()
+                try:
+                    snapshot = input_stage / "source.pdf"
+                    shutil.copy2(source, snapshot)
+                    snapshot_hash = sha256_file(snapshot)
+                    if snapshot_hash != record.source_sha256:
+                        raise ProcessingError(
+                            f"paper {session.citekey!r} source PDF hash no longer "
+                            "matches paper.json"
+                        )
+                    state.source_sha256 = snapshot_hash
+                    request = PageRenderRequest(
+                        pdf_path=snapshot,
+                        staging_dir=stage,
+                        timeout_seconds=timeout_seconds,
+                        dpi=dpi,
+                    )
+                    runtime.queue.publish_progress(job.id, "Rendering page images")
+                    result = await asyncio.to_thread(
+                        run_page_render,
+                        renderer_spec,
+                        request,
+                        cancel_event=token,
+                    )
+                    state.result = result
+                    state.log_path = _install_page_render_log(session, job, result)
+                    job.log_path = state.log_path
+                    if not result.ok:
+                        raise ProcessingError(result.error or "page rendering failed")
+                    if not token.begin_commit():
+                        raise asyncio.CancelledError
+                    runtime.queue.publish_progress(job.id, "Installing page images")
+                    state.artifacts = session.install_pages_bundle(stage)
+                finally:
+                    shutil.rmtree(stage, ignore_errors=True)
+                    shutil.rmtree(input_stage, ignore_errors=True)
+            except Exception as error:
+                if state.log_path is None:
+                    state.log_path = _install_text_log(
+                        session,
+                        f"pages-{job.id}.log",
+                        f"{type(error).__name__}: {error}",
+                    )
+                    job.log_path = state.log_path
+                raise
+
+        def validate(
+            session: PaperSession,
+            *,
+            state: _PageRenderState = state,
+        ) -> CompletionResult:
+            artifacts = {path: session.root_path(path) for path in state.artifacts}
+            return validate_artifacts(artifacts, expected_hashes=state.artifacts)
+
+        def record_terminal(
+            session: PaperSession,
+            outcome: TerminalOutcome,
+            *,
+            state: _PageRenderState = state,
+        ) -> None:
+            def update(paper):  # type: ignore[no-untyped-def]
+                attempt = _attempt(outcome, state.log_path)
+                if outcome.state is JobState.SUCCEEDED:
+                    result = state.result
+                    if result is None or state.source_sha256 is None:
+                        raise ProcessingError("page rendering completed without provenance")
+                    paper.pages = PageRenderRecord(
+                        source_sha256=state.source_sha256,
+                        renderer=result.renderer,
+                        renderer_version=result.renderer_version,
+                        dpi=dpi,
+                        page_count=len(outcome.artifact_hashes),
+                        artifacts=outcome.artifact_hashes,
+                        completed_at=outcome.finished_at,
+                        last_attempt=attempt,
+                    )
+                else:
+                    paper.pages.last_attempt = attempt
+
+            session.update_record(update)
+
+        jobs.append(
+            await runtime.enqueue_paper(
+                citekey,
+                JobKind.PAGE_RENDER,
+                "render-pages",
                 worker,
                 validate_completion=validate,
                 record_terminal=record_terminal,
@@ -322,7 +463,9 @@ async def retry_job(
     job_id: str,
     *,
     converter_spec: ConverterSpec | None = None,
+    page_renderer_spec: PageRendererSpec | None = None,
     timeout_seconds: int | None = None,
+    page_render_timeout_seconds: int | None = None,
     provider_name: str = "openai",
     model: str = "",
     recipes: dict[str, RecipeDefinition] | None = None,
@@ -349,6 +492,17 @@ async def retry_job(
                 [citekey],
                 converter_spec=converter_spec,
                 timeout_seconds=timeout_seconds,
+            )
+        )[0]
+    elif interrupted.kind is JobKind.PAGE_RENDER and interrupted.operation == "render-pages":
+        if page_renderer_spec is None or page_render_timeout_seconds is None:
+            raise ValueError("retrying interrupted page rendering requires renderer settings")
+        replacement = (
+            await queue_page_render(
+                runtime,
+                [citekey],
+                renderer_spec=page_renderer_spec,
+                timeout_seconds=page_render_timeout_seconds,
             )
         )[0]
     elif interrupted.kind is JobKind.RECIPE and interrupted.operation.startswith("recipes:"):
@@ -389,6 +543,19 @@ async def pending_conversion_citekeys(runtime: LibraryRuntime) -> list[str]:
             )
         ),
     )
+
+
+async def pending_page_render_citekeys(runtime: LibraryRuntime) -> list[str]:
+    """Return papers whose recorded page images are absent, stale, or invalid."""
+
+    def pending(record):  # type: ignore[no-untyped-def]
+        return not page_render_is_fresh(record) or not _page_artifacts_match(
+            runtime.root,
+            record.metadata.citekey,
+            record.pages.artifacts,
+        )
+
+    return await _select(runtime, pending)
 
 
 async def pending_recipe_citekeys(runtime: LibraryRuntime, recipe_name: str) -> list[str]:
@@ -445,6 +612,21 @@ def _install_conversion_log(session: PaperSession, job: Job, result: ConversionR
     stage = session.stage_dir()
     staged = stage / "conversion.log"
     status = "conversion succeeded" if result.ok else result.error or "conversion failed"
+    lines = [status, f"duration_seconds={result.duration_seconds:.3f}"]
+    lines.extend(f"[{name}]\n{text}" for name, text in sorted(result.diagnostics.items()) if text)
+    staged.write_text("\n\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    try:
+        session.install_artifact(staged, relative)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+    return relative
+
+
+def _install_page_render_log(session: PaperSession, job: Job, result: PageRenderResult) -> str:
+    relative = f"{PAPERS_DIR}/{session.citekey}/.pp/pages-{job.id}.log"
+    stage = session.stage_dir()
+    staged = stage / "pages.log"
+    status = "page rendering succeeded" if result.ok else result.error or "page rendering failed"
     lines = [status, f"duration_seconds={result.duration_seconds:.3f}"]
     lines.extend(f"[{name}]\n{text}" for name, text in sorted(result.diagnostics.items()) if text)
     staged.write_text("\n\n".join(lines) + "\n", encoding="utf-8", newline="\n")
@@ -541,3 +723,22 @@ def _safe_hashed_file(root: Path, relative: str, expected_sha256: str) -> bool:
         )
     except (OSError, ValueError):
         return False
+
+
+def _page_artifacts_match(
+    root: Path,
+    citekey: str,
+    expected_hashes: dict[str, str],
+) -> bool:
+    pages_root = root / PAPERS_DIR / citekey / "pages"
+    if pages_root.is_symlink() or not pages_root.is_dir():
+        return False
+    actual: set[str] = set()
+    for path in pages_root.rglob("*"):
+        if path.is_symlink():
+            return False
+        if path.is_file():
+            actual.add(path.relative_to(root).as_posix())
+    return actual == set(expected_hashes) and all(
+        _safe_hashed_file(root, stored, digest) for stored, digest in expected_hashes.items()
+    )

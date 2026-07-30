@@ -30,6 +30,7 @@ from paper_pipeline.services.paper_browse import browse_papers
 from paper_pipeline.services.paper_detail import get_figure, get_paper_detail, get_source_pdf
 from paper_pipeline.services.processing import (
     queue_conversion,
+    queue_page_render,
     queue_recipes,
 )
 from paper_pipeline.services.runtime import LibraryRuntime
@@ -310,6 +311,33 @@ def create_ui_router(context: WebContext) -> APIRouter:
             message=f"Queued {len(jobs)} recipe job{'s' if len(jobs) != 1 else ''}.",
         )
 
+    @router.post("/papers/actions/pages", response_class=HTMLResponse)
+    async def render_pages_selected(request: Request) -> HTMLResponse:
+        values = await _form_values(request)
+        citekeys = values.get("citekeys", [])
+        if context.runtime is None:
+            return _action_response(request, error="Open a library before launching work.")
+        if _first(values, "library_key") != context.runtime.library_key:
+            return _action_response(
+                request,
+                error="The selected library changed. Reload the papers page before launching work.",
+            )
+        if not citekeys:
+            return _action_response(request, error="Select at least one paper to render.")
+        try:
+            jobs = await queue_page_render(
+                context.runtime,
+                citekeys,
+                renderer_spec=context.page_renderer_spec,
+                timeout_seconds=context.config.page_render_timeout_seconds,
+            )
+        except (KeyError, ValueError, RuntimeError) as error:
+            return _action_response(request, error=str(error))
+        return _action_response(
+            request,
+            message=f"Queued page rendering for {len(jobs)} paper{'s' if len(jobs) != 1 else ''}.",
+        )
+
     @router.get("/papers/row/{citekey}", response_class=HTMLResponse)
     async def paper_table_row(request: Request, citekey: str) -> HTMLResponse:
         if context.runtime is None:
@@ -411,6 +439,7 @@ async def _table_context(
         sort=sort,
         direction=direction,
         select_pending_conversion=selection == "conversion",
+        select_pending_pages=selection == "pages",
     )
     return {
         "rows": page.rows,

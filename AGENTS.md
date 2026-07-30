@@ -71,8 +71,8 @@ Dependency direction (imports may only point downward):
 web client (templates/static)
     -> web API (paper_pipeline.web)
         -> application services (paper_pipeline.services)
-            -> library | ingest | convert | recipes | jobs | indexes
-                -> external edges: rdflib, Marker, LLM SDK, filesystem
+            -> library | ingest | convert | pages | recipes | jobs | indexes
+                -> external edges: rdflib, Marker, PDFium, LLM SDK, filesystem
 ```
 
 - `paper_pipeline.library` imports nothing from other subpackages and never
@@ -91,6 +91,7 @@ These are deliberate compatibility boundaries, not permanently frozen designs:
 - Library layout and file names — `library/paths.py` (ADR-0002)
 - Serialized formats `library.json` / `paper.json` — `library/model.py` (ADR-0002)
 - Converter contract — `convert/contract.py`
+- Page renderer contract — `pages/contract.py`
 - LLM provider contract — `recipes/provider.py`
 - Recipe template format — `recipes/model.py` (ADR-0003)
 - Job model and scheduling policies — `jobs/model.py` (ADR-0004)
@@ -118,6 +119,9 @@ work package. Do not let parallel tracks independently drift the same contract.
 
 - Every conversion runs in a **fresh child process**; one conversion at a
   time globally (default). Cancellation must kill the whole process tree.
+- Every page-render attempt runs locally in a **fresh child process** and never
+  uses the SSH conversion host. Page rendering uses the shared paper lane and
+  has its own bounded concurrency.
 - Every paper mutation goes through the shared job system's **paper lane**.
   A lane is exclusive across conversion, recipe batches, and import apply;
   callers cannot opt out and must not write `paper.json` directly.

@@ -45,7 +45,9 @@ def create_jobs_router(context: WebContext) -> APIRouter:
                 context.runtime,
                 job_id,
                 converter_spec=context.converter_spec,
+                page_renderer_spec=context.page_renderer_spec,
                 timeout_seconds=context.config.converter_timeout_seconds,
+                page_render_timeout_seconds=context.config.page_render_timeout_seconds,
                 provider_name=context.provider_name,
                 model=context.config.llm_model or "",
             )
@@ -63,7 +65,9 @@ def create_jobs_router(context: WebContext) -> APIRouter:
                 context.runtime,
                 values.get("job_ids", []),
                 converter_spec=context.converter_spec,
+                page_renderer_spec=context.page_renderer_spec,
                 timeout_seconds=context.config.converter_timeout_seconds,
+                page_render_timeout_seconds=context.config.page_render_timeout_seconds,
                 provider_name=context.provider_name,
                 model=context.config.llm_model or "",
             )

@@ -10,6 +10,7 @@ Libraries are ordinary folders that can be used by agents for literature search.
 
 - Repeatable Zotero RDF import with preview and explicit source replacement
 - PDF-to-Markdown conversion with Marker
+- Independent local rendering of low-resolution PDF page images
 - Built-in summary, contribution, introduction, and method recipes
 - Rebuildable indexes for titles, authors, years, venues, and summaries
 - A local dashboard for importing, processing, inspecting, and retrying work

@@ -74,13 +74,8 @@ class FakeTransport:
         figures = local_dir / "figures"
         figures.mkdir()
         (figures / "figure.png").write_bytes(b"figure")
-        pages = local_dir / "pages"
-        pages.mkdir()
-        (pages / "page1.png").write_bytes(b"page")
         if self.invalid_download == "unexpected-entry":
             (local_dir / "undeclared.txt").write_text("bad", encoding="utf-8")
-        elif self.invalid_download == "invalid-page":
-            (pages / "page1.png").rename(pages / "page1.txt")
         elif self.invalid_download == "missing-transcription":
             (local_dir / "transcription.md").unlink()
         elif self.invalid_download == "empty-transcription":
@@ -123,12 +118,11 @@ def test_success_installs_only_canonical_local_artifacts_and_cleans_up(tmp_path:
     assert result.ok
     assert result.backend == "remote-marker"
     assert result.figure_paths
-    assert result.page_paths
     installed = [
         result.transcription_path,
         *result.figure_paths,
-        *result.page_paths,
     ]
+    assert not (conversion_request.staging_dir / "pages").exists()
     assert all(
         path is not None and path.is_file() and path.is_relative_to(conversion_request.staging_dir)
         for path in installed
@@ -162,7 +156,6 @@ def test_incomplete_remote_execution_is_terminated_and_cleaned_up(
     "problem",
     [
         "unexpected-entry",
-        "invalid-page",
         "missing-transcription",
         "empty-transcription",
         "malformed-manifest",

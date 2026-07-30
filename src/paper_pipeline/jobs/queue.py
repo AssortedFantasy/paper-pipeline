@@ -181,6 +181,7 @@ class JobQueue:
         self._paper_lanes: dict[tuple[str, str], asyncio.Lock] = {}
         self._library_barriers: dict[str, _LibraryBarrier] = {}
         self._conversion_slots = asyncio.Semaphore(1)
+        self._page_render_slots = asyncio.Semaphore(2)
         self._recipe_slots = asyncio.Semaphore(llm_concurrency)
         self._tokens: dict[str, CancellationToken] = {}
         self._definitions: dict[str, _JobDefinition] = {}
@@ -575,6 +576,8 @@ class JobQueue:
         semaphore = None
         if kind is JobKind.CONVERSION:
             semaphore = self._conversion_slots
+        elif kind is JobKind.PAGE_RENDER:
+            semaphore = self._page_render_slots
         elif kind is JobKind.RECIPE:
             semaphore = self._recipe_slots
         if semaphore is None:

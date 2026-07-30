@@ -26,6 +26,7 @@ from paper_pipeline.library.paths import OPERATIONAL_DIR, PAPER_FILE, PAPERS_DIR
 from paper_pipeline.library.storage import (
     Library,
     conversion_is_fresh,
+    page_render_is_fresh,
     recipe_is_fresh,
     sha256_file,
 )
@@ -45,6 +46,7 @@ class CatalogPaper:
 
     record: PaperRecord
     conversion_pending: bool
+    page_render_pending: bool
     pending_recipes: frozenset[str]
     page_count: int | None
     is_large_document: bool
@@ -179,6 +181,9 @@ class LibraryCatalog:
         return CatalogPaper(
             record=durable,
             conversion_pending=conversion_pending,
+            # Full page-image hashing belongs to explicit pending selection and
+            # validation, not the interactive catalog hot path (ADR-0007).
+            page_render_pending=not page_render_is_fresh(durable),
             pending_recipes=pending_recipes,
             page_count=page_count,
             is_large_document=(

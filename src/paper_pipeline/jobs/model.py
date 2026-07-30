@@ -7,6 +7,7 @@ from enum import StrEnum
 
 class JobKind(StrEnum):
     CONVERSION = "conversion"  # local, GPU-bound, serialized
+    PAGE_RENDER = "page_render"  # local PDF rendering, independent of conversion
     RECIPE = "recipe"  # one sequential recipe batch for one paper
     IMPORT = "import"  # one import add/refresh applied through a paper lane
     MAINTENANCE = "maintenance"  # index rebuild, validation

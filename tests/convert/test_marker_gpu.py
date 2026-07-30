@@ -89,15 +89,6 @@ def _install_fake_marker(monkeypatch: pytest.MonkeyPatch, *, unsafe_image: bool 
     }.items():
         monkeypatch.setitem(sys.modules, name, module)
 
-    def render_pages(_pdf_path: Path, staging_dir: Path) -> list[Path]:
-        pages = staging_dir / "pages"
-        pages.mkdir()
-        page = pages / "page1.png"
-        page.write_bytes(b"page bytes")
-        return [page]
-
-    monkeypatch.setattr(marker_adapter, "_render_pages", render_pages)
-
 
 def test_adapter_normalizes_mocked_marker_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -126,10 +117,7 @@ def test_adapter_normalizes_mocked_marker_output(
         path.is_file() and path.is_relative_to(staging / "figures") for path in result.figure_paths
     )
     assert all(path.relative_to(staging).as_posix() in markdown for path in result.figure_paths)
-    assert result.page_paths
-    assert all(
-        path.is_file() and path.is_relative_to(staging / "pages") for path in result.page_paths
-    )
+    assert not (staging / "pages").exists()
 
     metadata = json.loads(result.diagnostics["marker_metadata"])
     assert isinstance(metadata, dict)

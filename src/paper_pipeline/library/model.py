@@ -66,7 +66,7 @@ class AttemptRecord(BaseModel):
 
 
 class ConversionRecord(BaseModel):
-    """Provenance of the installed transcription plus the latest attempt.
+    """Provenance of the installed transcription bundle plus the latest attempt.
 
     A failed rerun changes ``last_attempt`` without erasing the provenance of
     an older valid transcription. Freshness is derived by comparing
@@ -77,6 +77,20 @@ class ConversionRecord(BaseModel):
     transcription_sha256: str | None = None
     backend: str | None = None  # e.g. "marker"; describes installed output
     backend_version: str | None = None
+    completed_at: datetime | None = None
+    last_attempt: AttemptRecord | None = None
+
+
+class PageRenderRecord(BaseModel):
+    """Provenance of an independently installed set of rendered PDF pages."""
+
+    source_sha256: str | None = None
+    renderer: str | None = None
+    renderer_version: str | None = None
+    dpi: int | None = Field(default=None, gt=0)
+    page_count: int = Field(default=0, ge=0)
+    # Library-relative page-image paths mapped to their SHA-256 hashes.
+    artifacts: dict[str, str] = Field(default_factory=dict)
     completed_at: datetime | None = None
     last_attempt: AttemptRecord | None = None
 
@@ -121,5 +135,6 @@ class PaperRecord(BaseModel):
     source_sha256: str | None = None
     imported_at: datetime | None = None
     conversion: ConversionRecord = Field(default_factory=ConversionRecord)
+    pages: PageRenderRecord = Field(default_factory=PageRenderRecord)
     # Keyed by recipe name, e.g. "summary", "contributions".
     recipes: dict[str, RecipeRecord] = Field(default_factory=dict)

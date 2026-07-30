@@ -142,7 +142,7 @@ def _seed_full_paper(root: Path) -> None:
     figures = stage / "figures"
     figures.mkdir()
     (figures / "figure-1.png").write_bytes(PNG)
-    hashes = library.install_conversion_bundle(citekey, stage)
+    hashes = library.install_transcription_bundle(citekey, stage)
     transcription_path = f"papers/{citekey}/transcription.md"
     record.conversion = ConversionRecord(
         source_sha256=record.source_sha256,

@@ -37,13 +37,17 @@
       <strong>{{ total }}</strong> paper{{ '' if total == 1 else 's' }}
       <button class="text-button" type="button" data-paper-selection="all">Select all</button>
       <button class="text-button" type="button" data-paper-selection="none">Unselect all</button>
-      <button class="text-button" type="button" data-paper-selection="pending">Select pending</button>
+      <button class="text-button" type="button" data-paper-selection="pending">Select pending conversion</button>
+      <button class="text-button" type="button" data-paper-selection="pages">Select pending pages</button>
       {% if large_document_count %}<span class="bulk-selection-note">{{ large_document_count }} large document{{ '' if large_document_count == 1 else 's' }} (100+ pages) excluded from bulk selection</span>{% endif %}
     </div>
     <div class="action-controls">
       <button class="button" type="button" hx-post="/papers/actions/convert"
               hx-include="#paper-selection" hx-target="#action-feedback"
               hx-disabled-elt="this">Convert selected</button>
+      <button class="button button-quiet" type="button" hx-post="/papers/actions/pages"
+              hx-include="#paper-selection" hx-target="#action-feedback"
+              hx-disabled-elt="this">Render pages</button>
       <fieldset class="recipe-picker" title="Each checked recipe runs sequentially for every selected paper">
         <legend>Recipes</legend>
         {% for recipe_option in recipe_options %}
@@ -67,6 +71,7 @@
           <th><button class="sort-button" type="button" data-paper-sort="year" data-paper-direction="{{ 'desc' if filters.sort == 'year' and filters.direction == 'asc' else 'asc' }}" hx-get="/papers/table" hx-include="#paper-filters" hx-target="#paper-results">Year{% if filters.sort == 'year' %} {{ '↑' if filters.direction == 'asc' else '↓' }}{% endif %}</button></th>
           <th title="Number of pages in the source PDF">Pages</th>
           <th>Conversion</th>
+          <th>Page images</th>
           <th>Summary</th>
           <th title="Total recorded LLM recipe spend; hover a value for cache hit rate">Spend</th>
           <th>Live job</th>

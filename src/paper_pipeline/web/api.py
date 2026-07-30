@@ -19,6 +19,7 @@ from paper_pipeline.jobs.events import JobEvent, JobEventKind
 from paper_pipeline.jobs.model import Job, JobKind, JobScope, JobState
 from paper_pipeline.library.model import PaperRecord
 from paper_pipeline.library.validation import ValidationReport
+from paper_pipeline.pages.runner import PageRendererSpec
 from paper_pipeline.services.import_ops import ImportReport, apply_import, preview_import
 from paper_pipeline.services.job_ops import list_interrupted_attempts, list_runtime_jobs
 from paper_pipeline.services.library_ops import (
@@ -33,8 +34,10 @@ from paper_pipeline.services.library_ops import (
 from paper_pipeline.services.processing import (
     cancel_job,
     pending_conversion_citekeys,
+    pending_page_render_citekeys,
     pending_recipe_citekeys,
     queue_conversion,
+    queue_page_render,
     queue_recipes,
     retry_job,
 )
@@ -49,6 +52,7 @@ class WebContext:
     registry: RuntimeRegistry
     config: AppConfig
     converter_spec: ConverterSpec
+    page_renderer_spec: PageRendererSpec
     provider_name: str = "openai"
     runtime: LibraryRuntime | None = None
 
@@ -91,6 +95,10 @@ class SelectionRequest(BaseModel):
 
 
 class QueueConversionRequest(SelectionRequest):
+    pass
+
+
+class QueuePageRenderRequest(SelectionRequest):
     pass
 
 
@@ -334,6 +342,23 @@ def create_api_router(context: WebContext) -> APIRouter:
             raise HTTPException(status_code=400, detail=str(error)) from error
         return JobBatchResponse(jobs=[JobResponse.from_job(job) for job in jobs])
 
+    @router.post("/api/jobs/pages", response_model=JobBatchResponse, status_code=202)
+    async def queue_page_render_route(
+        body: QueuePageRenderRequest, request: Request
+    ) -> JobBatchResponse:
+        runtime = _runtime(request)
+        citekeys = await pending_page_render_citekeys(runtime) if body.pending else body.citekeys
+        try:
+            jobs = await queue_page_render(
+                runtime,
+                citekeys,
+                renderer_spec=context.page_renderer_spec,
+                timeout_seconds=context.config.page_render_timeout_seconds,
+            )
+        except (KeyError, ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return JobBatchResponse(jobs=[JobResponse.from_job(job) for job in jobs])
+
     @router.post("/api/jobs/{job_id}/cancel", response_model=JobResponse)
     async def cancel_route(job_id: str, request: Request) -> JobResponse:
         runtime = _runtime(request)
@@ -349,7 +374,9 @@ def create_api_router(context: WebContext) -> APIRouter:
                 runtime,
                 job_id,
                 converter_spec=context.converter_spec,
+                page_renderer_spec=context.page_renderer_spec,
                 timeout_seconds=context.config.converter_timeout_seconds,
+                page_render_timeout_seconds=context.config.page_render_timeout_seconds,
                 provider_name=context.provider_name,
                 model=context.config.llm_model or "",
             )

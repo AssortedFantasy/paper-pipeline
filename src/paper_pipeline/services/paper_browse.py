@@ -13,6 +13,7 @@ from paper_pipeline.services.runtime import LibraryRuntime
 class PaperBrowseRow:
     record: PaperRecord
     conversion_state: str
+    page_render_state: str
     recipe_state: str
     llm_cost_usd: float
     cache_hit_rate: float
@@ -40,6 +41,7 @@ async def browse_papers(
     sort: str = "title",
     direction: str = "asc",
     select_pending_conversion: bool = False,
+    select_pending_pages: bool = False,
 ) -> PaperBrowsePage:
     """Query the runtime's prepared paper catalog without rescanning the library."""
     snapshot = runtime.catalog.snapshot()
@@ -64,6 +66,10 @@ async def browse_papers(
             entry.conversion_pending,
             paper.conversion.last_attempt.state if paper.conversion.last_attempt else None,
         )
+        page_render_state = _processing_state(
+            entry.page_render_pending,
+            paper.pages.last_attempt.state if paper.pages.last_attempt else None,
+        )
         recipe_record = paper.recipes.get("summary")
         recipe_state = _processing_state(
             recipe_record is None or "summary" in entry.pending_recipes,
@@ -85,6 +91,7 @@ async def browse_papers(
             PaperBrowseRow(
                 record=paper,
                 conversion_state=conversion_state,
+                page_render_state=page_render_state,
                 recipe_state=recipe_state,
                 llm_cost_usd=sum(item.cost_usd for item in paper.recipes.values()),
                 cache_hit_rate=cached_tokens / prompt_tokens if prompt_tokens else 0.0,
@@ -93,8 +100,10 @@ async def browse_papers(
                 live_state=active.state.value if active is not None else None,
                 live_progress=(active.progress or active.label) if active is not None else None,
                 selected=(
-                    select_pending_conversion
-                    and entry.conversion_pending
+                    (
+                        (select_pending_conversion and entry.conversion_pending)
+                        or (select_pending_pages and entry.page_render_pending)
+                    )
                     and not entry.is_large_document
                 ),
             )

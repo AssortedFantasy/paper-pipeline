@@ -17,6 +17,7 @@ from tests.fakes import FakeLLMProvider
 
 from paper_pipeline.config import AppConfig
 from paper_pipeline.convert.runner import ConverterSpec
+from paper_pipeline.pages.runner import PageRendererSpec
 from paper_pipeline.services.runtime import RuntimeRegistry
 from paper_pipeline.web.app import create_app
 
@@ -46,6 +47,7 @@ def ui_server(tmp_path: Path, page: Page) -> Iterator[str]:
         registry=registry,
         config=_config(tmp_path),
         converter_spec=ConverterSpec("tests.fakes:FakeConverter"),
+        page_renderer_spec=PageRendererSpec("tests.fakes:FakePageRenderer"),
         provider_name="fake",
     )
     with socket.socket() as probe:
@@ -142,7 +144,7 @@ def test_papers_load_filter_select_and_launch(page: Page, ui_server: str, tmp_pa
     page.get_by_placeholder("Title, author, or citekey").fill("")
     expect(page.locator("tbody tr")).to_have_count(5)
 
-    page.get_by_role("button", name="Select pending").click()
+    page.get_by_role("button", name="Select pending conversion", exact=True).click()
     expect(page.locator("tbody input[type=checkbox]:checked")).to_have_count(5)
     page.get_by_role("button", name="Unselect all").click()
     expect(page.locator("tbody input[type=checkbox]:checked")).to_have_count(0)
@@ -201,10 +203,29 @@ def test_large_document_page_count_and_bulk_selection_guard(
     expect(page.locator("tbody input[type=checkbox]:checked")).to_have_count(4)
     expect(book_row.locator("input[type=checkbox]")).not_to_be_checked()
 
-    page.get_by_role("button", name="Select pending").click()
+    page.get_by_role("button", name="Select pending conversion", exact=True).click()
     expect(page.locator("tbody input[type=checkbox]:checked")).to_have_count(4)
     book_row.locator("input[type=checkbox]").check()
     expect(book_row.locator("input[type=checkbox]")).to_be_checked()
+
+
+def test_page_rendering_is_a_separate_local_action(
+    page: Page, ui_server: str, tmp_path: Path
+) -> None:
+    _create_library(page, ui_server, tmp_path / "library")
+    _import_papers(page, ui_server)
+    page.goto(f"{ui_server}/papers")
+    first_row = page.locator("tbody tr").first
+    first_row.locator("input[type=checkbox]").check()
+
+    page.get_by_role("button", name="Render pages", exact=True).click()
+    expect(page.get_by_role("status")).to_contain_text("Queued page rendering for 1 paper")
+    _wait_for_jobs(page, ui_server, count=1)
+
+    page.reload()
+    expect(page.locator("tbody tr").first.locator("td").nth(7)).to_contain_text("ready")
+    page.get_by_role("button", name="Select pending pages", exact=True).click()
+    expect(page.locator("tbody input[type=checkbox]:checked")).to_have_count(4)
 
 
 def test_papers_refresh_preserves_filters(page: Page, ui_server: str, tmp_path: Path) -> None:
