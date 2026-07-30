@@ -49,60 +49,12 @@ def library(library_root: Path) -> Library:
     return create_library(library_root)
 
 
-def test_first_import_produces_addition(library: Library, tmp_path: Path) -> None:
-    record = parsed_record(tmp_path, "New2024")
-
-    plan = build_import_plan(library, [record])
-
-    assert [item.metadata.citekey for item in plan.additions] == ["New2024"]
-    assert plan.refreshes == []
-    assert plan.source_replacements == []
-    assert plan.problems == []
-
-
-def test_identical_reimport_is_metadata_only_refresh(library: Library, tmp_path: Path) -> None:
-    library.write_paper(installed_record("Same2024"))
-    incoming = parsed_record(tmp_path, "Same2024")
-
-    plan = build_import_plan(library, [incoming])
-
-    assert [item.metadata.citekey for item in plan.refreshes] == ["Same2024"]
-    assert plan.additions == []
-    assert plan.source_replacements == []
-
-
-def test_changed_metadata_with_identical_source_is_refresh(
-    library: Library, tmp_path: Path
-) -> None:
+def test_mixed_plan_keeps_categories_disjoint(library: Library, tmp_path: Path) -> None:
     library.write_paper(installed_record("Refresh2024", title="Old title"))
-    incoming = parsed_record(tmp_path, "Refresh2024", title="Corrected title")
-
-    plan = build_import_plan(library, [incoming])
-
-    assert plan.refreshes[0].metadata.title == "Corrected title"
-    assert plan.source_replacements == []
-
-
-def test_changed_pdf_is_explicit_source_replacement(library: Library, tmp_path: Path) -> None:
-    library.write_paper(installed_record("Changed2024", source_hash="old-hash"))
-    incoming = parsed_record(tmp_path, "Changed2024", source_hash="new-hash")
-
-    plan = build_import_plan(library, [incoming])
-
-    assert [item.metadata.citekey for item in plan.source_replacements] == ["Changed2024"]
-    assert plan.source_replacements[0].expected_source_sha256 == "old-hash"
-    assert plan.refreshes == []
-
-
-def test_mixed_plan_keeps_categories_disjoint_and_retains_absent_library_papers(
-    library: Library, tmp_path: Path
-) -> None:
-    library.write_paper(installed_record("Refresh2024"))
     library.write_paper(installed_record("Replace2024", source_hash="old"))
-    library.write_paper(installed_record("Absent2024"))
     records = [
         parsed_record(tmp_path, "Add2024"),
-        parsed_record(tmp_path, "Refresh2024"),
+        parsed_record(tmp_path, "Refresh2024", title="Corrected title"),
         parsed_record(tmp_path, "Replace2024", source_hash="new"),
         parsed_record(tmp_path, "Broken2024", problems=["missing PDF attachment"]),
     ]
@@ -112,8 +64,10 @@ def test_mixed_plan_keeps_categories_disjoint_and_retains_absent_library_papers(
     assert [item.metadata.citekey for item in plan.additions] == ["Add2024"]
     assert [item.metadata.citekey for item in plan.refreshes] == ["Refresh2024"]
     assert [item.metadata.citekey for item in plan.source_replacements] == ["Replace2024"]
+    assert plan.refreshes[0].metadata.title == "Corrected title"
+    assert plan.refreshes[0].expected_source_sha256 == "source-hash"
+    assert plan.source_replacements[0].expected_source_sha256 == "old"
     assert plan.problems == ["Broken2024: missing PDF attachment"]
-    assert library.read_paper("Absent2024").metadata.citekey == "Absent2024"
 
 
 @pytest.mark.parametrize("citekey", ["bad/key", "CON", ""])

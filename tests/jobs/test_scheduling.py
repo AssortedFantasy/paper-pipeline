@@ -102,26 +102,6 @@ async def test_recipe_batches_respect_configured_cross_paper_concurrency() -> No
     assert maximum == 2
 
 
-async def test_recipe_names_inside_one_batch_are_sequential_on_same_context() -> None:
-    queue = JobQueue(llm_concurrency=4)
-    calls: list[tuple[str, int]] = []
-    provider_context = object()
-
-    async def recipe_batch(job: Job) -> None:
-        del job
-        for recipe in ("summary", "contributions", "methods"):
-            calls.append((recipe, id(provider_context)))
-            await asyncio.sleep(0)
-
-    job = await queue.enqueue_paper(
-        "library", "paper", JobKind.RECIPE, "three recipes", recipe_batch
-    )
-    await queue.wait(job.id)
-
-    assert [name for name, _ in calls] == ["summary", "contributions", "methods"]
-    assert len({context_id for _, context_id in calls}) == 1
-
-
 async def test_library_write_waits_for_papers_and_blocks_new_papers() -> None:
     queue = JobQueue()
     first_paper_started = asyncio.Event()
@@ -183,6 +163,43 @@ async def test_library_read_is_nonexclusive_with_paper_work() -> None:
     assert read_job.state is JobState.SUCCEEDED
     release.set()
     await queue.join()
+
+
+async def test_library_reads_and_writes_are_mutually_exclusive() -> None:
+    queue = JobQueue()
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    second_started = asyncio.Event()
+
+    async def first(job: Job) -> None:
+        del job
+        first_started.set()
+        await release_first.wait()
+
+    async def second(job: Job) -> None:
+        del job
+        second_started.set()
+
+    await queue.enqueue_library_write("library", JobKind.MAINTENANCE, "reindex", first)
+    await first_started.wait()
+    await queue.enqueue_library_read("library", JobKind.MAINTENANCE, "validate", second)
+    await asyncio.sleep(0)
+    assert second_started.is_set() is False
+    release_first.set()
+    await queue.join()
+    assert second_started.is_set() is True
+
+    first_started.clear()
+    release_first.clear()
+    second_started.clear()
+    await queue.enqueue_library_read("library", JobKind.MAINTENANCE, "validate", first)
+    await first_started.wait()
+    await queue.enqueue_library_write("library", JobKind.MAINTENANCE, "reindex", second)
+    await asyncio.sleep(0)
+    assert second_started.is_set() is False
+    release_first.set()
+    await queue.join()
+    assert second_started.is_set() is True
 
 
 async def test_cancel_queued_job_is_immediate() -> None:

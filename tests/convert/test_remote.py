@@ -28,10 +28,12 @@ class FakeTransport:
         execution: CommandResult | None = None,
         timeout: bool = False,
         unexpected_download: bool = False,
+        invalid_page: bool = False,
     ) -> None:
         self.execution = execution or CommandResult(0)
         self.timeout = timeout
         self.unexpected_download = unexpected_download
+        self.invalid_page = invalid_page
         self.calls: list[tuple[str, str]] = []
         self.run_dir = ""
 
@@ -86,6 +88,8 @@ class FakeTransport:
         (pages / "page1.png").write_bytes(b"page")
         if self.unexpected_download:
             (local_dir / "undeclared.txt").write_text("bad", encoding="utf-8")
+        if self.invalid_page:
+            (pages / "page1.png").rename(pages / "page1.txt")
 
     def terminate(self, host: str, run_dir: str, timeout: float) -> None:
         assert run_dir == self.run_dir
@@ -214,10 +218,14 @@ def test_dead_connection_is_a_clear_failure_not_a_hang(tmp_path: Path) -> None:
     assert [name for name, _host in transport.calls][-2:] == ["terminate", "cleanup"]
 
 
-def test_unexpected_download_never_enters_conversion_staging(tmp_path: Path) -> None:
+@pytest.mark.parametrize("problem", ["unexpected-entry", "invalid-page"])
+def test_invalid_download_never_enters_conversion_staging(tmp_path: Path, problem: str) -> None:
     result = RemoteConverter(
         "gpu-host",
-        transport=FakeTransport(unexpected_download=True),
+        transport=FakeTransport(
+            unexpected_download=problem == "unexpected-entry",
+            invalid_page=problem == "invalid-page",
+        ),
     ).convert(request(tmp_path))
 
     assert not result.ok

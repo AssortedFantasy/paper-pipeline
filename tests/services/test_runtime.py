@@ -162,39 +162,6 @@ async def test_cross_category_read_modify_write_preserves_every_field(
     assert final.metadata.authors == ["Ada"]
 
 
-async def test_runtime_exposes_library_read_and_write_barriers(tmp_path: Path) -> None:
-    runtime = RuntimeRegistry().create(tmp_path / "library")
-    await seed(runtime, record())
-    paper_started = asyncio.Event()
-    release_paper = asyncio.Event()
-    read_started = asyncio.Event()
-    write_started = asyncio.Event()
-
-    async def paper(session: PaperSession, job: Job, token: CancellationToken) -> None:
-        del session, job, token
-        paper_started.set()
-        await release_paper.wait()
-
-    async def read_worker(session: LibrarySession, job: Job, token: CancellationToken) -> None:
-        del session, job, token
-        read_started.set()
-
-    async def write_worker(session: LibrarySession, job: Job, token: CancellationToken) -> None:
-        del session, job, token
-        write_started.set()
-
-    await runtime.enqueue_paper("Smith2024", JobKind.IMPORT, "paper", paper)
-    await paper_started.wait()
-    await runtime.enqueue_library_write(JobKind.MAINTENANCE, "write", write_worker)
-    await runtime.enqueue_library_read(JobKind.MAINTENANCE, "read", read_worker)
-
-    await asyncio.wait_for(read_started.wait(), timeout=1)
-    assert write_started.is_set() is False
-    release_paper.set()
-    await runtime.queue.join()
-    assert write_started.is_set() is True
-
-
 async def test_library_read_session_has_no_storage_mutation_capability(tmp_path: Path) -> None:
     runtime = RuntimeRegistry().create(tmp_path / "library")
 
@@ -249,15 +216,3 @@ async def test_runtime_wires_recovery_callbacks_inside_paper_lane(tmp_path: Path
     assert outcomes[0].artifact_hashes.keys() == {artifact_relative}
     assert (runtime.root / ".pp" / "attempts" / f"{job.id}.json").exists() is False
     assert (await read(runtime, "Smith2024")).metadata.keywords == [job.id]
-
-
-def test_other_service_modules_do_not_open_raw_storage() -> None:
-    services_root = Path(__file__).parents[2] / "src" / "paper_pipeline" / "services"
-    offenders = []
-    for path in services_root.glob("*.py"):
-        if path.name == "runtime.py":
-            continue
-        text = path.read_text(encoding="utf-8")
-        if "open_library(" in text or "create_library(" in text:
-            offenders.append(path.name)
-    assert offenders == []

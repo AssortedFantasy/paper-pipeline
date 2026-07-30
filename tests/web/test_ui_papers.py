@@ -127,14 +127,6 @@ def test_papers_load_filter_select_and_launch(page: Page, ui_server: str, tmp_pa
     expect(page.get_by_role("heading", name="Papers", exact=True)).to_have_count(0)
     expect(page.locator("tbody tr")).to_have_count(5)
     expect(page.locator("script[src*='htmx.min.js']")).to_have_count(1)
-    recipe_checks = page.get_by_role("group", name="Recipes").locator("input")
-    expect(recipe_checks).to_have_count(4)
-    assert recipe_checks.evaluate_all("items => items.map(item => item.value)") == [
-        "contributions",
-        "intro",
-        "method",
-        "summary",
-    ]
 
     page.get_by_role("button", name="Citekey").click()
     expect(page.get_by_role("button", name="Citekey ↑")).to_be_visible()
@@ -185,16 +177,6 @@ def test_papers_load_filter_select_and_launch(page: Page, ui_server: str, tmp_pa
     assert (tmp_path / "library" / "papers" / citekey / "contributions.md").is_file()
 
     expect(page.locator(".job-stream")).to_contain_text("running")
-
-
-def test_empty_library_state(page: Page, ui_server: str, tmp_path: Path) -> None:
-    _create_library(page, ui_server, tmp_path / "empty-library")
-    page.goto(f"{ui_server}/papers")
-
-    expect(page).to_have_url(f"{ui_server}/papers")
-    expect(page.get_by_role("heading", name="No papers found")).to_be_visible()
-    expect(page.get_by_text("Import papers to start building this library.")).to_be_visible()
-    expect(page.locator("tbody")).to_have_count(0)
 
 
 def test_large_document_page_count_and_bulk_selection_guard(

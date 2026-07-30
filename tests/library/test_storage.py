@@ -27,13 +27,15 @@ from paper_pipeline.library.storage import (
     sha256_file,
 )
 
+SOURCE_HASH = "c35b21d6ca39aa7cc3b79a705d989f1a6e88b99ab43988d74048799e3db926a3"
+
 
 def make_record(citekey: str = "Smith2024") -> PaperRecord:
     return PaperRecord(
         format_version=FORMAT_VERSION,
         metadata=PaperMetadata(citekey=citekey, title="A paper", authors=["Ada Smith"]),
-        source_pdf=f"papers/{citekey}/source/paper.pdf",
-        source_sha256="source-hash",
+        source_pdf=f"papers/{citekey}/source/{SOURCE_HASH}.pdf",
+        source_sha256=SOURCE_HASH,
     )
 
 
@@ -111,15 +113,13 @@ def test_invalid_citekeys_are_rejected(library_root: Path, citekey: str) -> None
     ("field", "value"),
     [
         ("source_pdf", "/outside/paper.pdf"),
-        ("source_pdf", "C:/outside/paper.pdf"),
-        ("source_pdf", "C:outside/paper.pdf"),
-        ("source_pdf", r"papers\Smith2024\source\paper.pdf"),
-        ("source_pdf", "papers/../outside.pdf"),
-        ("input_artifact", "/outside/transcription.md"),
-        ("log_path", "../secret.log"),
+        ("conversion_log", "../secret.log"),
+        ("recipe_input", r"papers\Smith2024\transcription.md"),
+        ("recipe_output", "C:/outside/summary.md"),
+        ("recipe_log", "C:secret.log"),
     ],
 )
-def test_all_path_typed_fields_require_relative_posix_paths(
+def test_durable_path_fields_require_relative_posix_paths(
     library_root: Path, field: str, value: str
 ) -> None:
     library = create_library(library_root)
@@ -127,12 +127,26 @@ def test_all_path_typed_fields_require_relative_posix_paths(
     now = datetime.now(UTC)
     if field == "source_pdf":
         record.source_pdf = value
-    elif field == "input_artifact":
-        record.recipes["summary"] = RecipeRecord(input_artifact=value)
-    else:
+    elif field == "conversion_log":
         record.conversion.last_attempt = AttemptRecord(
             id="attempt", state=AttemptState.FAILED, started_at=now, finished_at=now, log_path=value
         )
+    elif field == "recipe_input":
+        record.recipes["summary"] = RecipeRecord(input_artifact=value)
+    elif field == "recipe_output":
+        record.recipes["summary"] = RecipeRecord(output_artifact=value)
+    elif field == "recipe_log":
+        record.recipes["summary"] = RecipeRecord(
+            last_attempt=AttemptRecord(
+                id="attempt",
+                state=AttemptState.FAILED,
+                started_at=now,
+                finished_at=now,
+                log_path=value,
+            )
+        )
+    else:  # pragma: no cover - the parameter table is exhaustive
+        raise AssertionError(f"unknown durable path field: {field}")
 
     with pytest.raises(ValueError, match="POSIX path relative"):
         library.write_paper(record)
@@ -335,7 +349,7 @@ def test_hash_and_freshness_helpers_compare_recorded_input_hashes(tmp_path: Path
     )
     record.recipes = {
         "pdf-summary": RecipeRecord(
-            input_artifact="papers/Smith2024/source/paper.pdf",
+            input_artifact=record.source_pdf,
             input_sha256=record.source_sha256,
         ),
         "text-summary": RecipeRecord(

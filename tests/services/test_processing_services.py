@@ -1,6 +1,7 @@
 """End-to-end processing service tests using only fake external edges."""
 
 import asyncio
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -13,8 +14,9 @@ from paper_pipeline.jobs.queue import CancellationToken
 from paper_pipeline.jobs.recovery import InterruptedAttempt
 from paper_pipeline.library.model import AttemptState, PaperMetadata, PaperRecord
 from paper_pipeline.library.paths import FORMAT_VERSION
-from paper_pipeline.library.storage import sha256_file
+from paper_pipeline.library.storage import recipe_is_fresh, sha256_file
 from paper_pipeline.recipes.model import RecipeDefinition
+from paper_pipeline.recipes.provider import ProviderRequest, ProviderResult
 from paper_pipeline.services.processing import (
     cancel_job,
     pending_conversion_citekeys,
@@ -43,13 +45,14 @@ async def _runtime(tmp_path: Path, provider: FakeLLMProvider | None = None) -> L
 async def _seed(
     runtime: LibraryRuntime,
     *,
+    citekey: str = "Smith2024",
     install_source: bool = True,
 ) -> None:
     source_bytes = b"%PDF-1.4 fake source"
-    source_relative = "papers/Smith2024/source/source.pdf"
+    source_relative = f"papers/{citekey}/source/source.pdf"
     record = PaperRecord(
         format_version=FORMAT_VERSION,
-        metadata=PaperMetadata(citekey="Smith2024", title="Test paper"),
+        metadata=PaperMetadata(citekey=citekey, title=f"Test paper {citekey}"),
         source_pdf=source_relative,
         source_sha256=_bytes_sha256(source_bytes),
     )
@@ -63,31 +66,61 @@ async def _seed(
             session.install_artifact(staged, source_relative)
         session.write_record(record)
 
-    job = await runtime.enqueue_paper("Smith2024", JobKind.IMPORT, "seed", worker)
+    job = await runtime.enqueue_paper(citekey, JobKind.IMPORT, "seed", worker)
     assert (await runtime.queue.wait(job.id)).state is JobState.SUCCEEDED
 
 
-async def _read(runtime: LibraryRuntime) -> PaperRecord:
+async def _read(runtime: LibraryRuntime, citekey: str = "Smith2024") -> PaperRecord:
     records: list[PaperRecord] = []
 
     async def worker(session: LibrarySession, job: Job, token: CancellationToken) -> None:
         del job, token
-        records.append(session.read_paper("Smith2024"))
+        records.append(session.read_paper(citekey))
 
     job = await runtime.enqueue_library_read(JobKind.MAINTENANCE, "read", worker)
     await runtime.queue.wait(job.id)
     return records[0]
 
 
-async def test_conversion_and_recipe_batch_flow_through_real_queue(tmp_path: Path) -> None:
-    provider = FakeLLMProvider(
-        response="One-line generated result",
-        prompt_tokens=100,
-        cached_tokens=50,
-        cache_write_tokens=25,
-    )
-    runtime = await _runtime(tmp_path, provider)
+async def test_processing_uses_real_queue_and_recipe_batching_contract(tmp_path: Path) -> None:
+    class BlockingProvider:
+        name = "recording"
+
+        def __init__(self) -> None:
+            self.barrier = threading.Barrier(2)
+            self.lock = threading.Lock()
+            self.active = 0
+            self.maximum_active = 0
+            self.calls: list[tuple[str, str]] = []
+
+        def generate(self, request: ProviderRequest) -> ProviderResult:
+            assert request.pdf_input is not None
+            citekey = request.pdf_input.parents[1].name
+            with self.lock:
+                self.active += 1
+                self.maximum_active = max(self.maximum_active, self.active)
+            try:
+                if request.prompt == "First.":
+                    self.barrier.wait(timeout=2)
+                with self.lock:
+                    self.calls.append((citekey, request.prompt))
+                return ProviderResult(
+                    ok=True,
+                    text=f"{citekey}: {request.prompt}",
+                    provider=self.name,
+                    model=request.model,
+                )
+            finally:
+                with self.lock:
+                    self.active -= 1
+
+    provider = BlockingProvider()
+    runtime = RuntimeRegistry(
+        llm_concurrency=2,
+        provider_factories={"recording": lambda: provider},
+    ).create(tmp_path / "library")
     await _seed(runtime)
+    await _seed(runtime, citekey="Jones2025")
 
     conversion = (
         await queue_conversion(
@@ -109,33 +142,34 @@ async def test_conversion_and_recipe_batch_flow_through_real_queue(tmp_path: Pat
     assert "conversion succeeded" in conversion_log.read_text(encoding="utf-8")
     assert (runtime.root / "papers" / "Smith2024" / "pages" / "page1.png").is_file()
 
-    recipe_job = (
-        await queue_recipes(
-            runtime,
-            ["summary", "contributions"],
-            ["Smith2024"],
-            provider_name="fake",
-            model="test-model",
-        )
-    )[0]
-    assert (await runtime.queue.wait(recipe_job.id)).state is JobState.SUCCEEDED
-    assert recipe_job.log_path is not None
-    usage_log = (runtime.root / recipe_job.log_path).read_text(encoding="utf-8")
-    assert "cached=50 cache_write=25 cache_hit_rate=50.0%" in usage_log
-    assert "total: prompt=200 cached=100" in usage_log
-    assert "cache_write=50" in usage_log
-    enriched = await _read(runtime)
-    assert set(enriched.recipes) == {"summary", "contributions"}
-    assert len(provider.calls) == 2
-    assert provider.calls[0].input_sha256 == provider.calls[1].input_sha256
-    for name in ("summary", "contributions"):
-        recipe = enriched.recipes[name]
-        assert recipe.last_attempt is not None
-        assert recipe.last_attempt.state is AttemptState.SUCCEEDED
-        assert recipe.cached_tokens == 50
-        assert recipe.cache_write_tokens == 25
-        assert recipe.output_artifact is not None
-        assert (runtime.root / recipe.output_artifact).is_file()
+    recipes = {
+        "first": RecipeDefinition("first", 1, "pdf", "first.md", "First."),
+        "second": RecipeDefinition("second", 1, "pdf", "second.md", "Second."),
+    }
+    recipe_jobs = await queue_recipes(
+        runtime,
+        ["first", "second"],
+        ["Smith2024", "Jones2025"],
+        provider_name="recording",
+        model="test-model",
+        recipes=recipes,
+    )
+    completed = await asyncio.gather(*(runtime.queue.wait(job.id) for job in recipe_jobs))
+
+    assert all(job.state is JobState.SUCCEEDED for job in completed)
+    assert provider.maximum_active == 2
+    for citekey in ("Smith2024", "Jones2025"):
+        assert [prompt for paper, prompt in provider.calls if paper == citekey] == [
+            "First.",
+            "Second.",
+        ]
+        enriched = await _read(runtime, citekey)
+        assert set(enriched.recipes) == {"first", "second"}
+        for recipe in enriched.recipes.values():
+            assert recipe.last_attempt is not None
+            assert recipe.last_attempt.state is AttemptState.SUCCEEDED
+            assert recipe.output_artifact is not None
+            assert (runtime.root / recipe.output_artifact).is_file()
 
 
 async def test_failed_rerun_preserves_last_good_conversion_and_records_log(
@@ -344,8 +378,8 @@ async def test_recipe_batch_rejects_duplicate_output_destinations(tmp_path: Path
         )
 
 
-async def test_recipe_failure_records_attempt_and_operational_log(tmp_path: Path) -> None:
-    provider = FakeLLMProvider(fail=True)
+async def test_failed_recipe_rerun_preserves_last_good_artifact(tmp_path: Path) -> None:
+    provider = FakeLLMProvider(response="Last good result")
     runtime = await _runtime(tmp_path, provider)
     await _seed(runtime)
     transcription = runtime.root / "papers" / "Smith2024" / "transcription.md"
@@ -363,6 +397,23 @@ async def test_recipe_failure_records_attempt_and_operational_log(tmp_path: Path
     )
     await runtime.queue.wait(update_job.id)
 
+    succeeded = (
+        await queue_recipes(
+            runtime,
+            ["summary"],
+            ["Smith2024"],
+            provider_name="fake",
+            model="test-model",
+        )
+    )[0]
+    assert (await runtime.queue.wait(succeeded.id)).state is JobState.SUCCEEDED
+    before = await _read(runtime)
+    before_recipe = before.recipes["summary"]
+    assert before_recipe.output_artifact is not None
+    output = runtime.root / before_recipe.output_artifact
+    before_bytes = output.read_bytes()
+
+    provider.fail = True
     failed = (
         await queue_recipes(
             runtime,
@@ -380,6 +431,15 @@ async def test_recipe_failure_records_attempt_and_operational_log(tmp_path: Path
     assert attempt.state is AttemptState.FAILED
     assert attempt.log_path is not None
     assert (runtime.root / attempt.log_path).is_file()
+    after_recipe = after.recipes["summary"]
+    assert output.read_bytes() == before_bytes
+    assert after_recipe.output_sha256 == before_recipe.output_sha256
+    assert after_recipe.input_sha256 == before_recipe.input_sha256
+    assert after_recipe.completed_at == before_recipe.completed_at
+    assert after_recipe.provider == before_recipe.provider
+    assert after_recipe.model == before_recipe.model
+    assert recipe_is_fresh(after, "summary")
+    assert await pending_recipe_citekeys(runtime, "summary") == []
 
 
 def _bytes_sha256(value: bytes) -> str:

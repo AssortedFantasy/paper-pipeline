@@ -15,7 +15,9 @@ from paper_pipeline.library.paths import FORMAT_VERSION
 from paper_pipeline.library.storage import create_library, sha256_file
 from paper_pipeline.library.validation import validate_library
 
-SOURCE_PATH = "papers/Smith2024/source/paper.pdf"
+SOURCE_PATH = (
+    "papers/Smith2024/source/c35b21d6ca39aa7cc3b79a705d989f1a6e88b99ab43988d74048799e3db926a3.pdf"
+)
 
 
 def _record() -> PaperRecord:
@@ -132,7 +134,7 @@ def test_recipe_output_hash_and_input_freshness_are_checked(library_root: Path) 
     summary = library_root / "papers" / "Smith2024" / "summary.md"
     summary.write_text("summary", encoding="utf-8")
     record.recipes["summary"] = RecipeRecord(
-        input_artifact="papers/Smith2024/source/paper.pdf",
+        input_artifact=SOURCE_PATH,
         input_sha256="old-source",
         output_artifact="papers/Smith2024/summary.md",
         output_sha256=sha256_file(summary),
@@ -153,49 +155,23 @@ def test_recipe_output_hash_and_input_freshness_are_checked(library_root: Path) 
     )
 
 
-def test_unrecorded_flat_markdown_is_an_error(library_root: Path) -> None:
-    library, _record = _library_with_source(library_root)
-    paper_root = library_root / "papers" / "Smith2024"
-    (paper_root / "orphan.md").write_text("unvalidated", encoding="utf-8")
-
-    report = validate_library(library)
-
-    assert any(
-        problem.severity == "error" and "Unexpected unrecorded entry" in problem.message
-        for problem in report.problems
-    )
-
-
 def test_paper_directory_rejects_unexpected_entries(library_root: Path) -> None:
     library, _record = _library_with_source(library_root)
     paper_root = library_root / "papers" / "Smith2024"
     (paper_root / "nested").mkdir()
     (paper_root / "payload.json").write_text("{}", encoding="utf-8")
+    (paper_root / "orphan.md").write_text("unvalidated", encoding="utf-8")
 
     report = validate_library(library)
 
     unexpected = [
         problem for problem in report.problems if "Unexpected unrecorded" in problem.message
     ]
-    assert {problem.message for problem in unexpected} == {
-        "Unexpected unrecorded entry in paper directory: 'nested'.",
-        "Unexpected unrecorded entry in paper directory: 'payload.json'.",
-    }
-
-
-def test_validator_rejects_unrecorded_symlink(library_root: Path, tmp_path: Path) -> None:
-    library, _record = _library_with_source(library_root)
-    outside = tmp_path / "outside-output.md"
-    outside.write_text("outside", encoding="utf-8")
-    generated = library_root / "papers" / "Smith2024" / "orphan.md"
-    try:
-        generated.symlink_to(outside)
-    except OSError as error:
-        pytest.skip(f"directory symlinks unavailable: {error}")
-
-    report = validate_library(library)
-
-    assert any("Unexpected unrecorded entry" in p.message for p in report.problems)
+    assert all(problem.severity == "error" and problem.action for problem in unexpected)
+    assert all(
+        any(repr(name) in problem.message for problem in unexpected)
+        for name in ("nested", "payload.json", "orphan.md")
+    )
 
 
 def test_deleted_paper_is_reported_as_stale_index(library_root: Path) -> None:

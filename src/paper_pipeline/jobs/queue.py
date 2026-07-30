@@ -93,6 +93,7 @@ class _LibraryBarrier:
     def __init__(self) -> None:
         self._condition = asyncio.Condition()
         self._active_papers = 0
+        self._active_readers = 0
         self._writer_active = False
         self._waiting_writers = 0
 
@@ -111,12 +112,30 @@ class _LibraryBarrier:
                 self._condition.notify_all()
 
     @asynccontextmanager
+    async def read(self) -> AsyncIterator[None]:
+        async with self._condition:
+            await self._condition.wait_for(
+                lambda: not self._writer_active and self._waiting_writers == 0
+            )
+            self._active_readers += 1
+        try:
+            yield
+        finally:
+            async with self._condition:
+                self._active_readers -= 1
+                self._condition.notify_all()
+
+    @asynccontextmanager
     async def write(self) -> AsyncIterator[None]:
         async with self._condition:
             self._waiting_writers += 1
             try:
                 await self._condition.wait_for(
-                    lambda: self._active_papers == 0 and not self._writer_active
+                    lambda: (
+                        self._active_papers == 0
+                        and self._active_readers == 0
+                        and not self._writer_active
+                    )
                 )
                 self._writer_active = True
             finally:
@@ -223,7 +242,8 @@ class JobQueue:
             kill_hook=kill_hook,
             recovery=recovery,
         )
-        self._start(job, worker)
+        barrier = self._library_barriers.setdefault(library_key, _LibraryBarrier())
+        self._start(job, worker, barrier=barrier)
         return job
 
     async def enqueue_library_write(
@@ -439,6 +459,10 @@ class JobQueue:
             if job.scope is JobScope.LIBRARY_WRITE:
                 assert barrier is not None
                 async with barrier.write():
+                    await self._invoke(job, worker, token)
+            elif job.scope is JobScope.LIBRARY_READ:
+                assert barrier is not None
+                async with barrier.read():
                     await self._invoke(job, worker, token)
             elif lane is not None:
                 assert barrier is not None

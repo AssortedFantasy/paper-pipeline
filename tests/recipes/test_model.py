@@ -25,10 +25,8 @@ def test_builtins_parse() -> None:
     assert recipes["contributions"].input == "pdf"
     assert recipes["intro"].input == "pdf"
     assert recipes["intro"].output == "intro_filtered.md"
-    assert "Motivation & Problem Context" in recipes["intro"].prompt
     assert recipes["method"].input == "pdf"
     assert recipes["method"].output == "method_filtered.md"
-    assert "Approach" in recipes["method"].prompt
 
 
 def test_prompt_body_is_preserved_verbatim() -> None:

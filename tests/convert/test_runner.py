@@ -1,5 +1,7 @@
 import multiprocessing
 import os
+import signal
+import subprocess
 import sys
 import threading
 import time
@@ -27,6 +29,25 @@ class HardExitConverter:
     def convert(self, request: ConversionRequest) -> ConversionResult:
         del request
         os._exit(7)
+
+
+class GrandchildConverter:
+    name = "grandchild"
+
+    def __init__(self, pid_path: str) -> None:
+        self.pid_path = Path(pid_path)
+
+    def convert(self, request: ConversionRequest) -> ConversionResult:
+        del request
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        self.pid_path.write_text(str(child.pid), encoding="utf-8")
+        time.sleep(30)
+        raise AssertionError("grandchild converter should have been terminated")
 
 
 class EmptySuccessConverter:
@@ -113,6 +134,54 @@ def assert_no_converter_children() -> None:
     )
 
 
+def process_is_running(pid: int) -> bool:
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        handle = kernel32.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return False
+        try:
+            exit_code = wintypes.DWORD()
+            return bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))) and (
+                exit_code.value == 259
+            )
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    status = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(pid)],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    return status.returncode == 0 and not status.stdout.lstrip().startswith("Z")
+
+
+def terminate_test_process(pid: int) -> None:
+    if not process_is_running(pid):
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            capture_output=True,
+            check=False,
+        )
+    else:
+        os.kill(pid, signal.SIGKILL)
+
+
 def test_success_runs_in_spawned_child_and_preserves_outputs(tmp_path: Path) -> None:
     request = make_request(tmp_path)
 
@@ -153,20 +222,33 @@ def test_child_exception_becomes_failed_result_with_traceback(tmp_path: Path) ->
     assert_no_converter_children()
 
 
-def test_timeout_kills_child_and_cleans_staging(tmp_path: Path) -> None:
+def test_timeout_kills_process_tree_and_cleans_staging(tmp_path: Path) -> None:
     request = make_request(tmp_path, timeout_seconds=1)
+    grandchild_pid_path = tmp_path / "grandchild.pid"
     started = time.monotonic()
 
-    result = run_conversion(
-        ConverterSpec(FAKE_SPEC, {"mode": "hang", "hang_seconds": 30}),
-        request,
-    )
+    try:
+        result = run_conversion(
+            ConverterSpec(
+                "tests.convert.test_runner:GrandchildConverter",
+                {"pid_path": str(grandchild_pid_path)},
+            ),
+            request,
+        )
+        grandchild_pid = int(grandchild_pid_path.read_text(encoding="utf-8"))
 
-    assert result.ok is False
-    assert result.error == "conversion timed out after 1 seconds"
-    assert time.monotonic() - started < 10
-    assert list(request.staging_dir.iterdir()) == []
-    assert_no_converter_children()
+        assert result.ok is False
+        assert result.error == "conversion timed out after 1 seconds"
+        assert time.monotonic() - started < 10
+        assert list(request.staging_dir.iterdir()) == []
+        assert_no_converter_children()
+        deadline = time.monotonic() + 5
+        while process_is_running(grandchild_pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert process_is_running(grandchild_pid) is False
+    finally:
+        if grandchild_pid_path.is_file():
+            terminate_test_process(int(grandchild_pid_path.read_text(encoding="utf-8")))
 
 
 def test_cancellation_kills_child_and_cleans_staging(tmp_path: Path) -> None:

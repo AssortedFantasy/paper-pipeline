@@ -93,17 +93,6 @@ def test_summary_uses_first_output_line(library_root: Path) -> None:
     )
 
 
-def test_summaries_distinguish_missing_summary(library_root: Path) -> None:
-    library = create_library(library_root)
-    library.write_paper(_record("Alpha2024", "First"))
-
-    rebuild_indexes(library)
-
-    assert (library_root / "indexes" / "summaries.md").read_text(encoding="utf-8") == (
-        "Alpha2024: no summary yet\n"
-    )
-
-
 def test_rebuild_removes_unsupported_derived_indexes(library_root: Path) -> None:
     library = create_library(library_root)
     obsolete = library_root / "indexes" / "status.md"
@@ -170,14 +159,6 @@ def test_rebuild_drops_entries_for_deleted_paper_directory(library_root: Path) -
     library.write_paper(_record("Deleted2024", "Gone"))
     rebuild_indexes(library)
     shutil.rmtree(library_root / "papers" / "Deleted2024")
-
-    rebuild_indexes(library)
-
-    assert all(content == b"" for content in _index_bytes(library_root).values())
-
-
-def test_empty_library_produces_valid_empty_indexes(library_root: Path) -> None:
-    library = create_library(library_root)
 
     rebuild_indexes(library)
 

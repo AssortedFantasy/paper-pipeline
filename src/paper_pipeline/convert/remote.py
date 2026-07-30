@@ -315,20 +315,12 @@ def _install_download(
     transcription = download / "transcription.md"
     if not transcription.is_file() or transcription.stat().st_size == 0:
         raise ValueError("download has no transcription")
-
-    destination = staging / "transcription.md"
-    shutil.copy2(transcription, destination)
-    figure_paths: list[Path] = []
     figures = download / "figures"
     if figures.exists():
         if not figures.is_dir():
             raise ValueError("figures is not a directory")
         if any(not path.is_file() and not path.is_dir() for path in figures.rglob("*")):
             raise ValueError("figures contains an unsupported entry")
-        destination_figures = staging / "figures"
-        shutil.copytree(figures, destination_figures)
-        figure_paths = sorted(path for path in destination_figures.rglob("*") if path.is_file())
-    page_paths: list[Path] = []
     pages = download / "pages"
     if pages.exists():
         if not pages.is_dir():
@@ -336,6 +328,16 @@ def _install_download(
         page_files = sorted(path for path in pages.rglob("*") if path.is_file())
         if not page_files or any(path.suffix.casefold() != ".png" for path in page_files):
             raise ValueError("pages contains invalid page images")
+
+    destination = staging / "transcription.md"
+    shutil.copy2(transcription, destination)
+    figure_paths: list[Path] = []
+    if figures.exists():
+        destination_figures = staging / "figures"
+        shutil.copytree(figures, destination_figures)
+        figure_paths = sorted(path for path in destination_figures.rglob("*") if path.is_file())
+    page_paths: list[Path] = []
+    if pages.exists():
         destination_pages = staging / "pages"
         shutil.copytree(pages, destination_pages)
         page_paths = sorted(path for path in destination_pages.rglob("*") if path.is_file())

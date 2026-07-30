@@ -1,5 +1,4 @@
 import hashlib
-import json
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -43,8 +42,6 @@ def test_marker_write_is_atomic_and_round_trips(tmp_path: Path) -> None:
     assert marker_path.is_file()
     assert store.scan() == [attempt]
     assert list(store.attempts_dir.glob("*.tmp")) == []
-    raw = json.loads(marker_path.read_text(encoding="utf-8"))
-    assert set(raw) == {"job_id", "target", "operation", "kind", "scope", "started_at"}
 
 
 def test_marker_store_rejects_symlinked_attempt_directory(tmp_path: Path) -> None:

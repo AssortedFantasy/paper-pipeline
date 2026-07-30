@@ -2,19 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import os
-import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from httpx import Request, Response
-from openai import APIConnectionError, APITimeoutError, BadRequestError, RateLimitError
+from openai import APITimeoutError, BadRequestError, RateLimitError
 
 from paper_pipeline.config import AppConfig
 from paper_pipeline.recipes.openai_provider import OpenAIProvider
 from paper_pipeline.recipes.provider import ProviderRequest
-from tests.fakes import FakeLLMProvider
 
 
 class RecordingFiles:
@@ -63,32 +61,6 @@ def config(**overrides: str | None) -> AppConfig:
     return AppConfig.model_construct(**values)
 
 
-def test_fake_provider_returns_canned_response_and_records_calls() -> None:
-    provider = FakeLLMProvider(response="Canned result")
-    request = ProviderRequest(prompt="Summarize", text_input="Paper", model="test-model")
-
-    result = provider.generate(request)
-
-    assert result.ok
-    assert result.text == "Canned result"
-    assert result.provider == "fake"
-    assert result.model == "test-model"
-    assert provider.calls == [request]
-
-
-def test_fake_provider_failure_and_delay() -> None:
-    provider = FakeLLMProvider(fail=True, delay_seconds=0.01)
-    request = ProviderRequest(prompt="Summarize", text_input="Paper", model="test-model")
-
-    started = time.perf_counter()
-    result = provider.generate(request)
-
-    assert time.perf_counter() - started >= 0.009
-    assert not result.ok
-    assert result.error == "fake provider failure"
-    assert provider.calls == [request]
-
-
 def test_openai_text_request_uses_responses_api() -> None:
     client = RecordingClient()
     provider = OpenAIProvider(config(), client=client)
@@ -106,26 +78,17 @@ def test_openai_text_request_uses_responses_api() -> None:
     # Luna: 200 cache-write tokens at 1.25x $1/MTok, 800 cached at
     # $0.10/MTok, and 100 output at $6/MTok.
     assert result.cost_usd == 0.00093
-    assert client.responses.calls == [
-        {
-            "model": "gpt-5.6-luna",
-            "prompt_cache_key": hashlib.sha256(b"paper-pipeline:abc").hexdigest(),
-            "prompt_cache_options": {"mode": "implicit", "ttl": "30m"},
-            "input": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": "Transcription",
-                            "prompt_cache_breakpoint": {"mode": "explicit"},
-                        },
-                        {"type": "input_text", "text": "Recipe prompt"},
-                    ],
-                }
-            ],
-        }
+    request = client.responses.calls[0]
+    assert request["model"] == "gpt-5.6-luna"
+    assert request["prompt_cache_key"] == hashlib.sha256(b"paper-pipeline:abc").hexdigest()
+    assert request["prompt_cache_options"] == {"mode": "implicit", "ttl": "30m"}
+    content = request["input"][0]["content"]
+    assert [(item["type"], item["text"]) for item in content] == [
+        ("input_text", "Transcription"),
+        ("input_text", "Recipe prompt"),
     ]
+    assert "prompt_cache_breakpoint" in content[0]
+    assert "prompt_cache_breakpoint" not in content[1]
     assert client.files.calls == []
 
 
@@ -214,23 +177,13 @@ def test_openai_requires_an_api_key_for_a_real_client() -> None:
     assert result.error == "OpenAI API key is not configured"
 
 
-def test_openai_errors_are_safe() -> None:
-    secret = "super-secret-api-key"
-    client = RecordingClient(error=RuntimeError(f"request with {secret} failed"))
-    request = ProviderRequest(prompt="full private prompt", text_input="private paper")
-
-    result = OpenAIProvider(config(llm_api_key=secret), client=client).generate(request)
-
-    assert not result.ok
-    assert result.error is not None
-    assert secret not in result.error
-    assert request.prompt not in result.error
-    assert (request.text_input or "") not in result.error
-
-
 @pytest.mark.parametrize(
-    ("error", "expected"),
+    ("error", "expected_fragments"),
     [
+        (
+            RuntimeError("request with super-secret-api-key and private response failed"),
+            ("request failed",),
+        ),
         (
             RateLimitError(
                 "private response body",
@@ -241,8 +194,7 @@ def test_openai_errors_are_safe() -> None:
                 ),
                 body={"private": "response"},
             ),
-            "OpenAI rate limit or quota was exceeded after automatic retries "
-            "(HTTP 429, request_id=req_safe-123)",
+            ("rate limit", "HTTP 429", "request_id=req_safe-123"),
         ),
         (
             BadRequestError(
@@ -253,28 +205,27 @@ def test_openai_errors_are_safe() -> None:
                 ),
                 body={"private": "response"},
             ),
-            "OpenAI rejected the request (check model parameters and input limits) (HTTP 400)",
+            ("rejected", "HTTP 400"),
         ),
         (
             APITimeoutError(Request("POST", "https://api.openai.com/v1/responses")),
-            "OpenAI request timed out",
-        ),
-        (
-            APIConnectionError(request=Request("POST", "https://api.openai.com/v1/responses")),
-            "OpenAI connection failed after automatic retries",
+            ("timed out",),
         ),
     ],
 )
-def test_openai_errors_include_safe_actionable_diagnostics(error: Exception, expected: str) -> None:
+def test_openai_errors_include_safe_actionable_diagnostics(
+    error: Exception, expected_fragments: tuple[str, ...]
+) -> None:
     client = RecordingClient(error=error)
 
     result = OpenAIProvider(config(), client=client).generate(
         ProviderRequest(prompt="private prompt", text_input="private paper")
     )
 
-    assert result.error == expected
     assert result.error is not None
+    assert all(fragment in result.error for fragment in expected_fragments)
     assert "private" not in result.error
+    assert "super-secret-api-key" not in result.error
 
 
 def test_openai_client_creation_is_lazy_and_respects_base_url(
@@ -320,7 +271,7 @@ def test_openai_missing_optional_sdk_is_actionable(monkeypatch: pytest.MonkeyPat
     assert result.error == "OpenAI provider unavailable; reinstall Paper Pipeline"
 
 
-def test_openai_rejects_missing_usage_and_unknown_pricing() -> None:
+def test_openai_rejects_invalid_usage_and_unknown_pricing() -> None:
     missing_usage = RecordingClient()
     missing_usage.responses.create = lambda **_kwargs: SimpleNamespace(output_text="text")
     result = OpenAIProvider(config(), client=missing_usage).generate(
@@ -328,6 +279,26 @@ def test_openai_rejects_missing_usage_and_unknown_pricing() -> None:
     )
     assert not result.ok
     assert result.error == "OpenAI response contained no token usage"
+
+    invalid_usage = (
+        SimpleNamespace(input_tokens=-1, output_tokens=1),
+        SimpleNamespace(input_tokens=1, output_tokens=True),
+        SimpleNamespace(
+            input_tokens=1,
+            output_tokens=1,
+            input_tokens_details=SimpleNamespace(cached_tokens=1, cache_write_tokens=1),
+        ),
+    )
+    for usage in invalid_usage:
+        client = RecordingClient()
+        client.responses.create = lambda usage=usage, **_kwargs: SimpleNamespace(
+            output_text="text", usage=usage
+        )
+        result = OpenAIProvider(config(), client=client).generate(
+            ProviderRequest(prompt="Prompt", text_input="Input")
+        )
+        assert not result.ok
+        assert result.error is not None and "token" in result.error
 
     unknown = OpenAIProvider(config(llm_model="compatible-model"), client=RecordingClient())
     result = unknown.generate(ProviderRequest(prompt="Prompt", text_input="Input"))

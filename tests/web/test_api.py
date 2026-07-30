@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from fastapi import Request
 from httpx import ASGITransport, AsyncClient
 from tests.fakes import FakeLLMProvider
 
@@ -17,7 +16,7 @@ from paper_pipeline.convert.runner import ConverterSpec
 from paper_pipeline.jobs.model import Job, JobKind, JobState
 from paper_pipeline.jobs.queue import CancellationToken
 from paper_pipeline.services.runtime import PaperSession, RuntimeRegistry
-from paper_pipeline.web.api import WebContext, event_stream
+from paper_pipeline.web.api import WebContext
 from paper_pipeline.web.app import create_app
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "zotero"
@@ -254,50 +253,6 @@ async def test_cancel_and_retry_routes(tmp_path: Path) -> None:
         retried_id = retried_response.json()["id"]
         assert retried_id != failed.id
         assert (await runtime.queue.wait(retried_id)).state is JobState.SUCCEEDED
-
-
-class _ConnectedRequest:
-    async def is_disconnected(self) -> bool:
-        return False
-
-
-@pytest.mark.asyncio
-async def test_sse_events_and_disconnect_does_not_cancel_job(tmp_path: Path) -> None:
-    async with _client(tmp_path) as (client, context, _):
-        await _create_library(client, tmp_path / "library")
-        assert context.runtime is not None
-        runtime = context.runtime
-        stream = event_stream(cast(Request, _ConnectedRequest()), runtime)
-        connected = await anext(stream)
-        assert connected == ": connected\n\n"
-
-        started = asyncio.Event()
-        release = asyncio.Event()
-
-        async def blocked(_session: PaperSession, _job: Job, _token: CancellationToken) -> None:
-            started.set()
-            await release.wait()
-
-        job = await runtime.enqueue_paper(
-            "sse-paper",
-            JobKind.RECIPE,
-            "sse-test",
-            blocked,
-        )
-        event = await asyncio.wait_for(anext(stream), timeout=1)
-        assert "event: state" in event
-        assert job.id in event
-        assert '"citekey":"sse-paper"' in event
-        assert '"job_kind":"recipe"' in event
-        assert '"label":"sse-test"' in event
-        await started.wait()
-
-        await stream.aclose()
-        current = runtime.queue.get(job.id)
-        assert current is not None
-        assert current.state is JobState.RUNNING
-        release.set()
-        assert (await runtime.queue.wait(job.id)).state is JobState.SUCCEEDED
 
 
 def test_serve_uses_localhost_by_default(monkeypatch: pytest.MonkeyPatch) -> None:

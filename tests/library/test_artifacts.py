@@ -181,7 +181,7 @@ def test_bundle_rejects_symlinked_figure(library_root: Path, tmp_path: Path) -> 
         library.install_conversion_bundle("Smith2024", stage)
 
 
-def test_bundle_install_exception_rolls_back_previous_bundle(
+def test_bundle_install_failure_preserves_previous_bundle(
     library_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     library = _paper_library(library_root)
@@ -189,17 +189,21 @@ def test_bundle_install_exception_rolls_back_previous_bundle(
     (paper / "transcription.md").write_text("old", encoding="utf-8")
     (paper / "figures").mkdir()
     (paper / "figures" / "old.png").write_bytes(b"old")
+    (paper / "pages").mkdir()
+    (paper / "pages" / "page1.png").write_bytes(b"old page")
     stage = library.stage_dir()
     (stage / "transcription.md").write_text("new", encoding="utf-8")
     (stage / "figures").mkdir()
     (stage / "figures" / "new.png").write_bytes(b"new")
+    (stage / "pages").mkdir()
+    (stage / "pages" / "page1.png").write_bytes(b"new page")
+    before = {
+        path.relative_to(paper): path.read_bytes() for path in paper.rglob("*") if path.is_file()
+    }
     real_replace = os.replace
-    calls = 0
 
     def fail_during_install(source: Path, destination: Path) -> None:
-        nonlocal calls
-        calls += 1
-        if calls == 3:
+        if Path(source) == stage / "figures" and Path(destination) == paper / "figures":
             raise OSError("interrupted bundle install")
         real_replace(source, destination)
 
@@ -207,8 +211,10 @@ def test_bundle_install_exception_rolls_back_previous_bundle(
     with pytest.raises(OSError, match="interrupted bundle"):
         library.install_conversion_bundle("Smith2024", stage)
 
-    assert (paper / "transcription.md").read_text(encoding="utf-8") == "old"
-    assert (paper / "figures" / "old.png").read_bytes() == b"old"
+    after = {
+        path.relative_to(paper): path.read_bytes() for path in paper.rglob("*") if path.is_file()
+    }
+    assert after == before
 
 
 def test_clean_stale_staging_only_removes_old_temp_directories(
