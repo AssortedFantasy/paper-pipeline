@@ -131,3 +131,10 @@ work package. Do not let parallel tracks independently drift the same contract.
   unmarked tests. Use `tests/fakes.py`.
 - Never leave a test or script holding a spawned child process; tests must
   clean up processes and temp dirs even on failure.
+
+## Tests
+
+- Be intentional about testing.
+- Do NOT write tests that amount to checking if the implementation does exactly what it literally does.
+- Consider the intentionality of the design and how it should behave in the face of future changes.
+- Be mindful of test performance.
