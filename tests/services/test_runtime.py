@@ -1,4 +1,3 @@
-import asyncio
 import os
 from pathlib import Path
 
@@ -6,7 +5,7 @@ import pytest
 
 from paper_pipeline.jobs.model import Job, JobKind, JobState
 from paper_pipeline.jobs.queue import CancellationToken
-from paper_pipeline.jobs.recovery import TerminalOutcome, validate_artifacts
+from paper_pipeline.jobs.recovery import CompletionResult, TerminalOutcome
 from paper_pipeline.library.model import PaperMetadata, PaperRecord
 from paper_pipeline.library.paths import FORMAT_VERSION
 from paper_pipeline.services.runtime import (
@@ -17,10 +16,19 @@ from paper_pipeline.services.runtime import (
 )
 
 
-def record(citekey: str = "Smith2024") -> PaperRecord:
+def record(
+    citekey: str = "Smith2024",
+    *,
+    title: str = "Original",
+) -> PaperRecord:
     return PaperRecord(
         format_version=FORMAT_VERSION,
-        metadata=PaperMetadata(citekey=citekey, title="Original", authors=["Ada"]),
+        metadata=PaperMetadata(
+            citekey=citekey,
+            title=title,
+            authors=["Ada"],
+            abstract="Keep this abstract",
+        ),
     )
 
 
@@ -50,8 +58,16 @@ async def read(runtime: LibraryRuntime, citekey: str) -> PaperRecord:
         "read",
         read_worker,
     )
-    await runtime.queue.wait(job.id)
+    assert (await runtime.queue.wait(job.id)).state is JobState.SUCCEEDED
     return records[0]
+
+
+def catalog_record(runtime: LibraryRuntime, citekey: str) -> PaperRecord:
+    return next(
+        paper.record
+        for paper in runtime.catalog.snapshot().papers
+        if paper.record.metadata.citekey == citekey
+    )
 
 
 def test_equivalent_paths_reuse_one_runtime(
@@ -62,140 +78,102 @@ def test_equivalent_paths_reuse_one_runtime(
     created = registry.create(root, name="Test")
 
     monkeypatch.chdir(tmp_path)
-    relative = registry.open(Path("Library") / ".")
-    resolved = registry.open(root.resolve())
-
-    assert relative is created
-    assert resolved is created
+    assert registry.open(Path("Library") / ".") is created
+    assert registry.open(root.resolve()) is created
     if os.name == "nt":
-        case_variant = registry.open(Path(str(root).upper()))
-        assert case_variant is created
+        assert registry.open(Path(str(root).upper())) is created
 
 
-def test_provider_instances_are_per_runtime_but_reused_on_reopen(tmp_path: Path) -> None:
+async def test_providers_and_library_state_are_isolated_per_runtime(
+    tmp_path: Path,
+) -> None:
     registry = RuntimeRegistry(provider_factories={"llm": object})
     first = registry.create(tmp_path / "one")
     second = registry.create(tmp_path / "two")
+    first_provider = first.provider("llm")
 
-    assert first.provider("llm") is first.provider("llm")
-    assert first.provider("llm") is not second.provider("llm")
-    assert registry.open(tmp_path / "one") is first
+    await seed(first, record(title="First library"))
+    await seed(second, record(title="Second library"))
 
-
-async def test_different_libraries_do_not_share_paper_lanes(tmp_path: Path) -> None:
-    registry = RuntimeRegistry()
-    first = registry.create(tmp_path / "one")
-    second = registry.create(tmp_path / "two")
-    await seed(first, record())
-    await seed(second, record())
-    both_started = asyncio.Event()
-    release = asyncio.Event()
-    running = 0
-
-    async def worker(session: PaperSession, job: Job, token: CancellationToken) -> None:
-        nonlocal running
-        del session, job, token
-        running += 1
-        if running == 2:
-            both_started.set()
-        await release.wait()
-        running -= 1
-
-    await first.enqueue_paper("Smith2024", JobKind.RECIPE, "summary", worker)
-    await second.enqueue_paper("Smith2024", JobKind.RECIPE, "summary", worker)
-
-    await asyncio.wait_for(both_started.wait(), timeout=1)
-    release.set()
-    await registry.queue.join()
+    assert first.provider("llm") is first_provider
+    assert registry.open(tmp_path / "one").provider("llm") is first_provider
+    assert second.provider("llm") is not first_provider
+    assert (await read(first, "Smith2024")).metadata.title == "First library"
+    assert (await read(second, "Smith2024")).metadata.title == "Second library"
+    assert catalog_record(first, "Smith2024").metadata.title == "First library"
+    assert catalog_record(second, "Smith2024").metadata.title == "Second library"
 
 
-async def test_paper_session_expires_when_lane_worker_returns(tmp_path: Path) -> None:
+async def test_paper_session_write_updates_catalog_without_losing_fields(
+    tmp_path: Path,
+) -> None:
     runtime = RuntimeRegistry().create(tmp_path / "library")
     await seed(runtime, record())
     captured: list[PaperSession] = []
 
-    async def capture(session: PaperSession, job: Job, token: CancellationToken) -> None:
+    async def update(session: PaperSession, job: Job, token: CancellationToken) -> None:
         del job, token
         captured.append(session)
-        assert session.read_record().metadata.title == "Original"
-        assert not hasattr(session, "call")
-        with pytest.raises(ValueError, match="inside this paper"):
-            session.root_path("papers/Other2024/paper.json")
+        with pytest.raises(ValueError):
+            session.read_paper("Other2024")
 
-    job = await runtime.enqueue_paper("Smith2024", JobKind.IMPORT, "refresh", capture)
-    await runtime.queue.wait(job.id)
+        current = session.read_record()
+        current.metadata.title = "Updated"
+        session.write_record(current)
 
-    with pytest.raises(RuntimeError, match="no longer inside"):
+    job = await runtime.enqueue_paper("Smith2024", JobKind.IMPORT, "update", update)
+    assert (await runtime.queue.wait(job.id)).state is JobState.SUCCEEDED
+
+    durable = await read(runtime, "Smith2024")
+    projected = catalog_record(runtime, "Smith2024")
+    assert projected == durable
+    assert durable.metadata.title == "Updated"
+    assert durable.metadata.authors == ["Ada"]
+    assert durable.metadata.abstract == "Keep this abstract"
+    with pytest.raises(RuntimeError):
         captured[0].read_record()
 
 
-async def test_cross_category_read_modify_write_preserves_every_field(
+async def test_library_read_session_can_inspect_but_not_mutate(
     tmp_path: Path,
 ) -> None:
-    runtime = RuntimeRegistry(llm_concurrency=2).create(tmp_path / "library")
-    await seed(runtime, record())
-
-    async def update_title(session: PaperSession, job: Job, token: CancellationToken) -> None:
-        del job, token
-        current = session.read_record()
-        await asyncio.sleep(0)
-        current.metadata.title = "Updated title"
-        session.write_record(current)
-
-    async def update_abstract(session: PaperSession, job: Job, token: CancellationToken) -> None:
-        del job, token
-        current = session.read_record()
-        await asyncio.sleep(0)
-        current.metadata.abstract = "Preserved abstract"
-        session.write_record(current)
-
-    conversion = await runtime.enqueue_paper(
-        "Smith2024", JobKind.CONVERSION, "convert-metadata", update_title
-    )
-    imported = await runtime.enqueue_paper("Smith2024", JobKind.IMPORT, "refresh", update_abstract)
-    await runtime.queue.wait(conversion.id)
-    await runtime.queue.wait(imported.id)
-
-    final = await read(runtime, "Smith2024")
-    assert final.metadata.title == "Updated title"
-    assert final.metadata.abstract == "Preserved abstract"
-    assert final.metadata.authors == ["Ada"]
-
-
-async def test_library_read_session_has_no_storage_mutation_capability(tmp_path: Path) -> None:
     runtime = RuntimeRegistry().create(tmp_path / "library")
+    await seed(runtime, record())
 
     async def read_worker(session: LibrarySession, job: Job, token: CancellationToken) -> None:
         del job, token
-        assert session.inspect(lambda view: view.root) == runtime.root
-        with pytest.raises(RuntimeError, match="cannot stage"):
+        assert session.read_paper("Smith2024").metadata.title == "Original"
+        with pytest.raises(RuntimeError):
             session.stage_dir()
-        with pytest.raises(RuntimeError, match="cannot mutate"):
+        with pytest.raises(RuntimeError):
             session.mutate(lambda library: library.stage_dir())
 
-    job = await runtime.enqueue_library_read(JobKind.MAINTENANCE, "read", read_worker)
+    job = await runtime.enqueue_library_read(JobKind.MAINTENANCE, "read-only", read_worker)
 
     assert (await runtime.queue.wait(job.id)).state is JobState.SUCCEEDED
 
 
-async def test_runtime_wires_recovery_callbacks_inside_paper_lane(tmp_path: Path) -> None:
+async def test_recovery_callbacks_receive_scoped_paper_sessions(
+    tmp_path: Path,
+) -> None:
     runtime = RuntimeRegistry().create(tmp_path / "library")
     await seed(runtime, record())
-    artifact_relative = "papers/Smith2024/test.md"
-    outcomes: list[TerminalOutcome] = []
+    validation_sessions: list[PaperSession] = []
+    terminal_sessions: list[PaperSession] = []
+    terminal_attempts: set[str] = set()
 
     async def worker(session: PaperSession, job: Job, token: CancellationToken) -> None:
         del job, token
-        stage = session.stage_dir()
-        staged = stage / "test.md"
-        staged.write_text("generated", encoding="utf-8")
-        session.install_artifact(staged, artifact_relative)
+        assert session.read_record().metadata.title == "Original"
 
-    def validate(session: PaperSession):  # type: ignore[no-untyped-def]
-        return validate_artifacts({artifact_relative: session.root_path(artifact_relative)})
+    def validate(session: PaperSession) -> CompletionResult:
+        validation_sessions.append(session)
+        assert session.read_record().metadata.title == "Original"
+        return CompletionResult()
 
     def record_terminal(session: PaperSession, outcome: TerminalOutcome) -> None:
-        outcomes.append(outcome)
+        terminal_sessions.append(session)
+        terminal_attempts.add(outcome.attempt_id)
 
         def update(paper: PaperRecord) -> None:
             paper.metadata.keywords.append(outcome.attempt_id)
@@ -213,6 +191,11 @@ async def test_runtime_wires_recovery_callbacks_inside_paper_lane(tmp_path: Path
     result = await runtime.queue.wait(job.id)
 
     assert result.state is JobState.SUCCEEDED
-    assert outcomes[0].artifact_hashes.keys() == {artifact_relative}
-    assert (runtime.root / ".pp" / "attempts" / f"{job.id}.json").exists() is False
-    assert (await read(runtime, "Smith2024")).metadata.keywords == [job.id]
+    assert validation_sessions
+    assert terminal_sessions
+    assert terminal_attempts == {job.id}
+    assert job.id in (await read(runtime, "Smith2024")).metadata.keywords
+    assert job.id in catalog_record(runtime, "Smith2024").metadata.keywords
+    for session in [*validation_sessions, *terminal_sessions]:
+        with pytest.raises(RuntimeError):
+            session.read_record()

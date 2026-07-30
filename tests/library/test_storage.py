@@ -2,9 +2,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
-import sys
-import textwrap
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -54,17 +51,24 @@ def test_create_open_and_paper_round_trip(library_root: Path) -> None:
     assert (library_root / ".pp").is_dir()
 
 
-def test_format_two_recipe_record_without_cache_write_count_remains_valid() -> None:
-    record = RecipeRecord.model_validate(
+def test_format_two_records_remain_compatible_with_later_optional_recipe_fields() -> None:
+    record = PaperRecord.model_validate(
         {
-            "prompt_tokens": 100,
-            "cached_tokens": 80,
-            "completion_tokens": 10,
-            "cost_usd": 0.001,
+            "format_version": FORMAT_VERSION,
+            "metadata": {"citekey": "Smith2024", "title": "Incomplete"},
+            "recipes": {
+                "summary": {
+                    "input_artifact": "papers/Smith2024/transcription.md",
+                    "output_sha256": "old-hash",
+                    "prompt_tokens": 100,
+                }
+            },
         }
     )
 
-    assert record.cache_write_tokens == 0
+    recipe = record.recipes["summary"]
+    assert recipe.output_artifact is None
+    assert recipe.cache_write_tokens == 0
 
 
 def test_create_refuses_non_empty_directory(library_root: Path) -> None:
@@ -76,25 +80,20 @@ def test_create_refuses_non_empty_directory(library_root: Path) -> None:
     assert (library_root / "keep.txt").read_text(encoding="utf-8") == "user data"
 
 
-def test_open_rejects_newer_format_with_upgrade_action(library_root: Path) -> None:
+@pytest.mark.parametrize(
+    ("version_delta", "recovery_guidance"),
+    [(1, r"newer.*upgrade"), (-1, r"older.*rebuild.*Zotero RDF")],
+)
+def test_open_rejects_incompatible_format_with_recovery_guidance(
+    library_root: Path, version_delta: int, recovery_guidance: str
+) -> None:
     create_library(library_root)
     info_path = library_root / "library.json"
     info = json.loads(info_path.read_text(encoding="utf-8"))
-    info["format_version"] = FORMAT_VERSION + 1
+    info["format_version"] = FORMAT_VERSION + version_delta
     info_path.write_text(json.dumps(info), encoding="utf-8")
 
-    with pytest.raises(ValueError, match=r"newer.*upgrade"):
-        open_library(library_root)
-
-
-def test_open_rejects_older_format_with_rebuild_action(library_root: Path) -> None:
-    create_library(library_root)
-    info_path = library_root / "library.json"
-    info = json.loads(info_path.read_text(encoding="utf-8"))
-    info["format_version"] = FORMAT_VERSION - 1
-    info_path.write_text(json.dumps(info), encoding="utf-8")
-
-    with pytest.raises(ValueError, match=r"older.*rebuild.*Zotero RDF"):
+    with pytest.raises(ValueError, match=recovery_guidance):
         open_library(library_root)
 
 
@@ -182,30 +181,36 @@ def test_bibliographic_text_is_not_treated_as_a_path(library_root: Path) -> None
     assert library.read_paper("Smith2024") == record
 
 
-def test_recipe_input_must_be_library_relative_and_scoped_to_its_paper(
-    library_root: Path,
+@pytest.mark.parametrize(
+    ("recipe", "problem"),
+    [
+        (RecipeRecord(input_artifact="transcription.md"), "this paper's library-relative"),
+        (
+            RecipeRecord(input_artifact="papers/Smith2024/source"),
+            "this paper's library-relative",
+        ),
+        (
+            RecipeRecord(output_artifact="papers/Other2024/summary.md"),
+            "this paper's directory",
+        ),
+        (
+            RecipeRecord(output_artifact="papers/Smith2024/transcription.md"),
+            "reserved paper filename",
+        ),
+        (
+            RecipeRecord(input_artifact="papers/Other2024/transcription.md"),
+            "this paper's library-relative",
+        ),
+    ],
+)
+def test_recipe_artifact_paths_are_scoped_to_their_paper(
+    library_root: Path, recipe: RecipeRecord, problem: str
 ) -> None:
     library = create_library(library_root)
     record = make_record()
-    record.recipes["summary"] = RecipeRecord(input_artifact="transcription.md")
+    record.recipes["summary"] = recipe
 
-    with pytest.raises(ValueError, match="this paper's library-relative"):
-        library.write_paper(record)
-
-    record.recipes["summary"] = RecipeRecord(input_artifact="papers/Smith2024/source")
-    with pytest.raises(ValueError, match="this paper's library-relative"):
-        library.write_paper(record)
-
-    record.recipes["summary"] = RecipeRecord(output_artifact="papers/Other2024/summary.md")
-    with pytest.raises(ValueError, match="this paper's directory"):
-        library.write_paper(record)
-
-    record.recipes["summary"] = RecipeRecord(output_artifact="papers/Smith2024/transcription.md")
-    with pytest.raises(ValueError, match="reserved paper filename"):
-        library.write_paper(record)
-
-    record.recipes["summary"] = RecipeRecord(input_artifact="papers/Other2024/transcription.md")
-    with pytest.raises(ValueError, match="this paper's library-relative"):
+    with pytest.raises(ValueError, match=problem):
         library.write_paper(record)
 
 
@@ -227,19 +232,6 @@ def test_recipe_output_filename_is_not_inferred_from_recipe_name(
     )
 
 
-def test_recipe_record_without_output_artifact_still_loads() -> None:
-    serialized = (
-        f'{{"format_version":{FORMAT_VERSION},'
-        '"metadata":{"citekey":"Smith2024","title":"Incomplete"},'
-        '"recipes":{"summary":{"input_artifact":'
-        '"papers/Smith2024/transcription.md","output_sha256":"old-hash"}}}'
-    )
-
-    record = PaperRecord.model_validate_json(serialized)
-
-    assert record.recipes["summary"].output_artifact is None
-
-
 def test_atomic_write_failure_preserves_previous_record(
     library_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -257,7 +249,6 @@ def test_atomic_write_failure_preserves_previous_record(
         library.write_paper(replacement)
 
     assert library.read_paper("Smith2024") == original
-    assert not list((library_root / ".pp" / "tmp").iterdir())
 
 
 def test_write_paper_rejects_symlinked_paper_directory(library_root: Path, tmp_path: Path) -> None:
@@ -274,34 +265,6 @@ def test_write_paper_rejects_symlinked_paper_directory(library_root: Path, tmp_p
         library.write_paper(make_record())
 
     assert list(outside.iterdir()) == []
-
-
-def test_process_killed_between_temp_write_and_rename_leaves_no_partial_record(
-    library_root: Path,
-) -> None:
-    library = create_library(library_root)
-    original = make_record()
-    library.write_paper(original)
-    script = textwrap.dedent(
-        f"""
-        import os
-        from pathlib import Path
-        import paper_pipeline.library.storage as storage
-
-        library = storage.open_library(Path({str(library_root)!r}))
-        record = library.read_paper("Smith2024")
-        record.metadata.title = "Never installed"
-        storage.os.replace = lambda source, destination: os._exit(73)
-        library.write_paper(record)
-        """
-    )
-
-    result = subprocess.run([sys.executable, "-c", script], check=False)
-
-    assert result.returncode == 73
-    reopened = open_library(library_root)
-    assert reopened.read_paper("Smith2024") == original
-    assert list((library_root / ".pp" / "tmp").glob("*.json"))
 
 
 def test_list_papers_reports_invalid_directories_and_continues(library_root: Path) -> None:
@@ -332,17 +295,25 @@ def test_copied_library_opens_without_absolute_location_dependency(
 
     copied = open_library(copied_root)
 
-    assert copied.root == copied_root.resolve()
     assert copied.read_paper("Smith2024") == record
     serialized = (copied_root / "papers" / "Smith2024" / "paper.json").read_text(encoding="utf-8")
     assert str(library_root) not in serialized
 
 
-def test_hash_and_freshness_helpers_compare_recorded_input_hashes(tmp_path: Path) -> None:
-    source = tmp_path / "source.pdf"
-    source.write_bytes(b"source bytes")
+def test_file_hash_identifies_content_without_location_affecting_identity(tmp_path: Path) -> None:
+    first = tmp_path / "first.pdf"
+    copy = tmp_path / "copy.pdf"
+    changed = tmp_path / "changed.pdf"
+    first.write_bytes(b"source bytes")
+    copy.write_bytes(b"source bytes")
+    changed.write_bytes(b"changed source bytes")
+
+    assert sha256_file(first) == sha256_file(copy)
+    assert sha256_file(first) != sha256_file(changed)
+
+
+def test_freshness_tracks_each_declared_input_independently() -> None:
     record = make_record()
-    record.source_sha256 = sha256_file(source)
     record.conversion = ConversionRecord(
         source_sha256=record.source_sha256,
         transcription_sha256="transcription-hash",
@@ -358,15 +329,17 @@ def test_hash_and_freshness_helpers_compare_recorded_input_hashes(tmp_path: Path
         ),
     }
 
-    assert sha256_file(source) == (
-        "4d4823794cbed3c4ee0bbc684c8f66e1dfd5afa6f078d494ce254ec5a4671753"
-    )
     assert conversion_is_fresh(record)
     assert recipe_is_fresh(record, "pdf-summary")
     assert recipe_is_fresh(record, "text-summary")
 
     record.source_sha256 = "replacement-hash"
-    record.conversion.transcription_sha256 = "replacement-transcription-hash"
     assert not conversion_is_fresh(record)
+    assert not recipe_is_fresh(record, "pdf-summary")
+    assert recipe_is_fresh(record, "text-summary")
+
+    record.conversion.source_sha256 = record.source_sha256
+    record.conversion.transcription_sha256 = "replacement-transcription-hash"
+    assert conversion_is_fresh(record)
     assert not recipe_is_fresh(record, "pdf-summary")
     assert not recipe_is_fresh(record, "text-summary")

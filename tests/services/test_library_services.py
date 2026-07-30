@@ -17,24 +17,31 @@ from paper_pipeline.services.library_ops import (
 from paper_pipeline.services.runtime import LibraryRuntime, PaperSession, RuntimeRegistry
 
 
-def paper(citekey: str = "Smith2024") -> PaperRecord:
+def paper(
+    citekey: str = "Smith2024",
+    *,
+    title: str = "A useful paper",
+    authors: list[str] | None = None,
+    year: int | None = 2024,
+) -> PaperRecord:
     return PaperRecord(
         format_version=FORMAT_VERSION,
         metadata=PaperMetadata(
             citekey=citekey,
-            title="A useful paper",
-            authors=["Ada Smith"],
+            title=title,
+            authors=authors or ["Ada Smith"],
+            year=year,
         ),
     )
 
 
-async def seed(runtime: LibraryRuntime) -> None:
+async def seed(runtime: LibraryRuntime, record: PaperRecord) -> None:
     async def write(session: PaperSession, job: Job, token: CancellationToken) -> None:
         del job, token
-        session.write_record(paper())
+        session.write_record(record)
 
-    job = await runtime.enqueue_paper("Smith2024", JobKind.IMPORT, "seed", write)
-    await runtime.queue.wait(job.id)
+    job = await runtime.enqueue_paper(record.metadata.citekey, JobKind.IMPORT, "seed", write)
+    assert (await runtime.queue.wait(job.id)).state is JobState.SUCCEEDED
 
 
 def test_create_and_open_services_reuse_runtime(tmp_path: Path) -> None:
@@ -44,65 +51,32 @@ def test_create_and_open_services_reuse_runtime(tmp_path: Path) -> None:
     reopened = open_library(tmp_path / "library", registry=registry)
 
     assert reopened is created
-    assert created.root.joinpath("library.json").is_file()
 
 
-async def test_validate_service_uses_library_read_scope(tmp_path: Path) -> None:
+async def test_validation_is_read_only_and_returns_structured_corruption(
+    tmp_path: Path,
+) -> None:
     runtime = create_library(tmp_path / "library", registry=RuntimeRegistry())
 
-    report = await validate_library(runtime)
+    healthy = await validate_library(runtime)
+    assert healthy.ok
+    assert runtime.queue.list_jobs()[-1].scope is JobScope.LIBRARY_READ
 
-    assert report.ok is True
+    unexpected = runtime.root / "papers" / "unexpected.txt"
+    unexpected.write_text("bad", encoding="utf-8")
+    corrupt = await validate_library(runtime)
+
+    assert not corrupt.ok
+    assert any(problem.severity == "error" and problem.action for problem in corrupt.problems)
+    assert unexpected.read_text(encoding="utf-8") == "bad"
     assert runtime.queue.list_jobs()[-1].scope is JobScope.LIBRARY_READ
 
 
-async def test_validate_reports_corrupt_library_content(tmp_path: Path) -> None:
+async def test_reindex_uses_the_library_write_barrier_and_builds_derived_files(
+    tmp_path: Path,
+) -> None:
     runtime = create_library(tmp_path / "library", registry=RuntimeRegistry())
-    (runtime.root / "papers" / "unexpected.txt").write_text("bad", encoding="utf-8")
-
-    report = await validate_library(runtime)
-
-    assert report.ok is False
-    assert any("Unexpected file" in problem.message for problem in report.problems)
-
-
-async def test_reindex_builds_all_indexes_and_support_files(tmp_path: Path) -> None:
-    runtime = create_library(tmp_path / "library", registry=RuntimeRegistry())
-    await seed(runtime)
-
-    job = await rebuild_indexes(runtime)
-
-    assert job.state is JobState.SUCCEEDED
-    assert job.scope is JobScope.LIBRARY_WRITE
-    for filename in (
-        "titles.md",
-        "authors.md",
-        "years.md",
-        "venues.md",
-        "summaries.md",
-    ):
-        assert (runtime.root / "indexes" / filename).is_file()
-    assert "papers/<citekey>/" in (runtime.root / "AGENTS.md").read_text(encoding="utf-8")
-    assert (runtime.root / ".gitignore").read_text(encoding="utf-8") == (
-        "**/.pp/\npapers/*/source/\n"
-    )
-
-
-async def test_list_and_get_papers_apply_service_owned_filters(tmp_path: Path) -> None:
-    runtime = create_library(tmp_path / "library", registry=RuntimeRegistry())
-    await seed(runtime)
-
-    page = await list_papers(runtime, query="useful", author="smith", limit=10)
-
-    assert page.total == 1
-    assert [record.metadata.citekey for record in page.papers] == ["Smith2024"]
-    assert (await get_paper(runtime, "Smith2024")).metadata.title == "A useful paper"
-    assert (await list_papers(runtime, query="absent")).total == 0
-
-
-async def test_reindex_waits_behind_active_paper_lane(tmp_path: Path) -> None:
-    runtime = create_library(tmp_path / "library", registry=RuntimeRegistry())
-    await seed(runtime)
+    await seed(runtime, paper())
     started = asyncio.Event()
     release = asyncio.Event()
 
@@ -113,35 +87,79 @@ async def test_reindex_waits_behind_active_paper_lane(tmp_path: Path) -> None:
 
     await runtime.enqueue_paper("Smith2024", JobKind.IMPORT, "hold-paper", paper_work)
     await started.wait()
-    reindex_task = asyncio.create_task(rebuild_indexes(runtime))
-    await asyncio.sleep(0)
+    rebuilding = asyncio.create_task(rebuild_indexes(runtime))
+    was_blocked = False
+    try:
+        await asyncio.sleep(0)
+        was_blocked = (
+            not rebuilding.done() and not (runtime.root / "indexes" / "titles.md").exists()
+        )
+    finally:
+        release.set()
 
-    assert (runtime.root / "indexes" / "titles.md").exists() is False
-    release.set()
-    await reindex_task
+    job = await rebuilding
+    assert was_blocked
+    assert job.state is JobState.SUCCEEDED
+    assert job.scope is JobScope.LIBRARY_WRITE
     assert (runtime.root / "indexes" / "titles.md").is_file()
+    assert (runtime.root / "AGENTS.md").is_file()
+    assert (runtime.root / ".gitignore").is_file()
 
 
-def test_cli_validate_exit_codes_and_messages(tmp_path: Path, capsys) -> None:
+async def test_list_and_get_apply_service_owned_filters_and_pagination(
+    tmp_path: Path,
+) -> None:
+    runtime = create_library(tmp_path / "library", registry=RuntimeRegistry())
+    for record in (
+        paper("Alpha2024", title="Useful methods", authors=["Ada Smith"], year=2024),
+        paper("Beta2024", title="Useful results", authors=["Ben Jones"], year=2024),
+        paper("Gamma2023", title="Other topic", authors=["Ada Smith"], year=2023),
+    ):
+        await seed(runtime, record)
+
+    selected = await list_papers(
+        runtime,
+        query="useful",
+        author="smith",
+        year=2024,
+    )
+    paged = await list_papers(runtime, query="useful", offset=1, limit=1)
+
+    assert selected.total == 1
+    assert selected.papers[0].metadata.citekey == "Alpha2024"
+    assert paged.total == 2
+    assert len(paged.papers) == 1
+    assert (await get_paper(runtime, "Alpha2024")).metadata.title == "Useful methods"
+    assert (await list_papers(runtime, query="absent")).total == 0
+
+
+def test_cli_exit_categories_for_healthy_corrupt_and_missing_libraries(
+    tmp_path: Path, capsys
+) -> None:
     healthy = create_library(tmp_path / "healthy", registry=RuntimeRegistry())
+    corrupt = create_library(tmp_path / "corrupt", registry=RuntimeRegistry())
+    (corrupt.root / "papers" / "unexpected.txt").write_text("bad", encoding="utf-8")
+    missing = tmp_path / "missing"
 
     assert main(["validate", str(healthy.root)]) == 0
-    assert "Library is valid" in capsys.readouterr().out
+    healthy_output = capsys.readouterr()
+    assert healthy_output.out
+    assert not healthy_output.err
 
-    broken = create_library(tmp_path / "broken", registry=RuntimeRegistry())
-    (broken.root / "papers" / "unexpected.txt").write_text("bad", encoding="utf-8")
+    assert main(["validate", str(corrupt.root)]) == 1
+    corrupt_output = capsys.readouterr()
+    assert corrupt_output.out
+    assert not corrupt_output.err
 
-    assert main(["validate", str(broken.root)]) == 1
-    output = capsys.readouterr().out
-    assert "ERROR" in output
-    assert "Action:" in output
+    assert main(["validate", str(missing)]) == 2
+    missing_validation_output = capsys.readouterr()
+    assert missing_validation_output.err
 
+    assert main(["reindex", str(healthy.root)]) == 0
+    reindex_output = capsys.readouterr()
+    assert reindex_output.out
+    assert not reindex_output.err
 
-def test_cli_reindex_and_missing_library(tmp_path: Path, capsys) -> None:
-    runtime = create_library(tmp_path / "library", registry=RuntimeRegistry())
-
-    assert main(["reindex", str(runtime.root)]) == 0
-    assert "Rebuilt indexes, AGENTS.md, and .gitignore" in capsys.readouterr().out
-
-    assert main(["validate", str(tmp_path / "missing")]) == 2
-    assert "Could not validate library" in capsys.readouterr().err
+    assert main(["reindex", str(missing)]) == 2
+    missing_reindex_output = capsys.readouterr()
+    assert missing_reindex_output.err

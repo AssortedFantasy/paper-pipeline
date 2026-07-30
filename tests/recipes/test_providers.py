@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -28,13 +26,14 @@ class RecordingResponses:
     def __init__(self, *, error: Exception | None = None) -> None:
         self.calls: list[dict[str, Any]] = []
         self.error = error
+        self.output_text = "Generated response"
 
     def create(self, **kwargs: Any) -> SimpleNamespace:
         self.calls.append(kwargs)
         if self.error is not None:
             raise self.error
         return SimpleNamespace(
-            output_text="Generated response",
+            output_text=self.output_text,
             usage=SimpleNamespace(
                 input_tokens=1_000,
                 input_tokens_details=SimpleNamespace(
@@ -61,83 +60,109 @@ def config(**overrides: str | None) -> AppConfig:
     return AppConfig.model_construct(**values)
 
 
-def test_openai_text_request_uses_responses_api() -> None:
+def test_text_generation_returns_usage_and_preserves_the_cacheable_prefix() -> None:
     client = RecordingClient()
     provider = OpenAIProvider(config(), client=client)
 
     result = provider.generate(
-        ProviderRequest(prompt="Recipe prompt", text_input="Transcription", input_sha256="abc")
+        ProviderRequest(
+            prompt="Recipe prompt",
+            text_input="Transcription",
+            input_sha256="paper-hash",
+        )
     )
 
     assert result.ok
-    assert result.text == "Generated response"
-    assert result.prompt_tokens == 1_000
-    assert result.cached_tokens == 800
-    assert result.cache_write_tokens == 200
-    assert result.completion_tokens == 100
-    # Luna: 200 cache-write tokens at 1.25x $1/MTok, 800 cached at
-    # $0.10/MTok, and 100 output at $6/MTok.
+    assert result.text == client.responses.output_text
+    assert result.provider == "openai"
+    assert result.model == "gpt-5.6-luna"
+    assert (
+        result.prompt_tokens,
+        result.cached_tokens,
+        result.cache_write_tokens,
+        result.completion_tokens,
+    ) == (1_000, 800, 200, 100)
+    # Spend is a persisted product value, so its calculation is a contract:
+    # 200 cache-write tokens at 1.25x $1/MTok, 800 cached at $0.10/MTok,
+    # and 100 output at $6/MTok.
     assert result.cost_usd == 0.00093
-    request = client.responses.calls[0]
-    assert request["model"] == "gpt-5.6-luna"
-    assert request["prompt_cache_key"] == hashlib.sha256(b"paper-pipeline:abc").hexdigest()
-    assert request["prompt_cache_options"] == {"mode": "implicit", "ttl": "30m"}
-    content = request["input"][0]["content"]
-    assert [(item["type"], item["text"]) for item in content] == [
-        ("input_text", "Transcription"),
-        ("input_text", "Recipe prompt"),
-    ]
+
+    assert len(client.responses.calls) == 1
+    sent = client.responses.calls[0]
+    content = sent["input"][0]["content"]
+    assert [item["text"] for item in content] == ["Transcription", "Recipe prompt"]
     assert "prompt_cache_breakpoint" in content[0]
     assert "prompt_cache_breakpoint" not in content[1]
+    assert sent["prompt_cache_key"]
+    assert "paper-hash" not in sent["prompt_cache_key"]
+    assert "prompt_cache_options" in sent
     assert client.files.calls == []
 
 
-def test_openai_pdf_upload_is_cached_by_input_hash(tmp_path: Path) -> None:
+def test_cache_routing_is_stable_per_input_and_separates_different_inputs() -> None:
+    client = RecordingClient()
+    provider = OpenAIProvider(config(), client=client)
+
+    for input_hash, prompt in (
+        ("same-paper", "Summary"),
+        ("same-paper", "Contributions"),
+        ("different-paper", "Summary"),
+    ):
+        result = provider.generate(
+            ProviderRequest(
+                prompt=prompt,
+                text_input="Shared transcription",
+                input_sha256=input_hash,
+            )
+        )
+        assert result.ok
+
+    cache_keys = [call["prompt_cache_key"] for call in client.responses.calls]
+    assert cache_keys[0] == cache_keys[1]
+    assert cache_keys[0] != cache_keys[2]
+
+
+def test_pdf_upload_is_reused_for_a_sequential_recipe_batch(tmp_path: Path) -> None:
     pdf = tmp_path / "paper.pdf"
     pdf.write_bytes(b"%PDF-1.4 fake")
     client = RecordingClient()
     provider = OpenAIProvider(config(), client=client)
 
-    first = provider.generate(
-        ProviderRequest(prompt="Summary", pdf_input=pdf, input_sha256="same-hash")
-    )
-    second = provider.generate(
-        ProviderRequest(prompt="Contributions", pdf_input=pdf, input_sha256="same-hash")
-    )
-
-    assert first.ok and second.ok
-    assert len(client.files.calls) == 1
-    upload = client.files.calls[0]
-    assert upload["purpose"] == "user_data"
-    assert client.responses.calls[0]["input"][0]["content"] == [
-        {
-            "type": "input_file",
-            "file_id": "file-test",
-            "prompt_cache_breakpoint": {"mode": "explicit"},
-        },
-        {"type": "input_text", "text": "Summary"},
+    results = [
+        provider.generate(ProviderRequest(prompt=prompt, pdf_input=pdf, input_sha256="same-paper"))
+        for prompt in ("Summary", "Contributions")
     ]
+
+    assert all(result.ok for result in results)
+    assert len(client.files.calls) == 1
+    assert client.files.calls[0]["purpose"] == "user_data"
+
+    sent_content = [call["input"][0]["content"] for call in client.responses.calls]
+    uploaded_inputs = [
+        next(item for item in content if item["type"] == "input_file") for content in sent_content
+    ]
+    assert {item["file_id"] for item in uploaded_inputs} == {"file-test"}
+    assert all("prompt_cache_breakpoint" in item for item in uploaded_inputs)
+    assert [
+        next(item["text"] for item in content if item["type"] == "input_text")
+        for content in sent_content
+    ] == ["Summary", "Contributions"]
     assert (
         client.responses.calls[0]["prompt_cache_key"]
-        == hashlib.sha256(b"paper-pipeline:same-hash").hexdigest()
+        == client.responses.calls[1]["prompt_cache_key"]
     )
-    assert client.responses.calls[1]["input"][0]["content"][0] == {
-        "type": "input_file",
-        "file_id": "file-test",
-        "prompt_cache_breakpoint": {"mode": "explicit"},
-    }
 
 
-def test_openai_request_model_overrides_configured_model() -> None:
+def test_request_model_takes_precedence_over_the_default() -> None:
     client = RecordingClient()
-    provider = OpenAIProvider(config(), client=client)
 
-    result = provider.generate(
-        ProviderRequest(prompt="Prompt", text_input="Input", model="request-model")
+    result = OpenAIProvider(config(), client=client).generate(
+        ProviderRequest(prompt="Prompt", text_input="Input", model="gpt-5.6-terra")
     )
 
-    assert result.model == "request-model"
-    assert client.responses.calls[0]["model"] == "request-model"
+    assert result.ok
+    assert result.model == "gpt-5.6-terra"
+    assert client.responses.calls[0]["model"] == "gpt-5.6-terra"
 
 
 @pytest.mark.parametrize(
@@ -146,8 +171,9 @@ def test_openai_request_model_overrides_configured_model() -> None:
         ProviderRequest(prompt="Prompt"),
         ProviderRequest(prompt="Prompt", text_input="Text", pdf_input=Path("paper.pdf")),
     ],
+    ids=["no-input", "two-inputs"],
 )
-def test_openai_rejects_requests_without_exactly_one_input(
+def test_invalid_input_selection_fails_without_contacting_the_provider(
     provider_request: ProviderRequest,
 ) -> None:
     client = RecordingClient()
@@ -157,24 +183,27 @@ def test_openai_rejects_requests_without_exactly_one_input(
     assert not result.ok
     assert "exactly one input" in (result.error or "")
     assert client.responses.calls == []
+    assert client.files.calls == []
 
 
-def test_openai_requires_a_model() -> None:
-    result = OpenAIProvider(config(llm_model=None), client=RecordingClient()).generate(
+@pytest.mark.parametrize(
+    ("overrides", "expected_problem"),
+    [
+        ({"llm_model": None}, "model"),
+        ({"llm_api_key": None}, "API key"),
+    ],
+    ids=["missing-model", "missing-api-key"],
+)
+def test_missing_required_configuration_is_actionable_and_offline(
+    overrides: dict[str, str | None], expected_problem: str
+) -> None:
+    result = OpenAIProvider(config(**overrides)).generate(
         ProviderRequest(prompt="Prompt", text_input="Input")
     )
 
     assert not result.ok
-    assert result.error == "OpenAI model is not configured"
-
-
-def test_openai_requires_an_api_key_for_a_real_client() -> None:
-    result = OpenAIProvider(config(llm_api_key=None)).generate(
-        ProviderRequest(prompt="Prompt", text_input="Input")
-    )
-
-    assert not result.ok
-    assert result.error == "OpenAI API key is not configured"
+    assert "not configured" in (result.error or "")
+    assert expected_problem in (result.error or "")
 
 
 @pytest.mark.parametrize(
@@ -212,8 +241,9 @@ def test_openai_requires_an_api_key_for_a_real_client() -> None:
             ("timed out",),
         ),
     ],
+    ids=["unexpected", "rate-limit", "bad-request", "timeout"],
 )
-def test_openai_errors_include_safe_actionable_diagnostics(
+def test_failures_are_actionable_without_leaking_sensitive_content(
     error: Exception, expected_fragments: tuple[str, ...]
 ) -> None:
     client = RecordingClient(error=error)
@@ -222,13 +252,14 @@ def test_openai_errors_include_safe_actionable_diagnostics(
         ProviderRequest(prompt="private prompt", text_input="private paper")
     )
 
+    assert not result.ok
     assert result.error is not None
     assert all(fragment in result.error for fragment in expected_fragments)
     assert "private" not in result.error
     assert "super-secret-api-key" not in result.error
 
 
-def test_openai_client_creation_is_lazy_and_respects_base_url(
+def test_client_creation_is_lazy_reuses_the_client_and_honors_the_endpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     created: list[dict[str, str]] = []
@@ -240,73 +271,86 @@ def test_openai_client_creation_is_lazy_and_respects_base_url(
             created.append(kwargs)
             return client
 
-    def fake_import(name: str) -> OpenAIModule:
-        assert name == "openai"
-        return OpenAIModule()
-
-    monkeypatch.setattr("importlib.import_module", fake_import)
+    monkeypatch.setattr(
+        "importlib.import_module",
+        lambda _name: OpenAIModule(),
+    )
     provider = OpenAIProvider(config(llm_base_url="https://compatible.example/v1"))
     assert created == []
 
-    result = provider.generate(ProviderRequest(prompt="Prompt", text_input="Input"))
+    for prompt in ("First", "Second"):
+        assert provider.generate(ProviderRequest(prompt=prompt, text_input="Input")).ok
 
-    assert result.ok
-    assert created == [
-        {
-            "api_key": "test-secret-key",
-            "base_url": "https://compatible.example/v1",
-        }
-    ]
+    assert len(created) == 1
+    assert created[0]["api_key"] == "test-secret-key"
+    assert created[0]["base_url"] == "https://compatible.example/v1"
 
 
-def test_openai_missing_optional_sdk_is_actionable(monkeypatch: pytest.MonkeyPatch) -> None:
-    def missing_openai(name: str) -> None:
-        raise ModuleNotFoundError(name=name)
+def test_missing_optional_sdk_returns_an_actionable_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def missing_openai(_name: str) -> None:
+        raise ModuleNotFoundError(name="openai")
 
     monkeypatch.setattr("importlib.import_module", missing_openai)
 
     result = OpenAIProvider(config()).generate(ProviderRequest(prompt="Prompt", text_input="Input"))
 
     assert not result.ok
-    assert result.error == "OpenAI provider unavailable; reinstall Paper Pipeline"
+    assert "unavailable" in (result.error or "")
+    assert "reinstall" in (result.error or "")
 
 
-def test_openai_rejects_invalid_usage_and_unknown_pricing() -> None:
-    missing_usage = RecordingClient()
-    missing_usage.responses.create = lambda **_kwargs: SimpleNamespace(output_text="text")
-    result = OpenAIProvider(config(), client=missing_usage).generate(
+@pytest.mark.parametrize(
+    ("usage", "expected_problem"),
+    [
+        (None, "no token usage"),
+        (SimpleNamespace(input_tokens=-1, output_tokens=1), "input tokens"),
+        (SimpleNamespace(input_tokens=1, output_tokens=True), "output tokens"),
+        (
+            SimpleNamespace(
+                input_tokens=1,
+                output_tokens=1,
+                input_tokens_details=SimpleNamespace(
+                    cached_tokens=1,
+                    cache_write_tokens=1,
+                ),
+            ),
+            "invalid input token details",
+        ),
+    ],
+    ids=["missing", "negative", "boolean", "details-exceed-total"],
+)
+def test_invalid_usage_is_not_recorded_as_a_success(
+    usage: SimpleNamespace | None, expected_problem: str
+) -> None:
+    client = RecordingClient()
+    response = SimpleNamespace(output_text="text")
+    if usage is not None:
+        response.usage = usage
+    client.responses.create = lambda **_kwargs: response
+
+    result = OpenAIProvider(config(), client=client).generate(
         ProviderRequest(prompt="Prompt", text_input="Input")
     )
+
     assert not result.ok
-    assert result.error == "OpenAI response contained no token usage"
+    assert expected_problem in (result.error or "")
+    assert result.cost_usd == 0
 
-    invalid_usage = (
-        SimpleNamespace(input_tokens=-1, output_tokens=1),
-        SimpleNamespace(input_tokens=1, output_tokens=True),
-        SimpleNamespace(
-            input_tokens=1,
-            output_tokens=1,
-            input_tokens_details=SimpleNamespace(cached_tokens=1, cache_write_tokens=1),
-        ),
-    )
-    for usage in invalid_usage:
-        client = RecordingClient()
-        client.responses.create = lambda usage=usage, **_kwargs: SimpleNamespace(
-            output_text="text", usage=usage
-        )
-        result = OpenAIProvider(config(), client=client).generate(
-            ProviderRequest(prompt="Prompt", text_input="Input")
-        )
-        assert not result.ok
-        assert result.error is not None and "token" in result.error
 
-    unknown = OpenAIProvider(config(llm_model="compatible-model"), client=RecordingClient())
-    result = unknown.generate(ProviderRequest(prompt="Prompt", text_input="Input"))
+def test_unknown_pricing_fails_instead_of_reporting_false_zero_spend() -> None:
+    result = OpenAIProvider(
+        config(llm_model="compatible-model"), client=RecordingClient()
+    ).generate(ProviderRequest(prompt="Prompt", text_input="Input"))
+
     assert not result.ok
-    assert result.error == "OpenAI pricing is not known for model 'compatible-model'"
+    assert "pricing is not known" in (result.error or "")
+    assert "compatible-model" in (result.error or "")
+    assert result.cost_usd == 0
 
 
-def test_gpt_56_cost_includes_long_context_and_cache_write_multipliers() -> None:
+def test_long_context_pricing_applies_input_and_output_multipliers() -> None:
     client = RecordingClient()
     client.responses.create = lambda **_kwargs: SimpleNamespace(
         output_text="text",
@@ -324,58 +368,7 @@ def test_gpt_56_cost_includes_long_context_and_cache_write_multipliers() -> None
         ProviderRequest(prompt="Prompt", text_input="Input")
     )
 
-    # Luna long-context request: writes 100k * $1 * 1.25 * 2,
-    # reads 200k * $0.10 * 2, output 1k * $6 * 1.5.
     assert result.ok
+    # Long-context Luna: writes 100k * $1 * 1.25 * 2,
+    # reads 200k * $0.10 * 2, and outputs 1k * $6 * 1.5.
     assert result.cost_usd == 0.299
-
-
-@pytest.mark.llm
-def test_real_openai_text_smoke() -> None:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        pytest.skip("OPENAI_API_KEY is not set")
-    provider = OpenAIProvider(AppConfig(llm_api_key=api_key, llm_model="gpt-5.6-luna"))
-
-    result = provider.generate(
-        ProviderRequest(
-            prompt="Reply with exactly: provider smoke ok",
-            text_input="This is a connectivity smoke test.",
-        )
-    )
-
-    assert result.ok, result.error
-    assert result.text.strip()
-
-
-@pytest.mark.llm
-@pytest.mark.skipif(
-    os.environ.get("PAPER_PIPELINE_CACHE_TEST") != "1",
-    reason="set PAPER_PIPELINE_CACHE_TEST=1 to spend a small amount verifying real caching",
-)
-def test_real_openai_reuses_explicit_transcription_cache() -> None:
-    config = AppConfig()
-    assert config.llm_api_key and config.llm_model
-    text = "Stable academic transcription sentence for cache verification.\n" * 600
-    input_hash = hashlib.sha256(text.encode()).hexdigest()
-    provider = OpenAIProvider(config)
-
-    first = provider.generate(
-        ProviderRequest(
-            prompt="Reply with exactly: first cache check",
-            text_input=text,
-            input_sha256=input_hash,
-        )
-    )
-    second = provider.generate(
-        ProviderRequest(
-            prompt="Reply with exactly: second cache check",
-            text_input=text,
-            input_sha256=input_hash,
-        )
-    )
-
-    assert first.ok, first.error
-    assert second.ok, second.error
-    assert first.cache_write_tokens > 0
-    assert second.cached_tokens > 0

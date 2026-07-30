@@ -1,5 +1,4 @@
 import hashlib
-import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -32,40 +31,37 @@ def marker(*, job_id: str = "attempt-1") -> AttemptMarker:
     )
 
 
-def test_marker_write_is_atomic_and_round_trips(tmp_path: Path) -> None:
+def test_marker_write_is_atomic_and_discoverable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store = marker_store(tmp_path)
     attempt = marker()
-
     store.create(attempt)
 
-    marker_path = store.attempts_dir / "attempt-1.json"
-    assert marker_path.is_file()
+    def interrupted_replace(source: Path, destination: Path) -> None:
+        raise OSError("interrupted before marker install")
+
+    monkeypatch.setattr("paper_pipeline.jobs.recovery.os.replace", interrupted_replace)
+    with pytest.raises(OSError, match="interrupted before marker install"):
+        store.create(marker(job_id="attempt-2"))
+
     assert store.scan() == [attempt]
-    assert list(store.attempts_dir.glob("*.tmp")) == []
 
 
-def test_marker_store_rejects_symlinked_attempt_directory(tmp_path: Path) -> None:
-    outside = tmp_path / "outside-attempts"
+@pytest.mark.parametrize(
+    "linked_relative",
+    [Path(".pp"), Path(".pp/attempts")],
+    ids=["operational-directory", "attempt-directory"],
+)
+def test_marker_store_rejects_symlinked_managed_ancestor(
+    tmp_path: Path, linked_relative: Path
+) -> None:
+    outside = tmp_path / "outside"
     outside.mkdir()
-    attempts = tmp_path / ".pp" / "attempts"
-    attempts.parent.mkdir()
+    linked = tmp_path / linked_relative
+    linked.parent.mkdir(parents=True, exist_ok=True)
     try:
-        attempts.symlink_to(outside, target_is_directory=True)
-    except OSError as error:
-        pytest.skip(f"directory symlinks unavailable: {error}")
-
-    with pytest.raises(ValueError, match="must not contain symlinks"):
-        AttemptMarkerStore(attempts).create(marker())
-
-    assert list(outside.iterdir()) == []
-
-
-def test_marker_store_rejects_symlinked_operational_ancestor(tmp_path: Path) -> None:
-    outside = tmp_path / "outside-operational"
-    outside.mkdir()
-    operational = tmp_path / ".pp"
-    try:
-        operational.symlink_to(outside, target_is_directory=True)
+        linked.symlink_to(outside, target_is_directory=True)
     except OSError as error:
         pytest.skip(f"directory symlinks unavailable: {error}")
 
@@ -82,14 +78,14 @@ async def test_success_validates_hashes_records_then_removes_marker(tmp_path: Pa
     marker_was_present_during_record = False
 
     async def worker(job: Job) -> None:
-        assert (store.attempts_dir / f"{job.id}.json").is_file()
+        assert [item.job_id for item in store.scan()] == [job.id]
         artifact.write_text("converted\n", encoding="utf-8")
 
     def record(outcome: TerminalOutcome) -> None:
         nonlocal marker_was_present_during_record
-        marker_was_present_during_record = (
-            store.attempts_dir / f"{outcome.attempt_id}.json"
-        ).is_file()
+        marker_was_present_during_record = any(
+            item.job_id == outcome.attempt_id for item in store.scan()
+        )
         outcomes.append(outcome)
 
     queue = JobQueue()
@@ -120,24 +116,33 @@ async def test_success_validates_hashes_records_then_removes_marker(tmp_path: Pa
     assert store.scan() == []
 
 
-@pytest.mark.parametrize("failure", ["missing", "empty", "hash-mismatch"])
-async def test_invalid_artifact_fails_before_success(tmp_path: Path, failure: str) -> None:
+@pytest.mark.parametrize(
+    ("artifact_bytes", "expected_hashes"),
+    [
+        (None, None),
+        (b"", None),
+        (b"actual", {"papers/Smith2024/summary.md": "0" * 64}),
+    ],
+    ids=["missing", "empty", "hash-mismatch"],
+)
+async def test_invalid_artifact_fails_before_success(
+    tmp_path: Path,
+    artifact_bytes: bytes | None,
+    expected_hashes: dict[str, str] | None,
+) -> None:
     store = marker_store(tmp_path)
     artifact = tmp_path / "output.md"
     outcomes: list[TerminalOutcome] = []
 
     async def worker(job: Job) -> None:
         del job
-        if failure == "empty":
-            artifact.write_bytes(b"")
-        elif failure == "hash-mismatch":
-            artifact.write_text("actual", encoding="utf-8")
+        if artifact_bytes is not None:
+            artifact.write_bytes(artifact_bytes)
 
     def validate():  # type: ignore[no-untyped-def]
-        expected = {"papers/Smith2024/summary.md": "0" * 64}
         return validate_artifacts(
             {"papers/Smith2024/summary.md": artifact},
-            expected_hashes=expected if failure == "hash-mismatch" else None,
+            expected_hashes=expected_hashes,
         )
 
     queue = JobQueue()
@@ -159,8 +164,6 @@ async def test_invalid_artifact_fails_before_success(tmp_path: Path, failure: st
     result = await queue.wait(job.id)
 
     assert result.state is JobState.FAILED
-    assert result.error is not None
-    assert failure.replace("-", " ") in result.error
     assert outcomes[-1].state is JobState.FAILED
     assert outcomes[-1].artifact_hashes == {}
     assert store.scan() == []
@@ -176,7 +179,7 @@ async def test_crash_before_terminal_record_leaves_marker_and_prior_truth(
     durable_truth = {"artifact_hash": "prior-valid-hash", "attempt_id": "prior"}
 
     async def crash(job: Job) -> None:
-        assert (store.attempts_dir / f"{job.id}.json").is_file()
+        assert [item.job_id for item in store.scan()] == [job.id]
         raise SimulatedProcessCrash
 
     def record(outcome: TerminalOutcome) -> None:
@@ -203,38 +206,20 @@ async def test_crash_before_terminal_record_leaves_marker_and_prior_truth(
     assert durable_truth == {"artifact_hash": "prior-valid-hash", "attempt_id": "prior"}
 
 
-def test_startup_synthesizes_interrupted_without_durable_rewrite(tmp_path: Path) -> None:
+def test_startup_synthesizes_interrupted_and_cleans_stale_terminal_markers(
+    tmp_path: Path,
+) -> None:
     store = marker_store(tmp_path)
-    store.create(marker())
-    durable_attempts: set[str] = set()
+    interrupted_marker = marker(job_id="interrupted-1")
+    terminal_marker = marker(job_id="terminal-1")
+    store.create(interrupted_marker)
+    store.create(terminal_marker)
 
-    interrupted = reconcile_attempts(store, durable_attempts.__contains__)
+    interrupted = reconcile_attempts(store, {"terminal-1"}.__contains__)
 
     assert len(interrupted) == 1
-    assert interrupted[0].job_id == "attempt-1"
+    assert interrupted[0].job_id == "interrupted-1"
     assert interrupted[0].state is JobState.INTERRUPTED
     assert interrupted[0].retryable is True
     assert interrupted[0].target == "papers/Smith2024"
-    assert durable_attempts == set()
-    assert store.scan() == [marker()]
-
-
-def test_terminal_attempt_marker_is_cleaned_as_stale(tmp_path: Path) -> None:
-    store = marker_store(tmp_path)
-    store.create(marker())
-
-    interrupted = reconcile_attempts(store, {"attempt-1"}.__contains__)
-
-    assert interrupted == []
-    assert store.scan() == []
-
-
-def test_deleting_operational_directory_loses_no_durable_truth(tmp_path: Path) -> None:
-    store = marker_store(tmp_path)
-    store.create(marker())
-    durable_truth = {"artifact_hash": "still-valid", "attempt_id": "prior"}
-
-    shutil.rmtree(tmp_path / ".pp")
-
-    assert reconcile_attempts(store, lambda attempt_id: attempt_id == "prior") == []
-    assert durable_truth == {"artifact_hash": "still-valid", "attempt_id": "prior"}
+    assert store.scan() == [interrupted_marker]

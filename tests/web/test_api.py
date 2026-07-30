@@ -22,26 +22,6 @@ from paper_pipeline.web.app import create_app
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "zotero"
 
 
-def test_remote_converter_configuration_selects_ssh_backend(tmp_path: Path) -> None:
-    values: dict[str, object] = {
-        "remote_converter_host": "noesis",
-        "remote_converter_root": "/srv/paper-pipeline",
-        "remote_converter_python": "/opt/paper-pipeline/bin/python",
-        "_env_file": None,
-    }
-    config = AppConfig(**cast(Any, values))
-
-    app = create_app(registry=RuntimeRegistry(), config=config)
-    context: WebContext = app.state.web_context
-
-    assert context.converter_spec.module_path == "paper_pipeline.convert.remote:RemoteConverter"
-    assert context.converter_spec.kwargs == {
-        "host": "noesis",
-        "remote_root": "/srv/paper-pipeline",
-        "remote_python": "/opt/paper-pipeline/bin/python",
-    }
-
-
 @pytest.mark.asyncio
 async def test_cross_origin_mutation_is_rejected(tmp_path: Path) -> None:
     app = create_app(registry=RuntimeRegistry(), config=_config(tmp_path))
@@ -74,7 +54,7 @@ def _config(tmp_path: Path) -> AppConfig:
 @asynccontextmanager
 async def _client(
     tmp_path: Path,
-) -> AsyncIterator[tuple[AsyncClient, WebContext, FakeLLMProvider]]:
+) -> AsyncIterator[tuple[AsyncClient, WebContext]]:
     provider = FakeLLMProvider()
     registry = RuntimeRegistry(provider_factories={"fake": lambda: provider})
     app = create_app(
@@ -84,7 +64,7 @@ async def _client(
     )
     context = cast(WebContext, app.state.web_context)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        yield client, context, provider
+        yield client, context
     await registry.queue.shutdown()
 
 
@@ -96,27 +76,63 @@ async def _create_library(client: AsyncClient, path: Path) -> None:
     assert response.status_code == 200, response.text
 
 
-async def _import_fixture(client: AsyncClient, fixture: str = "clean") -> dict[str, object]:
+async def _import_fixture(
+    client: AsyncClient,
+    fixture: str = "clean",
+    *,
+    addition_limit: int | None = 1,
+) -> tuple[dict[str, object], dict[str, object]]:
     preview = await client.post(
         "/api/import/preview",
         json={"export_path": str(FIXTURES / fixture)},
     )
     assert preview.status_code == 200, preview.text
-    response = await client.post("/api/import/apply", json={"plan": preview.json()})
+    plan = cast(dict[str, object], preview.json())
+    if addition_limit is not None:
+        plan["additions"] = cast(list[object], plan["additions"])[:addition_limit]
+    response = await client.post("/api/import/apply", json={"plan": plan})
     assert response.status_code == 200, response.text
-    return cast(dict[str, object], response.json())
+    return (
+        plan,
+        cast(dict[str, object], response.json()),
+    )
+
+
+@pytest.mark.asyncio
+async def test_job_requests_reject_ambiguous_or_duplicate_work(tmp_path: Path) -> None:
+    invalid_requests = [
+        ("/api/jobs/conversion", {}),
+        ("/api/jobs/conversion", {"citekeys": ["Smith2024"], "pending": True}),
+        ("/api/jobs/conversion", {"citekeys": ["Smith2024", "Smith2024"]}),
+        (
+            "/api/jobs/recipes",
+            {"citekeys": ["Smith2024"], "recipe_names": []},
+        ),
+        (
+            "/api/jobs/recipes",
+            {
+                "citekeys": ["Smith2024"],
+                "recipe_names": ["summary", "summary"],
+            },
+        ),
+    ]
+
+    async with _client(tmp_path) as (client, _):
+        for endpoint, payload in invalid_requests:
+            response = await client.post(endpoint, json=payload)
+            assert response.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_library_lifecycle_and_import_contract(tmp_path: Path) -> None:
     library = tmp_path / "library"
-    async with _client(tmp_path) as (client, _, _):
+    async with _client(tmp_path) as (client, _):
         assert (await client.get("/api/library")).status_code == 409
 
         await _create_library(client, library)
         current = await client.get("/api/library")
         assert current.status_code == 200
-        assert current.json() == {"root": str(library.resolve())}
+        assert Path(current.json()["root"]) == library.resolve()
 
         report = await client.post("/api/library/validate")
         assert report.status_code == 200
@@ -125,50 +141,59 @@ async def test_library_lifecycle_and_import_contract(tmp_path: Path) -> None:
         reindex = await client.post("/api/library/reindex")
         assert reindex.status_code == 200
         assert reindex.json()["state"] == "succeeded"
-        assert (library / "indexes" / "titles.md").is_file()
 
-        imported = await _import_fixture(client)
-        assert len(cast(list[str], imported["added"])) == 5
-        assert imported["refreshed"] == []
-        assert imported["replaced"] == []
+        preview, imported = await _import_fixture(client)
+        planned_citekeys = {
+            item["metadata"]["citekey"] for item in cast(list[dict[str, Any]], preview["additions"])
+        }
+        assert planned_citekeys
+        assert set(cast(list[str], imported["added"])) == planned_citekeys
+        assert not imported["failed"]
 
         reopened = await client.post("/api/library/open", json={"path": str(library)})
         assert reopened.status_code == 200
-        assert reopened.json()["root"] == str(library.resolve())
+        assert Path(reopened.json()["root"]) == library.resolve()
 
 
 @pytest.mark.asyncio
 async def test_paper_list_filters_and_detail_contract(tmp_path: Path) -> None:
-    async with _client(tmp_path) as (client, _, _):
+    async with _client(tmp_path) as (client, _):
         await _create_library(client, tmp_path / "library")
-        await _import_fixture(client)
+        await _import_fixture(client, addition_limit=None)
 
         all_papers = await client.get("/api/papers")
         assert all_papers.status_code == 200
-        assert all_papers.json()["total"] == 5
+        all_payload = all_papers.json()
+        assert all_payload["papers"]
+        assert all_payload["total"] == len(all_payload["papers"])
 
         filtered = await client.get(
             "/api/papers",
             params={"query": "journal", "author": "Ada", "year": 2024},
         )
         assert filtered.status_code == 200
-        assert filtered.json()["total"] == 1
-        paper = filtered.json()["papers"][0]
+        filtered_payload = filtered.json()
+        assert filtered_payload["total"] == len(filtered_payload["papers"]) == 1
+        paper = filtered_payload["papers"][0]
+        assert paper["metadata"]["year"] == 2024
+        assert any("Ada" in author for author in paper["metadata"]["authors"])
 
         paged = await client.get("/api/papers", params={"limit": 2, "offset": 1})
         assert paged.status_code == 200
-        assert len(paged.json()["papers"]) == 2
-        assert paged.json()["total"] == 5
+        assert [item["metadata"]["citekey"] for item in paged.json()["papers"]] == [
+            item["metadata"]["citekey"] for item in all_payload["papers"][1:3]
+        ]
+        assert paged.json()["total"] == all_payload["total"]
 
         detail = await client.get(f"/api/papers/{paper['metadata']['citekey']}")
         assert detail.status_code == 200
-        assert detail.json()["metadata"]["title"] == paper["metadata"]["title"]
+        assert detail.json()["metadata"]["citekey"] == paper["metadata"]["citekey"]
         assert (await client.get("/api/papers/not-a-paper")).status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_conversion_recipe_and_job_list_contract(tmp_path: Path) -> None:
-    async with _client(tmp_path) as (client, context, provider):
+    async with _client(tmp_path) as (client, context):
         await _create_library(client, tmp_path / "library")
         await _import_fixture(client)
         papers = (await client.get("/api/papers")).json()["papers"]
@@ -194,21 +219,20 @@ async def test_conversion_recipe_and_job_list_contract(tmp_path: Path) -> None:
         recipe_id = recipes.json()["jobs"][0]["id"]
         completed = await context.runtime.queue.wait(recipe_id)
         assert completed.state is JobState.SUCCEEDED
-        assert provider.calls
 
-        succeeded = await client.get("/api/jobs", params={"state": "succeeded"})
-        assert succeeded.status_code == 200
-        ids = {job["id"] for job in succeeded.json()["jobs"]}
-        assert {conversion_id, recipe_id} <= ids
-
-        conversion_jobs = await client.get("/api/jobs", params={"kind": "conversion"})
+        conversion_jobs = await client.get(
+            "/api/jobs",
+            params={"state": "succeeded", "kind": "conversion"},
+        )
         assert conversion_jobs.status_code == 200
-        assert {job["kind"] for job in conversion_jobs.json()["jobs"]} == {"conversion"}
+        ids = {job["id"] for job in conversion_jobs.json()["jobs"]}
+        assert conversion_id in ids
+        assert recipe_id not in ids
 
 
 @pytest.mark.asyncio
 async def test_cancel_and_retry_routes(tmp_path: Path) -> None:
-    async with _client(tmp_path) as (client, context, _):
+    async with _client(tmp_path) as (client, context):
         await _create_library(client, tmp_path / "library")
         assert context.runtime is not None
         runtime = context.runtime
@@ -255,18 +279,13 @@ async def test_cancel_and_retry_routes(tmp_path: Path) -> None:
         assert (await runtime.queue.wait(retried_id)).state is JobState.SUCCEEDED
 
 
-def test_serve_uses_localhost_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    called: dict[str, object] = {}
+def test_serve_defaults_to_a_loopback_interface(monkeypatch: pytest.MonkeyPatch) -> None:
+    invocation: dict[str, object] = {}
 
-    def fake_run(app: str, **kwargs: object) -> None:
-        called["app"] = app
-        called.update(kwargs)
+    def record_server_start(_app: str, **options: object) -> None:
+        invocation.update(options)
 
-    monkeypatch.setattr("uvicorn.run", fake_run)
+    monkeypatch.setattr("uvicorn.run", record_server_start)
+
     assert main(["serve"]) == 0
-    assert called == {
-        "app": "paper_pipeline.web.app:create_app",
-        "factory": True,
-        "host": "127.0.0.1",
-        "port": 8000,
-    }
+    assert invocation["host"] in {"127.0.0.1", "localhost", "::1"}

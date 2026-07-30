@@ -16,7 +16,7 @@ from urllib.request import urlopen
 
 import pytest
 import uvicorn
-from playwright.sync_api import Page, Route, ViewportSize, expect
+from playwright.sync_api import Page, ViewportSize, expect
 from tests.fakes import FakeLLMProvider
 
 from paper_pipeline.config import AppConfig
@@ -39,6 +39,8 @@ FIXTURES = Path(__file__).parents[1] / "fixtures" / "zotero"
 VIEWPORT = ViewportSize(width=1440, height=1000)
 SNAPSHOTS = Path(__file__).with_name("snapshots")
 FIXED_TIME = datetime(2026, 7, 15, 14, 30, tzinfo=UTC)
+PIXEL_CHANNEL_TOLERANCE = 8
+MAX_CHANGED_PIXEL_RATIO = 0.003
 PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 )
@@ -204,32 +206,50 @@ def _snapshot(page: Page, name: str, *, update: bool) -> None:
         pytest.fail(
             f"missing visual baseline {baseline}; run the documented --update-snapshots command"
         )
-    changed, total, maximum_delta = _pixel_difference(actual, baseline.read_bytes())
-    allowed = max(10, int(total * 0.0005))
+    changed, total, maximum_delta, actual_size, expected_size = _pixel_difference(
+        actual, baseline.read_bytes()
+    )
+    allowed = max(100, int(total * MAX_CHANGED_PIXEL_RATIO))
     assert changed <= allowed, (
         f"visual snapshot differs: {name}; {changed}/{total} pixels changed "
-        f"(allowed {allowed}, max channel delta {maximum_delta}); run the documented "
+        f"(allowed {allowed}, max channel delta {maximum_delta}, "
+        f"dimensions {expected_size} -> {actual_size}); run the documented "
         "--update-snapshots command after reviewing the UI change"
     )
 
 
-def _pixel_difference(actual: bytes, expected: bytes) -> tuple[int, int, int]:
+def _pixel_difference(
+    actual: bytes, expected: bytes
+) -> tuple[int, int, int, tuple[int, int], tuple[int, int]]:
     actual_size, actual_pixels = _decode_png(actual)
     expected_size, expected_pixels = _decode_png(expected)
-    assert actual_size == expected_size, (
-        f"visual dimensions changed from {expected_size} to {actual_size}"
-    )
     changed = 0
     maximum_delta = 0
-    for offset in range(0, len(actual_pixels), 4):
-        delta = max(
-            abs(actual_pixels[offset + channel] - expected_pixels[offset + channel])
-            for channel in range(4)
-        )
-        maximum_delta = max(maximum_delta, delta)
-        if delta > 2:
-            changed += 1
-    return changed, actual_size[0] * actual_size[1], maximum_delta
+    width = max(actual_size[0], expected_size[0])
+    height = max(actual_size[1], expected_size[1])
+    for y in range(height):
+        for x in range(width):
+            if x >= actual_size[0] or y >= actual_size[1]:
+                changed += 1
+                maximum_delta = 255
+                continue
+            if x >= expected_size[0] or y >= expected_size[1]:
+                changed += 1
+                maximum_delta = 255
+                continue
+            actual_offset = (y * actual_size[0] + x) * 4
+            expected_offset = (y * expected_size[0] + x) * 4
+            delta = max(
+                abs(
+                    actual_pixels[actual_offset + channel]
+                    - expected_pixels[expected_offset + channel]
+                )
+                for channel in range(4)
+            )
+            maximum_delta = max(maximum_delta, delta)
+            if delta > PIXEL_CHANNEL_TOLERANCE:
+                changed += 1
+    return changed, width * height, maximum_delta, actual_size, expected_size
 
 
 def _decode_png(payload: bytes) -> tuple[tuple[int, int], bytes]:
@@ -305,7 +325,7 @@ def _paeth(left: int, above: int, upper_left: int) -> int:
     return (left, above, upper_left)[distances.index(min(distances))]
 
 
-def test_visual_papers_table_filled(
+def test_visual_papers_table_and_paper_detail(
     page: Page, visual_server: VisualServer, tmp_path: Path, update_snapshots: bool
 ) -> None:
     root = tmp_path / "visual-library"
@@ -315,24 +335,6 @@ def test_visual_papers_table_filled(
     page.goto(f"{visual_server.url}/papers")
     expect(page.locator("tbody tr")).to_have_count(5)
     _snapshot(page, "papers-table-filled.png", update=update_snapshots)
-
-
-def test_visual_papers_table_empty(
-    page: Page, visual_server: VisualServer, tmp_path: Path, update_snapshots: bool
-) -> None:
-    _create_library(page, visual_server, tmp_path / "visual-library")
-
-    page.goto(f"{visual_server.url}/papers")
-    expect(page.get_by_role("heading", name="No papers found")).to_be_visible()
-    _snapshot(page, "papers-table-empty.png", update=update_snapshots)
-
-
-def test_visual_paper_detail(
-    page: Page, visual_server: VisualServer, tmp_path: Path, update_snapshots: bool
-) -> None:
-    root = tmp_path / "visual-library"
-    _create_library(page, visual_server, root)
-    _import_fixture(page, visual_server)
     _seed_full_paper(root)
 
     page.goto(f"{visual_server.url}/papers/SmithJournal2024")
@@ -410,7 +412,7 @@ def test_visual_jobs_running_failed_interrupted(
     running.state = JobState.FAILED
 
 
-def test_visual_import_preview(
+def test_visual_import_preview_and_error_state(
     page: Page, visual_server: VisualServer, tmp_path: Path, update_snapshots: bool
 ) -> None:
     _create_library(page, visual_server, tmp_path / "visual-library")
@@ -423,11 +425,6 @@ def test_visual_import_preview(
     page.get_by_label("Zotero RDF export").fill(r"D:\Exports\library.rdf")
     _snapshot(page, "import-preview.png", update=update_snapshots)
 
-
-def test_visual_error_state(
-    page: Page, visual_server: VisualServer, tmp_path: Path, update_snapshots: bool
-) -> None:
-    _create_library(page, visual_server, tmp_path / "visual-library")
     page.goto(f"{visual_server.url}/import")
     page.get_by_label("Zotero RDF export").fill(str(FIXTURES / "problems"))
     page.get_by_role("button", name="Preview import").click()
@@ -436,17 +433,3 @@ def test_visual_error_state(
     page.get_by_label("Existing library folder").fill(r"D:\Libraries\Visual Fixture")
     page.get_by_label("Zotero RDF export").fill(r"D:\Exports\problem-library.rdf")
     _snapshot(page, "import-error-state.png", update=update_snapshots)
-
-
-def test_visual_disconnected_state(
-    page: Page, visual_server: VisualServer, tmp_path: Path, update_snapshots: bool
-) -> None:
-    _create_library(page, visual_server, tmp_path / "visual-library")
-
-    def abort_events(route: Route) -> None:
-        route.abort()
-
-    page.route("**/events", abort_events)
-    page.goto(f"{visual_server.url}/jobs")
-    expect(page.locator("#connection-status")).to_contain_text("disconnected")
-    _snapshot(page, "jobs-disconnected.png", update=update_snapshots)

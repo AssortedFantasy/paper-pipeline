@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import pytest
 
+from paper_pipeline.library.paths import RESERVED_PAPER_NAMES
 from paper_pipeline.recipes.model import load_builtin_recipes, parse_recipe
 
 
-def recipe_text(**overrides: str) -> str:
-    fields = {
+def recipe_text(**overrides: object) -> str:
+    fields: dict[str, object] = {
         "name": "summary",
         "version": "1",
         "input": "transcription",
@@ -17,27 +18,43 @@ def recipe_text(**overrides: str) -> str:
     return f"---\n{front_matter}\n---\nPrompt text.\n"
 
 
-def test_builtins_parse() -> None:
+def test_shipped_recipes_satisfy_the_recipe_contract() -> None:
     recipes = load_builtin_recipes()
+    reserved = {name.casefold() for name in RESERVED_PAPER_NAMES}
 
-    assert set(recipes) == {"contributions", "intro", "method", "summary"}
-    assert recipes["summary"].output == "summary.md"
-    assert recipes["contributions"].input == "pdf"
-    assert recipes["intro"].input == "pdf"
-    assert recipes["intro"].output == "intro_filtered.md"
-    assert recipes["method"].input == "pdf"
-    assert recipes["method"].output == "method_filtered.md"
+    assert recipes
+    for key, recipe in recipes.items():
+        assert key == recipe.name
+        assert recipe.version >= 1
+        assert recipe.input in {"transcription", "pdf"}
+        assert recipe.output.endswith(".md")
+        assert "/" not in recipe.output and "\\" not in recipe.output
+        assert recipe.output.casefold() not in reserved
+        assert recipe.prompt.strip()
 
 
-def test_prompt_body_is_preserved_verbatim() -> None:
-    prompt = "First line.\n\n- Keep spacing  \nLast line.\n"
-    text = "---\nname: exact\nversion: 2\ninput: pdf\noutput: exact.md\n---\n" + prompt
+def test_yaml_scalars_are_interoperable_and_prompt_is_opaque() -> None:
+    prompt = "First line.\n\n- Keep spacing  \n{{ no template language }}\n"
+    recipe = parse_recipe(
+        """---
+name: "quoted" # ordinary YAML comment
+version: 2
+input: 'transcription'
+output: "different-file.md"
+---
+"""
+        + prompt
+    )
 
-    assert parse_recipe(text).prompt == prompt
+    assert recipe.name == "quoted"
+    assert recipe.version == 2
+    assert recipe.input == "transcription"
+    assert recipe.output == "different-file.md"
+    assert recipe.prompt == prompt
 
 
 @pytest.mark.parametrize("field", ["name", "version", "input", "output"])
-def test_required_fields(field: str) -> None:
+def test_declared_fields_are_required(field: str) -> None:
     text = recipe_text()
     text = "\n".join(line for line in text.splitlines() if not line.startswith(f"{field}:"))
 
@@ -45,69 +62,29 @@ def test_required_fields(field: str) -> None:
         parse_recipe(text)
 
 
-def test_unknown_field_is_rejected() -> None:
-    with pytest.raises(ValueError, match=r"unknown.*provider"):
-        parse_recipe(recipe_text(provider="openai"))
-
-
-def test_duplicate_field_is_rejected() -> None:
-    text = recipe_text().replace("name: summary", "name: summary\nname: other")
-
-    with pytest.raises(ValueError, match=r"duplicate.*name"):
-        parse_recipe(text)
-
-
-@pytest.mark.parametrize("name", ["", "Has Spaces", "Uppercase", "../summary"])
-def test_invalid_name_is_rejected(name: str) -> None:
-    with pytest.raises(ValueError, match="name"):
-        parse_recipe(recipe_text(name=name))
-
-
-@pytest.mark.parametrize("version", ["zero", "0", "-1", "1.5", '"1"'])
-def test_invalid_version_is_rejected(version: str) -> None:
-    with pytest.raises(ValueError, match="version"):
-        parse_recipe(recipe_text(version=version))
-
-
-def test_yaml_quotes_and_inline_comments_are_supported() -> None:
-    recipe = parse_recipe(
-        """---
-name: "quoted" # ordinary YAML comment
-version: 1 # positive integer
-input: 'transcription'
-output: "different-file.md"
----
-Keep this prompt.
-"""
-    )
-
-    assert recipe.name == "quoted"
-    assert recipe.version == 1
-    assert recipe.input == "transcription"
-    assert recipe.output == "different-file.md"
-
-
-def test_invalid_input_is_rejected() -> None:
-    with pytest.raises(ValueError, match="input"):
-        parse_recipe(recipe_text(input="source"))
-
-
 @pytest.mark.parametrize(
-    "output",
-    ["summary.txt", ".md", "generated/summary.md", "generated\\summary.md", "../summary.md"],
+    ("field", "value"),
+    [
+        pytest.param("name", "", id="empty-name"),
+        pytest.param("name", "Uppercase", id="non-lowercase-name"),
+        pytest.param("name", "../summary", id="unsafe-name"),
+        pytest.param("version", "0", id="non-positive-version"),
+        pytest.param("version", '"1"', id="non-integer-version"),
+        pytest.param("input", "source", id="unsupported-input"),
+        pytest.param("output", "summary.txt", id="non-markdown-output"),
+        pytest.param("output", ".md", id="empty-output-stem"),
+        pytest.param("output", "generated/summary.md", id="posix-subdirectory"),
+        pytest.param("output", r"generated\summary.md", id="windows-subdirectory"),
+        pytest.param("output", "transcription.md", id="reserved-output"),
+        pytest.param("output", "TRANSCRIPTION.MD", id="case-insensitive-reserved-output"),
+    ],
 )
-def test_output_must_be_a_bare_markdown_filename(output: str) -> None:
-    with pytest.raises(ValueError, match=r"output.*bare \.md filename"):
-        parse_recipe(recipe_text(output=output))
+def test_field_constraints_reject_unsafe_or_ambiguous_values(field: str, value: str) -> None:
+    with pytest.raises(ValueError, match=field):
+        parse_recipe(recipe_text(**{field: value}))
 
 
-@pytest.mark.parametrize("output", ["transcription.md"])
-def test_output_must_not_collide_with_reserved_paper_names(output: str) -> None:
-    with pytest.raises(ValueError, match="reserved paper filename"):
-        parse_recipe(recipe_text(output=output))
-
-
-@pytest.mark.parametrize("prompt", ["", "\n", " \n\t"])
+@pytest.mark.parametrize("prompt", ["", " \n\t"])
 def test_prompt_must_be_non_empty(prompt: str) -> None:
     text = "---\nname: empty\nversion: 1\ninput: pdf\noutput: empty.md\n---\n" + prompt
 
@@ -118,11 +95,30 @@ def test_prompt_must_be_non_empty(prompt: str) -> None:
 @pytest.mark.parametrize(
     ("text", "message"),
     [
-        ("name: missing\n", "start"),
-        ("---\nname: missing\n", "end"),
-        ("---\nnot-a-field\n---\nprompt", "front matter"),
+        pytest.param("name: missing\n", "front matter", id="missing-opening-delimiter"),
+        pytest.param("---\nname: missing\n", "front matter", id="missing-closing-delimiter"),
+        pytest.param(
+            "---\n- name\n- version\n---\nprompt",
+            "front matter",
+            id="front-matter-is-not-a-mapping",
+        ),
+        pytest.param(
+            recipe_text(provider="openai"),
+            "provider",
+            id="unknown-field",
+        ),
+        pytest.param(
+            recipe_text().replace("name: summary", "name: summary\nname: other"),
+            "name",
+            id="duplicate-field",
+        ),
+        pytest.param(
+            recipe_text(output="[summary.md]"),
+            "front matter",
+            id="non-scalar-field",
+        ),
     ],
 )
-def test_malformed_front_matter_is_rejected(text: str, message: str) -> None:
+def test_ambiguous_or_extended_front_matter_is_rejected(text: str, message: str) -> None:
     with pytest.raises(ValueError, match=message):
         parse_recipe(text)

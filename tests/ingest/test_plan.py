@@ -61,81 +61,98 @@ def test_mixed_plan_keeps_categories_disjoint(library: Library, tmp_path: Path) 
 
     plan = build_import_plan(library, records)
 
-    assert [item.metadata.citekey for item in plan.additions] == ["Add2024"]
-    assert [item.metadata.citekey for item in plan.refreshes] == ["Refresh2024"]
-    assert [item.metadata.citekey for item in plan.source_replacements] == ["Replace2024"]
-    assert plan.refreshes[0].metadata.title == "Corrected title"
-    assert plan.refreshes[0].expected_source_sha256 == "source-hash"
-    assert plan.source_replacements[0].expected_source_sha256 == "old"
-    assert plan.problems == ["Broken2024: missing PDF attachment"]
+    categories = {
+        "additions": {item.metadata.citekey for item in plan.additions},
+        "refreshes": {item.metadata.citekey for item in plan.refreshes},
+        "replacements": {item.metadata.citekey for item in plan.source_replacements},
+    }
+    assert categories == {
+        "additions": {"Add2024"},
+        "refreshes": {"Refresh2024"},
+        "replacements": {"Replace2024"},
+    }
+    assert not (categories["additions"] & categories["refreshes"])
+    assert not (categories["additions"] & categories["replacements"])
+    assert not (categories["refreshes"] & categories["replacements"])
 
-
-@pytest.mark.parametrize("citekey", ["bad/key", "CON", ""])
-def test_invalid_citekey_is_routed_to_problems(
-    library: Library, tmp_path: Path, citekey: str
-) -> None:
-    plan = build_import_plan(library, [parsed_record(tmp_path, citekey)])
-
-    assert plan.additions == []
-    assert plan.refreshes == []
-    assert plan.source_replacements == []
+    refresh = plan.refreshes[0]
+    replacement = plan.source_replacements[0]
+    assert refresh.metadata.title == "Corrected title"
+    assert refresh.expected_source_sha256 == library.read_paper("Refresh2024").source_sha256
+    assert replacement.expected_source_sha256 == library.read_paper("Replace2024").source_sha256
     assert len(plan.problems) == 1
-    assert "citekey" in plan.problems[0]
+    assert plan.problems[0].startswith("Broken2024:")
 
 
-def test_same_doi_duplicate_candidate_is_surfaced_not_merged(
+def test_invalid_and_duplicate_citekeys_are_problems_not_actions(
     library: Library, tmp_path: Path
 ) -> None:
     records = [
-        parsed_record(tmp_path, "First2024", doi="10.1234/SAME"),
-        parsed_record(tmp_path, "Second2024", doi="https://doi.org/10.1234/same"),
+        parsed_record(tmp_path, "bad/key"),
+        parsed_record(tmp_path, "Repeated2024", title="First"),
+        parsed_record(tmp_path, "Repeated2024", title="Second"),
+        parsed_record(tmp_path, "Valid2024"),
     ]
 
     plan = build_import_plan(library, records)
 
-    assert {item.metadata.citekey for item in plan.additions} == {"First2024", "Second2024"}
-    assert len(plan.duplicate_candidates) == 1
-    duplicate = plan.duplicate_candidates[0]
-    assert {duplicate.citekey, duplicate.candidate_citekey} == {"First2024", "Second2024"}
-    assert duplicate.reason == "same DOI: 10.1234/same"
+    assert {item.metadata.citekey for item in plan.additions} == {"Valid2024"}
+    assert plan.refreshes == []
+    assert plan.source_replacements == []
+    assert sum(problem.startswith("bad/key:") for problem in plan.problems) == 1
+    assert sum(problem.startswith("Repeated2024:") for problem in plan.problems) == 2
 
 
-def test_normalized_title_duplicate_against_library_is_surfaced(
+def test_duplicate_candidates_are_advisory_and_never_auto_merged(
     library: Library, tmp_path: Path
 ) -> None:
     library.write_paper(installed_record("Existing2020", title="A Study: Testing Pipelines!"))
-    incoming = parsed_record(tmp_path, "Incoming2024", title="A study testing pipelines")
-
-    plan = build_import_plan(library, [incoming])
-
-    assert [item.metadata.citekey for item in plan.additions] == ["Incoming2024"]
-    assert len(plan.duplicate_candidates) == 1
-    assert plan.duplicate_candidates[0].reason == "normalized title match"
-
-
-def test_duplicate_citekey_in_one_export_is_a_problem(library: Library, tmp_path: Path) -> None:
     records = [
-        parsed_record(tmp_path, "Repeated2024", title="First"),
-        parsed_record(tmp_path, "Repeated2024", title="Second"),
+        parsed_record(tmp_path, "First2024", doi="10.1234/SAME"),
+        parsed_record(tmp_path, "Second2024", doi="https://doi.org/10.1234/same"),
+        parsed_record(tmp_path, "Incoming2024", title="A study testing pipelines"),
     ]
 
     plan = build_import_plan(library, records)
 
-    assert plan.additions == []
-    assert len(plan.problems) == 2
-    assert all("duplicate citekey" in problem for problem in plan.problems)
+    assert {item.metadata.citekey for item in plan.additions} == {
+        "First2024",
+        "Second2024",
+        "Incoming2024",
+    }
+    pairs = {
+        frozenset((candidate.citekey, candidate.candidate_citekey))
+        for candidate in plan.duplicate_candidates
+    }
+    assert pairs == {
+        frozenset(("First2024", "Second2024")),
+        frozenset(("Existing2020", "Incoming2024")),
+    }
+    assert all(candidate.reason for candidate in plan.duplicate_candidates)
 
 
 def test_plan_is_directly_json_serializable_and_does_not_modify_inputs(
     library: Library, tmp_path: Path
 ) -> None:
     record = parsed_record(tmp_path, "Serializable2024")
-    original_metadata = record.metadata.model_copy(deep=True)
+    original_record = (
+        record.metadata.model_copy(deep=True),
+        record.attachment_path,
+        record.attachment_sha256,
+        list(record.problems),
+    )
+    original_library = library.list_papers()
 
     plan = build_import_plan(library, [record])
     payload = json.loads(plan.model_dump_json())
 
+    assert isinstance(payload, dict)
     assert payload["additions"][0]["metadata"]["citekey"] == "Serializable2024"
     assert isinstance(payload["additions"][0]["attachment_path"], str)
-    assert record.metadata == original_metadata
-    assert library.list_papers() == ([], [])
+    assert (
+        record.metadata,
+        record.attachment_path,
+        record.attachment_sha256,
+        record.problems,
+    ) == original_record
+    assert library.list_papers() == original_library

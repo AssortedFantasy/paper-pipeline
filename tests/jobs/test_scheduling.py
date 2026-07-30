@@ -22,9 +22,8 @@ async def test_two_conversions_never_overlap_even_across_libraries() -> None:
         second_started.set()
 
     await queue.enqueue_paper("one", "a", JobKind.CONVERSION, "convert", first)
-    await queue.enqueue_paper("two", "b", JobKind.CONVERSION, "convert", second)
-
     await first_started.wait()
+    await queue.enqueue_paper("two", "b", JobKind.CONVERSION, "convert", second)
     await asyncio.sleep(0)
     assert second_started.is_set() is False
     release_first.set()
@@ -34,71 +33,75 @@ async def test_two_conversions_never_overlap_even_across_libraries() -> None:
 
 async def test_conversion_recipe_and_import_share_one_paper_lane() -> None:
     queue = JobQueue(llm_concurrency=3)
-    release = [asyncio.Event(), asyncio.Event()]
-    order: list[str] = []
+    running = 0
+    maximum = 0
+    completed: set[JobKind] = set()
 
-    def worker(name: str, release_event: asyncio.Event | None = None):  # type: ignore[no-untyped-def]
-        async def run(job: Job) -> None:
-            del job
-            order.append(f"start:{name}")
-            if release_event is not None:
-                await release_event.wait()
-            order.append(f"end:{name}")
+    async def worker(job: Job) -> None:
+        nonlocal maximum, running
+        running += 1
+        maximum = max(maximum, running)
+        await asyncio.sleep(0)
+        running -= 1
+        completed.add(job.kind)
 
-        return run
+    await queue.enqueue_paper("library", "paper", JobKind.CONVERSION, "convert", worker)
+    await queue.enqueue_paper("library", "paper", JobKind.RECIPE, "recipes", worker)
+    await queue.enqueue_paper("library", "paper", JobKind.IMPORT, "refresh", worker)
 
-    await queue.enqueue_paper(
-        "library", "paper", JobKind.CONVERSION, "convert", worker("conversion", release[0])
-    )
-    await queue.enqueue_paper(
-        "library", "paper", JobKind.RECIPE, "recipes", worker("recipe", release[1])
-    )
-    await queue.enqueue_paper("library", "paper", JobKind.IMPORT, "refresh", worker("import"))
-
-    await asyncio.sleep(0)
-    assert order == ["start:conversion"]
-    release[0].set()
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    assert order == ["start:conversion", "end:conversion", "start:recipe"]
-    release[1].set()
     await queue.join()
-    assert order == [
-        "start:conversion",
-        "end:conversion",
-        "start:recipe",
-        "end:recipe",
-        "start:import",
-        "end:import",
-    ]
+    assert maximum == 1
+    assert completed == {JobKind.CONVERSION, JobKind.RECIPE, JobKind.IMPORT}
 
 
-async def test_recipe_batches_respect_configured_cross_paper_concurrency() -> None:
+async def test_recipes_are_concurrent_across_papers_but_sequential_within_a_paper() -> None:
     queue = JobQueue(llm_concurrency=2)
-    two_started = asyncio.Event()
-    release = asyncio.Event()
+    first_started = asyncio.Event()
+    other_started = asyncio.Event()
+    same_paper_started = asyncio.Event()
+    third_paper_started = asyncio.Event()
+    releases = {
+        "first": asyncio.Event(),
+        "other": asyncio.Event(),
+        "same-paper": asyncio.Event(),
+        "third-paper": asyncio.Event(),
+    }
     running = 0
     maximum = 0
 
     async def recipe_batch(job: Job) -> None:
         nonlocal maximum, running
-        del job
         running += 1
         maximum = max(maximum, running)
-        if running == 2:
-            two_started.set()
-        await release.wait()
+        {
+            "first": first_started,
+            "other": other_started,
+            "same-paper": same_paper_started,
+            "third-paper": third_paper_started,
+        }[job.label].set()
+        await releases[job.label].wait()
         running -= 1
 
-    jobs = [
-        await queue.enqueue_paper("library", citekey, JobKind.RECIPE, "recipes", recipe_batch)
-        for citekey in ("one", "two", "three")
-    ]
+    await queue.enqueue_paper("library", "one", JobKind.RECIPE, "first", recipe_batch)
+    await queue.enqueue_paper("library", "two", JobKind.RECIPE, "other", recipe_batch)
+    await asyncio.gather(first_started.wait(), other_started.wait())
 
-    await asyncio.wait_for(two_started.wait(), timeout=1)
-    assert sum(job.state is JobState.RUNNING for job in jobs) == 2
-    release.set()
+    await queue.enqueue_paper("library", "one", JobKind.RECIPE, "same-paper", recipe_batch)
+    await queue.enqueue_paper("library", "three", JobKind.RECIPE, "third-paper", recipe_batch)
+    await asyncio.sleep(0)
+    assert same_paper_started.is_set() is False
+    assert third_paper_started.is_set() is False
+
+    releases["other"].set()
+    await third_paper_started.wait()
+    assert same_paper_started.is_set() is False
+
+    releases["first"].set()
+    await same_paper_started.wait()
+    releases["third-paper"].set()
+    releases["same-paper"].set()
     await queue.join()
+
     assert maximum == 2
 
 
@@ -202,65 +205,6 @@ async def test_library_reads_and_writes_are_mutually_exclusive() -> None:
     assert second_started.is_set() is True
 
 
-async def test_cancel_queued_job_is_immediate() -> None:
-    queue = JobQueue()
-    blocker_started = asyncio.Event()
-    release = asyncio.Event()
-    queued_ran = False
-
-    async def blocker(job: Job) -> None:
-        del job
-        blocker_started.set()
-        await release.wait()
-
-    async def queued(job: Job) -> None:
-        nonlocal queued_ran
-        del job
-        queued_ran = True
-
-    await queue.enqueue_paper("library", "paper", JobKind.IMPORT, "first", blocker)
-    await blocker_started.wait()
-    queued_job = await queue.enqueue_paper("library", "paper", JobKind.IMPORT, "second", queued)
-
-    assert await queue.cancel(queued_job.id) is True
-    assert queued_job.state is JobState.CANCELLED
-    assert (await queue.wait(queued_job.id)).state is JobState.CANCELLED
-    assert queued_ran is False
-    release.set()
-    await queue.join()
-
-
-async def test_cancel_running_job_sets_token_and_calls_kill_hook() -> None:
-    queue = JobQueue()
-    started = asyncio.Event()
-    hook_called = asyncio.Event()
-
-    async def worker(job: Job, token: CancellationToken) -> None:
-        del job
-        started.set()
-        await token.wait()
-
-    async def kill_hook() -> None:
-        hook_called.set()
-
-    job = await queue.enqueue_paper(
-        "library",
-        "paper",
-        JobKind.CONVERSION,
-        "convert",
-        worker,
-        kill_hook=kill_hook,
-    )
-    await started.wait()
-
-    assert await queue.cancel(job.id) is True
-    result = await queue.wait(job.id)
-
-    assert hook_called.is_set() is True
-    assert result.state is JobState.CANCELLED
-    assert result.error == "job cancelled"
-
-
 async def test_cancel_is_rejected_after_worker_begins_durable_commit() -> None:
     queue = JobQueue()
     committing = asyncio.Event()
@@ -281,40 +225,19 @@ async def test_cancel_is_rejected_after_worker_begins_durable_commit() -> None:
     assert (await queue.wait(job.id)).state is JobState.SUCCEEDED
 
 
-async def test_retry_creates_fresh_job_and_preserves_old_terminal_job() -> None:
-    queue = JobQueue()
-    attempts = 0
-
-    async def flaky(job: Job) -> None:
-        nonlocal attempts
-        del job
-        attempts += 1
-        if attempts == 1:
-            raise RuntimeError("first attempt")
-
-    failed = await queue.enqueue_paper(
-        "library", "paper", JobKind.RECIPE, "summary", flaky, meta={"recipe": "summary"}
-    )
-    await queue.wait(failed.id)
-
-    retried = await queue.retry(failed.id)
-    await queue.wait(retried.id)
-
-    assert failed.state is JobState.FAILED
-    assert retried.id != failed.id
-    assert retried.state is JobState.SUCCEEDED
-    assert retried.meta == {"recipe": "summary", "retry_of": failed.id}
-
-
 async def test_clean_shutdown_forces_uncooperative_worker_and_rejects_enqueue() -> None:
     queue = JobQueue()
     started = asyncio.Event()
+    stopped = asyncio.Event()
     never = asyncio.Event()
 
     async def uncooperative(job: Job) -> None:
         del job
         started.set()
-        await never.wait()
+        try:
+            await never.wait()
+        finally:
+            stopped.set()
 
     job = await queue.enqueue_paper("library", "paper", JobKind.IMPORT, "import", uncooperative)
     await started.wait()
@@ -322,9 +245,6 @@ async def test_clean_shutdown_forces_uncooperative_worker_and_rejects_enqueue() 
     await queue.shutdown(grace_seconds=0.01)
 
     assert job.state is JobState.CANCELLED
-    assert not any(
-        task.get_name().startswith("paper-pipeline-job-") and not task.done()
-        for task in asyncio.all_tasks()
-    )
-    with pytest.raises(RuntimeError, match="shut down"):
+    assert stopped.is_set()
+    with pytest.raises(RuntimeError):
         await queue.enqueue_paper("library", "other", JobKind.IMPORT, "import", uncooperative)

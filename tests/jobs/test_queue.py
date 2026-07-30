@@ -1,5 +1,4 @@
 import asyncio
-from datetime import UTC, datetime
 
 import pytest
 
@@ -24,18 +23,29 @@ async def no_op(job: Job) -> None:
     del job
 
 
-def test_legal_transitions_set_timestamps_and_error() -> None:
+@pytest.mark.parametrize(
+    "path",
+    [
+        (JobState.RUNNING, JobState.SUCCEEDED),
+        (JobState.RUNNING, JobState.FAILED),
+        (JobState.RUNNING, JobState.CANCELLED),
+        (JobState.CANCELLED,),
+    ],
+)
+def test_legal_live_lifecycle_paths_record_phase_timing(path: tuple[JobState, ...]) -> None:
     job = bare_job()
-    started = datetime(2026, 1, 1, tzinfo=UTC)
-    finished = datetime(2026, 1, 2, tzinfo=UTC)
 
-    transition_job(job, JobState.RUNNING, now=started)
-    transition_job(job, JobState.FAILED, error="broken", now=finished)
+    for state in path:
+        transition_job(
+            job,
+            state,
+            error="failure detail" if state is JobState.FAILED else None,
+        )
 
-    assert job.state is JobState.FAILED
-    assert job.started_at == started
-    assert job.finished_at == finished
-    assert job.error == "broken"
+    assert job.state is path[-1]
+    assert (job.started_at is not None) is (JobState.RUNNING in path)
+    assert job.finished_at is not None
+    assert (job.error is not None) is (path[-1] is JobState.FAILED)
 
 
 @pytest.mark.parametrize(
@@ -53,40 +63,23 @@ def test_legal_transitions_set_timestamps_and_error() -> None:
 def test_illegal_transitions_are_rejected(initial: JobState, target: JobState) -> None:
     job = bare_job(state=initial)
 
-    with pytest.raises(InvalidJobTransition, match="cannot transition"):
+    with pytest.raises(InvalidJobTransition):
         transition_job(job, target)
 
     assert job.state is initial
 
 
-async def test_event_order_follows_job_lifecycle() -> None:
-    queue = JobQueue()
-    subscription = queue.events.subscribe()
-
-    job = await queue.enqueue_paper(
-        "library",
-        "paper",
-        JobKind.CONVERSION,
-        "convert",
-        no_op,
-    )
-    await queue.wait(job.id)
-    events = [await subscription.get() for _ in range(3)]
-
-    assert [event.state for event in events] == [
-        JobState.QUEUED,
-        JobState.RUNNING,
-        JobState.SUCCEEDED,
-    ]
-    assert [event.sequence for event in events] == sorted(event.sequence for event in events)
-    assert all(event.job_id == job.id for event in events)
-    assert all(event.kind is JobEventKind.STATE for event in events)
-
-
-async def test_worker_failure_becomes_failed_job_and_event() -> None:
-    async def fail(job: Job) -> None:
+@pytest.mark.parametrize(
+    ("worker_fails", "terminal_state"),
+    [(False, JobState.SUCCEEDED), (True, JobState.FAILED)],
+)
+async def test_job_lifecycle_is_published_in_order(
+    worker_fails: bool, terminal_state: JobState
+) -> None:
+    async def worker(job: Job) -> None:
         del job
-        raise RuntimeError("boom")
+        if worker_fails:
+            raise RuntimeError("expected failure")
 
     queue = JobQueue()
     subscription = queue.events.subscribe()
@@ -94,82 +87,37 @@ async def test_worker_failure_becomes_failed_job_and_event() -> None:
         "library",
         JobKind.MAINTENANCE,
         "validate",
-        fail,
+        worker,
     )
 
     result = await queue.wait(job.id)
     events = [await subscription.get() for _ in range(3)]
 
-    assert result.state is JobState.FAILED
-    assert result.error == "RuntimeError: boom"
-    assert events[-1].state is JobState.FAILED
-    assert events[-1].error == "RuntimeError: boom"
+    assert result.state is terminal_state
+    assert [event.state for event in events] == [
+        JobState.QUEUED,
+        JobState.RUNNING,
+        terminal_state,
+    ]
+    assert [event.sequence for event in events] == sorted(event.sequence for event in events)
+    assert all(event.job_id == job.id for event in events)
+    assert all(event.kind is JobEventKind.STATE for event in events)
+    assert events[-1].error == result.error
+    assert (result.error is not None) is worker_fails
+    subscription.close()
 
 
-async def test_paper_lane_is_acquired_before_worker_runs() -> None:
-    queue = JobQueue()
-    first_started = asyncio.Event()
-    release_first = asyncio.Event()
-    second_started = asyncio.Event()
-
-    async def first(job: Job) -> None:
-        del job
-        first_started.set()
-        await release_first.wait()
-
-    async def second(job: Job) -> None:
-        del job
-        second_started.set()
-
-    first_job = await queue.enqueue_paper("library", "paper", JobKind.CONVERSION, "convert", first)
-    second_job = await queue.enqueue_paper("library", "paper", JobKind.IMPORT, "refresh", second)
-
-    await first_started.wait()
-    await asyncio.sleep(0)
-    assert second_started.is_set() is False
-    assert second_job.state is JobState.QUEUED
-
-    release_first.set()
-    await queue.join()
-    assert second_started.is_set() is True
-    assert first_job.state is JobState.SUCCEEDED
-    assert second_job.state is JobState.SUCCEEDED
-
-
-async def test_same_citekey_in_different_libraries_uses_different_lanes() -> None:
-    queue = JobQueue()
-    both_running = asyncio.Event()
-    release = asyncio.Event()
-    running = 0
-
-    async def worker(job: Job) -> None:
-        nonlocal running
-        del job
-        running += 1
-        if running == 2:
-            both_running.set()
-        await release.wait()
-        running -= 1
-
-    await queue.enqueue_paper("one", "paper", JobKind.RECIPE, "summary", worker)
-    await queue.enqueue_paper("two", "paper", JobKind.RECIPE, "summary", worker)
-
-    await asyncio.wait_for(both_running.wait(), timeout=1)
-    release.set()
-    await queue.join()
-
-
-async def test_separate_library_entry_points_assign_scopes() -> None:
+async def test_entry_points_assign_resource_scopes_and_citekey_shape() -> None:
     queue = JobQueue()
 
+    paper = await queue.enqueue_paper("library", "paper", JobKind.IMPORT, "refresh", no_op)
     read = await queue.enqueue_library_read("library", JobKind.MAINTENANCE, "validate", no_op)
     write = await queue.enqueue_library_write("library", JobKind.MAINTENANCE, "reindex", no_op)
     await queue.join()
 
-    assert read.scope is JobScope.LIBRARY_READ
-    assert write.scope is JobScope.LIBRARY_WRITE
-    assert read.citekey is None
-    assert write.citekey is None
+    assert (paper.scope, paper.citekey) == (JobScope.PAPER, "paper")
+    assert (read.scope, read.citekey) == (JobScope.LIBRARY_READ, None)
+    assert (write.scope, write.citekey) == (JobScope.LIBRARY_WRITE, None)
 
 
 async def test_slow_subscriber_does_not_block_job_or_fast_subscriber() -> None:
@@ -191,18 +139,27 @@ async def test_slow_subscriber_does_not_block_job_or_fast_subscriber() -> None:
     assert slow.dropped_count == 2
     assert slow.get_nowait().state is JobState.SUCCEEDED
 
+    slow.close()
+    another = await queue.enqueue_paper("library", "another", JobKind.IMPORT, "refresh", no_op)
+    await queue.wait(another.id)
+    with pytest.raises(asyncio.QueueEmpty):
+        slow.get_nowait()
+    fast.close()
+
 
 async def test_progress_event_does_not_change_state() -> None:
     queue = JobQueue()
     subscription = queue.events.subscribe()
+    progress_published = asyncio.Event()
     release = asyncio.Event()
 
     async def worker(job: Job) -> None:
         queue.publish_progress(job.id, "halfway")
+        progress_published.set()
         await release.wait()
 
     job = await queue.enqueue_paper("library", "paper", JobKind.CONVERSION, "convert", worker)
-    await asyncio.sleep(0)
+    await progress_published.wait()
     events = [await subscription.get() for _ in range(3)]
 
     assert events[-1].kind is JobEventKind.PROGRESS
@@ -212,3 +169,4 @@ async def test_progress_event_does_not_change_state() -> None:
     assert job.progress == "halfway"
     release.set()
     await queue.wait(job.id)
+    subscription.close()

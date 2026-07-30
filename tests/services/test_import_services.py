@@ -18,7 +18,12 @@ from paper_pipeline.library.model import (
 from paper_pipeline.library.storage import sha256_file
 from paper_pipeline.library.validation import validate_library
 from paper_pipeline.services.import_ops import apply_import, preview_import
-from paper_pipeline.services.runtime import PaperSession, RuntimeRegistry
+from paper_pipeline.services.runtime import (
+    LibraryRuntime,
+    LibrarySession,
+    PaperSession,
+    RuntimeRegistry,
+)
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "zotero"
 
@@ -30,8 +35,8 @@ def planned(
     title: str = "Title",
     body: bytes = b"pdf",
     expected_source_sha256: str | None = None,
-):
-    attachment = tmp_path / f"{citekey}.pdf"
+) -> PlannedImport:
+    attachment = tmp_path / f"{citekey}-{hashlib.sha256(body).hexdigest()[:8]}.pdf"
     attachment.write_bytes(body)
     return PlannedImport(
         metadata=PaperMetadata(citekey=citekey, title=title),
@@ -41,19 +46,27 @@ def planned(
     )
 
 
-async def read(runtime, citekey: str) -> PaperRecord:  # type: ignore[no-untyped-def]
-    records: list[PaperRecord] = []
+async def read_papers(runtime: LibraryRuntime, *citekeys: str) -> dict[str, PaperRecord]:
+    records: dict[str, PaperRecord] = {}
 
-    async def worker(session, job, token):  # type: ignore[no-untyped-def]
+    async def worker(session: LibrarySession, job: Job, token: CancellationToken) -> None:
         del job, token
-        records.append(session.read_paper(citekey))
+        records.update(
+            session.inspect(
+                lambda library: {citekey: library.read_paper(citekey) for citekey in citekeys}
+            )
+        )
 
     job = await runtime.enqueue_library_read(JobKind.MAINTENANCE, "read", worker)
-    await runtime.queue.wait(job.id)
-    return records[0]
+    assert (await runtime.queue.wait(job.id)).state is JobState.SUCCEEDED
+    return records
 
 
-async def seed(runtime, record: PaperRecord) -> None:  # type: ignore[no-untyped-def]
+async def read(runtime: LibraryRuntime, citekey: str) -> PaperRecord:
+    return (await read_papers(runtime, citekey))[citekey]
+
+
+async def seed(runtime: LibraryRuntime, record: PaperRecord) -> None:
     async def worker(session: PaperSession, job: Job, token: CancellationToken) -> None:
         del job, token
         session.write_record(record)
@@ -62,130 +75,111 @@ async def seed(runtime, record: PaperRecord) -> None:  # type: ignore[no-untyped
     assert (await runtime.queue.wait(job.id)).state is JobState.SUCCEEDED
 
 
-async def test_preview_parses_rdf_and_plans_through_library_read(tmp_path: Path) -> None:
+async def test_preview_returns_an_actionable_plan_through_a_library_read(
+    tmp_path: Path,
+) -> None:
     runtime = RuntimeRegistry().create(tmp_path / "library")
 
     plan = await preview_import(runtime, FIXTURES / "clean")
 
-    assert len(plan.additions) == 5
-    assert plan.problems == []
-    assert runtime.queue.list_jobs()[-1].scope is JobScope.LIBRARY_READ
+    assert any(item.metadata.citekey == "SmithJournal2024" for item in plan.additions)
+    preview_job = runtime.queue.list_jobs()[-1]
+    assert preview_job.kind is JobKind.IMPORT
+    assert preview_job.scope is JobScope.LIBRARY_READ
 
 
-async def test_first_import_and_additive_reimport(tmp_path: Path) -> None:
-    runtime = RuntimeRegistry().create(tmp_path / "library")
-    first = planned(tmp_path, "First2024", body=b"first")
-
-    report = await apply_import(runtime, ImportPlan(additions=[first]))
-
-    assert report.added == ["First2024"]
-    record = await read(runtime, "First2024")
-    assert record.source_sha256 == first.attachment_sha256
-    assert record.source_pdf is not None
-    assert (runtime.root / record.source_pdf).read_bytes() == b"first"
-
-    second = planned(tmp_path, "Second2024", body=b"second")
-    additive = await apply_import(runtime, ImportPlan(additions=[second]))
-
-    assert additive.added == ["Second2024"]
-    assert (await read(runtime, "First2024")).metadata.title == "Title"
-    assert (await read(runtime, "Second2024")).source_sha256 == second.attachment_sha256
-
-
-async def test_metadata_refresh_preserves_artifact_provenance(tmp_path: Path) -> None:
-    runtime = RuntimeRegistry().create(tmp_path / "library")
-    item = planned(tmp_path, "Refresh2024", title="Old", body=b"same")
-    await apply_import(runtime, ImportPlan(additions=[item]))
-    record = await read(runtime, "Refresh2024")
-    record.conversion = ConversionRecord(
-        source_sha256=record.source_sha256,
-        transcription_sha256="transcription-hash",
-        backend="fake",
-    )
-    record.recipes["summary"] = RecipeRecord(
-        input_artifact="papers/Refresh2024/transcription.md",
-        input_sha256="transcription-hash",
-        output_artifact="papers/Refresh2024/summary.md",
-        output_sha256="summary-hash",
-    )
-    await seed(runtime, record)
-    refreshed = item.model_copy(deep=True)
-    refreshed.metadata.title = "Corrected"
-    refreshed.expected_source_sha256 = item.attachment_sha256
-
-    report = await apply_import(runtime, ImportPlan(refreshes=[refreshed]))
-
-    current = await read(runtime, "Refresh2024")
-    assert report.refreshed == ["Refresh2024"]
-    assert current.metadata.title == "Corrected"
-    assert current.conversion == record.conversion
-    assert current.recipes == record.recipes
-
-
-async def test_explicit_replacement_makes_outputs_stale_without_deleting_them(
+async def test_import_is_additive_and_reapplying_a_plan_is_idempotent(
     tmp_path: Path,
 ) -> None:
     runtime = RuntimeRegistry().create(tmp_path / "library")
-    old = planned(tmp_path, "Replace2024", body=b"old")
-    await apply_import(runtime, ImportPlan(additions=[old]))
-    record = await read(runtime, "Replace2024")
-    old_source = runtime.root / (record.source_pdf or "")
-    transcription = runtime.root / "papers" / "Replace2024" / "transcription.md"
+    first = planned(tmp_path, "First2024", body=b"first")
+    second = planned(tmp_path, "Second2024", body=b"second")
+
+    assert (await apply_import(runtime, ImportPlan(additions=[first]))).ok
+    first_before = await read(runtime, "First2024")
+    assert (await apply_import(runtime, ImportPlan(additions=[second]))).ok
+    before_replay = await read_papers(runtime, "First2024", "Second2024")
+
+    replay = await apply_import(runtime, ImportPlan(additions=[second]))
+
+    after_replay = await read_papers(runtime, "First2024", "Second2024")
+    assert replay.ok
+    assert before_replay["First2024"] == first_before
+    assert after_replay == before_replay
+    for citekey, expected_bytes in (
+        ("First2024", b"first"),
+        ("Second2024", b"second"),
+    ):
+        record = after_replay[citekey]
+        assert record.source_pdf is not None
+        assert (runtime.root / record.source_pdf).read_bytes() == expected_bytes
+        assert len(list((runtime.root / "papers" / citekey / "source").glob("*.pdf"))) == 1
+
+
+async def test_refresh_preserves_provenance_then_replacement_stales_outputs(
+    tmp_path: Path,
+) -> None:
+    runtime = RuntimeRegistry().create(tmp_path / "library")
+    original = planned(tmp_path, "Changed2024", title="Old", body=b"old source")
+    assert (await apply_import(runtime, ImportPlan(additions=[original]))).ok
+    record = await read(runtime, "Changed2024")
+    original_source_path = runtime.root / (record.source_pdf or "")
+
+    transcription = runtime.root / "papers" / "Changed2024" / "transcription.md"
     transcription.write_text("existing transcription", encoding="utf-8")
+    summary = runtime.root / "papers" / "Changed2024" / "summary.md"
+    summary.write_text("existing summary", encoding="utf-8")
     record.conversion = ConversionRecord(
         source_sha256=record.source_sha256,
         transcription_sha256=sha256_file(transcription),
+        backend="fake",
+    )
+    record.recipes["summary"] = RecipeRecord(
+        input_artifact="papers/Changed2024/transcription.md",
+        input_sha256=record.conversion.transcription_sha256,
+        output_artifact="papers/Changed2024/summary.md",
+        output_sha256=sha256_file(summary),
     )
     await seed(runtime, record)
+
+    refresh = planned(
+        tmp_path,
+        "Changed2024",
+        title="Corrected",
+        body=b"old source",
+        expected_source_sha256=original.attachment_sha256,
+    )
+    assert (await apply_import(runtime, ImportPlan(refreshes=[refresh]))).ok
+
+    refreshed = await read(runtime, "Changed2024")
+    assert refreshed.metadata.title == "Corrected"
+    assert refreshed.source_pdf == record.source_pdf
+    assert refreshed.source_sha256 == record.source_sha256
+    assert refreshed.conversion == record.conversion
+    assert refreshed.recipes == record.recipes
+
     replacement = planned(
         tmp_path,
-        "Replace2024",
-        body=b"new",
-        expected_source_sha256=old.attachment_sha256,
+        "Changed2024",
+        title="Corrected",
+        body=b"new source",
+        expected_source_sha256=original.attachment_sha256,
     )
+    assert (await apply_import(runtime, ImportPlan(source_replacements=[replacement]))).ok
 
-    report = await apply_import(runtime, ImportPlan(source_replacements=[replacement]))
-
-    current = await read(runtime, "Replace2024")
-    assert report.replaced == ["Replace2024"]
-    assert current.source_sha256 == replacement.attachment_sha256
-    assert current.conversion.source_sha256 == old.attachment_sha256
+    replaced = await read(runtime, "Changed2024")
+    assert replaced.source_sha256 == replacement.attachment_sha256
+    assert replaced.source_pdf is not None
+    assert (runtime.root / replaced.source_pdf).read_bytes() == b"new source"
+    assert replaced.conversion == record.conversion
+    assert replaced.conversion.source_sha256 != replaced.source_sha256
+    assert replaced.recipes == record.recipes
     assert transcription.read_text(encoding="utf-8") == "existing transcription"
-    assert old_source.read_bytes() == b"old"
+    assert summary.read_text(encoding="utf-8") == "existing summary"
+    assert original_source_path.read_bytes() == b"old source"
 
 
-async def test_missing_attachment_is_skipped_without_a_job(tmp_path: Path) -> None:
-    runtime = RuntimeRegistry().create(tmp_path / "library")
-    item = PlannedImport(
-        metadata=PaperMetadata(citekey="Missing2024", title="Missing"),
-        attachment_path=None,
-        attachment_sha256=None,
-        expected_source_sha256=None,
-    )
-
-    report = await apply_import(runtime, ImportPlan(additions=[item]))
-
-    assert report.jobs == []
-    assert report.skipped == ["Missing2024: missing PDF attachment"]
-    assert not (runtime.root / "papers" / "Missing2024").exists()
-
-
-async def test_reapplying_same_plan_is_idempotent(tmp_path: Path) -> None:
-    runtime = RuntimeRegistry().create(tmp_path / "library")
-    item = planned(tmp_path, "Same2024", body=b"same")
-    plan = ImportPlan(additions=[item])
-    await apply_import(runtime, plan)
-    before = (runtime.root / "papers" / "Same2024" / "paper.json").read_bytes()
-
-    second = await apply_import(runtime, plan)
-
-    after = (runtime.root / "papers" / "Same2024" / "paper.json").read_bytes()
-    assert second.added == ["Same2024"]
-    assert before == after
-    assert len(list((runtime.root / "papers" / "Same2024" / "source").glob("*.pdf"))) == 1
-
-
-async def test_failed_copy_leaves_no_paper_directory(tmp_path: Path) -> None:
+async def test_failed_copy_leaves_no_partial_paper(tmp_path: Path) -> None:
     runtime = RuntimeRegistry().create(tmp_path / "library")
     item = planned(tmp_path, "Broken2024")
     assert item.attachment_path is not None
@@ -193,40 +187,38 @@ async def test_failed_copy_leaves_no_paper_directory(tmp_path: Path) -> None:
 
     report = await apply_import(runtime, ImportPlan(additions=[item]))
 
+    assert not report.ok
     assert "Broken2024" in report.failed
     assert not (runtime.root / "papers" / "Broken2024").exists()
 
 
-async def test_interruption_after_source_install_leaves_library_valid(
+async def test_interruption_after_source_install_leaves_valid_metadata_only_paper(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runtime = RuntimeRegistry().create(tmp_path / "library")
     item = planned(tmp_path, "Interrupted2024")
-    original = PaperSession.write_record
-    writes = 0
+    original_install = PaperSession.install_artifact
 
-    def fail_second_write(self: PaperSession, record: PaperRecord) -> None:
-        nonlocal writes
-        writes += 1
-        if writes == 2:
-            raise OSError("simulated interruption")
-        original(self, record)
+    def install_then_interrupt(self: PaperSession, staged_path: Path, destination: str) -> str:
+        original_install(self, staged_path, destination)
+        raise OSError("simulated interruption after source installation")
 
-    monkeypatch.setattr(PaperSession, "write_record", fail_second_write)
+    monkeypatch.setattr(PaperSession, "install_artifact", install_then_interrupt)
 
     report = await apply_import(runtime, ImportPlan(additions=[item]))
 
+    assert not report.ok
     assert "Interrupted2024" in report.failed
-    assert validate_library(runtime.root).ok is True
+    assert validate_library(runtime.root).ok
     record = await read(runtime, "Interrupted2024")
     assert record.source_pdf is None
     assert record.source_sha256 is None
 
 
-async def test_import_cannot_overlap_conversion_for_same_citekey(tmp_path: Path) -> None:
+async def test_import_waits_for_the_existing_paper_lane_owner(tmp_path: Path) -> None:
     runtime = RuntimeRegistry().create(tmp_path / "library")
     initial = planned(tmp_path, "Lane2024", title="Old")
-    await apply_import(runtime, ImportPlan(additions=[initial]))
+    assert (await apply_import(runtime, ImportPlan(additions=[initial]))).ok
     started = asyncio.Event()
     release = asyncio.Event()
 
@@ -237,42 +229,31 @@ async def test_import_cannot_overlap_conversion_for_same_citekey(tmp_path: Path)
 
     await runtime.enqueue_paper("Lane2024", JobKind.CONVERSION, "convert", conversion)
     await started.wait()
-    refresh = initial.model_copy(deep=True)
-    refresh.metadata.title = "New"
-    refresh.expected_source_sha256 = initial.attachment_sha256
+    refresh = planned(
+        tmp_path,
+        "Lane2024",
+        title="New",
+        expected_source_sha256=initial.attachment_sha256,
+    )
     applying = asyncio.create_task(apply_import(runtime, ImportPlan(refreshes=[refresh])))
-    await asyncio.sleep(0)
+    try:
+        await asyncio.sleep(0)
+        assert not applying.done()
+        assert (await read(runtime, "Lane2024")).metadata.title == "Old"
+    finally:
+        release.set()
 
-    assert (await read(runtime, "Lane2024")).metadata.title == "Old"
-    release.set()
     report = await applying
-
-    assert report.refreshed == ["Lane2024"]
+    assert report.ok
     assert (await read(runtime, "Lane2024")).metadata.title == "New"
 
 
-async def test_duplicate_plan_is_rejected_before_any_job_is_enqueued(tmp_path: Path) -> None:
-    runtime = RuntimeRegistry().create(tmp_path / "library")
-    addition = planned(tmp_path, "Duplicate2024")
-    refresh = addition.model_copy(deep=True)
-    refresh.expected_source_sha256 = refresh.attachment_sha256
-
-    with pytest.raises(ValueError, match="more than once"):
-        await apply_import(
-            runtime,
-            ImportPlan(additions=[addition], refreshes=[refresh]),
-        )
-
-    assert runtime.queue.list_jobs() == []
-    assert not (runtime.root / "papers" / "Duplicate2024").exists()
-
-
-async def test_stale_source_replacement_cannot_overwrite_intervening_source(
+async def test_stale_replacement_cannot_overwrite_an_intervening_source(
     tmp_path: Path,
 ) -> None:
     runtime = RuntimeRegistry().create(tmp_path / "library")
     original = planned(tmp_path, "Cas2024", body=b"original")
-    await apply_import(runtime, ImportPlan(additions=[original]))
+    assert (await apply_import(runtime, ImportPlan(additions=[original]))).ok
     stale = planned(
         tmp_path,
         "Cas2024",
@@ -285,11 +266,11 @@ async def test_stale_source_replacement_cannot_overwrite_intervening_source(
         body=b"intervening",
         expected_source_sha256=original.attachment_sha256,
     )
-    applied = await apply_import(runtime, ImportPlan(source_replacements=[intervening]))
-    assert applied.replaced == ["Cas2024"]
+    assert (await apply_import(runtime, ImportPlan(source_replacements=[intervening]))).ok
 
     rejected = await apply_import(runtime, ImportPlan(source_replacements=[stale]))
 
+    assert not rejected.ok
     assert "Cas2024" in rejected.failed
     current = await read(runtime, "Cas2024")
     assert current.source_sha256 == intervening.attachment_sha256

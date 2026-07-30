@@ -48,8 +48,13 @@ def test_healthy_library_has_no_problems(library_root: Path) -> None:
     assert report.problems == []
 
 
-@pytest.mark.parametrize("mutation", ["missing", "malformed", "newer"])
-def test_library_metadata_problems_are_errors(library_root: Path, mutation: str) -> None:
+@pytest.mark.parametrize(
+    ("mutation", "action_concept"),
+    [("missing", "restore"), ("malformed", "restore"), ("newer", "compatible")],
+)
+def test_library_metadata_problems_are_actionable_errors(
+    library_root: Path, mutation: str, action_concept: str
+) -> None:
     create_library(library_root)
     info = library_root / "library.json"
     if mutation == "missing":
@@ -64,94 +69,96 @@ def test_library_metadata_problems_are_errors(library_root: Path, mutation: str)
     report = validate_library(library_root)
 
     assert not report.ok
-    assert report.problems[0].severity == "error"
-    assert report.problems[0].action
+    assert len(report.problems) == 1
+    problem = report.problems[0]
+    assert problem.severity == "error"
+    assert problem.citekey is None
+    assert action_concept in problem.action.lower()
 
 
-def test_invalid_paper_directory_is_reported_and_validation_continues(library_root: Path) -> None:
+def test_corrupt_paper_is_reported_and_validation_continues(library_root: Path) -> None:
     library, _record = _library_with_source(library_root)
-    bad = library_root / "papers" / "bad key"
+    bad = library_root / "papers" / "Broken2024"
     bad.mkdir()
-
-    report = validate_library(library)
-
-    assert any(
-        problem.severity == "error" and problem.citekey == "bad key" for problem in report.problems
-    )
-
-
-def test_missing_source_is_not_reprocessable_warning(library_root: Path) -> None:
-    library, _record = _library_with_source(library_root)
+    (bad / "paper.json").write_text("not-json", encoding="utf-8")
     (library_root / SOURCE_PATH).unlink()
 
     report = validate_library(library)
 
-    problem = next(problem for problem in report.problems if "not reprocessable" in problem.message)
-    assert problem.severity == "warning"
-    assert report.ok
+    assert {(problem.citekey, problem.severity) for problem in report.problems} == {
+        ("Broken2024", "error"),
+        ("Smith2024", "warning"),
+    }
+    assert all(problem.action for problem in report.problems)
 
 
-def test_source_hash_mismatch_is_corruption_error(library_root: Path) -> None:
+@pytest.mark.parametrize(
+    ("source_state", "severity", "report_ok"),
+    [("missing", "warning", True), ("mismatched", "error", False)],
+)
+def test_source_availability_distinguishes_reprocessability_from_corruption(
+    library_root: Path, source_state: str, severity: str, report_ok: bool
+) -> None:
     library, _record = _library_with_source(library_root)
-    (library_root / SOURCE_PATH).write_bytes(b"changed")
+    source = library_root / SOURCE_PATH
+    if source_state == "missing":
+        source.unlink()
+    else:
+        source.write_bytes(b"changed")
 
     report = validate_library(library)
 
-    assert any(
-        problem.severity == "error" and "Source PDF hash" in problem.message
-        for problem in report.problems
-    )
+    assert report.ok is report_ok
+    assert len(report.problems) == 1
+    problem = report.problems[0]
+    assert (problem.citekey, problem.severity) == ("Smith2024", severity)
+    assert "restore" in problem.action.lower()
 
 
-def test_stale_transcription_is_warning_but_bad_installed_hash_is_error(
-    library_root: Path,
+@pytest.mark.parametrize("artifact_kind", ["transcription", "recipe-output"])
+def test_stale_input_is_a_warning_but_installed_hash_mismatch_is_an_error(
+    library_root: Path, artifact_kind: str
 ) -> None:
     library, record = _library_with_source(library_root)
-    transcription = library_root / "papers" / "Smith2024" / "transcription.md"
-    transcription.write_text("text", encoding="utf-8")
-    record.conversion = ConversionRecord(
-        source_sha256="old-source",
-        transcription_sha256=sha256_file(transcription),
-    )
+    if artifact_kind == "transcription":
+        artifact = library_root / "papers" / "Smith2024" / "transcription.md"
+        artifact.write_text("text", encoding="utf-8")
+        record.conversion = ConversionRecord(
+            source_sha256="old-source",
+            transcription_sha256=sha256_file(artifact),
+        )
+    else:
+        artifact = library_root / "papers" / "Smith2024" / "summary.md"
+        artifact.write_text("summary", encoding="utf-8")
+        record.recipes["summary"] = RecipeRecord(
+            input_artifact=SOURCE_PATH,
+            input_sha256="old-source",
+            output_artifact="papers/Smith2024/summary.md",
+            output_sha256=sha256_file(artifact),
+        )
     library.write_paper(record)
 
     report = validate_library(library)
 
-    assert any(
-        problem.severity == "warning" and "transcription is stale" in problem.message
-        for problem in report.problems
-    )
-    transcription.write_text("tampered", encoding="utf-8")
-    report = validate_library(library)
-    assert any(
-        problem.severity == "error" and "transcription hash" in problem.message
-        for problem in report.problems
-    )
+    assert [(problem.citekey, problem.severity) for problem in report.problems] == [
+        ("Smith2024", "warning")
+    ]
+    assert "rerun" in report.problems[0].action.lower()
 
-
-def test_recipe_output_hash_and_input_freshness_are_checked(library_root: Path) -> None:
-    library, record = _library_with_source(library_root)
-    summary = library_root / "papers" / "Smith2024" / "summary.md"
-    summary.write_text("summary", encoding="utf-8")
-    record.recipes["summary"] = RecipeRecord(
-        input_artifact=SOURCE_PATH,
-        input_sha256="old-source",
-        output_artifact="papers/Smith2024/summary.md",
-        output_sha256=sha256_file(summary),
-    )
-    library.write_paper(record)
-
+    artifact.write_text("tampered", encoding="utf-8")
     report = validate_library(library)
 
+    assert {problem.severity for problem in report.problems} == {"error", "warning"}
+    assert all(problem.citekey == "Smith2024" for problem in report.problems)
     assert any(
-        problem.severity == "warning" and "Recipe output" in problem.message
+        "restore" in problem.action.lower()
         for problem in report.problems
+        if problem.severity == "error"
     )
-    summary.write_text("tampered", encoding="utf-8")
-    report = validate_library(library)
     assert any(
-        problem.severity == "error" and "recipe output" in problem.message
+        "rerun" in problem.action.lower()
         for problem in report.problems
+        if problem.severity == "warning"
     )
 
 
@@ -164,13 +171,12 @@ def test_paper_directory_rejects_unexpected_entries(library_root: Path) -> None:
 
     report = validate_library(library)
 
-    unexpected = [
-        problem for problem in report.problems if "Unexpected unrecorded" in problem.message
-    ]
-    assert all(problem.severity == "error" and problem.action for problem in unexpected)
+    assert len(report.problems) == 3
     assert all(
-        any(repr(name) in problem.message for problem in unexpected)
-        for name in ("nested", "payload.json", "orphan.md")
+        problem.severity == "error"
+        and problem.citekey == "Smith2024"
+        and "remove" in problem.action.lower()
+        for problem in report.problems
     )
 
 
@@ -182,9 +188,11 @@ def test_deleted_paper_is_reported_as_stale_index(library_root: Path) -> None:
 
     report = validate_library(library)
 
-    problem = next(problem for problem in report.problems if "Deleted2024" in problem.message)
-    assert problem.severity == "warning"
-    assert problem.action == "Rebuild the indexes."
+    assert report.ok
+    assert len(report.problems) == 1
+    problem = report.problems[0]
+    assert (problem.citekey, problem.severity) == ("Deleted2024", "warning")
+    assert "rebuild" in problem.action.lower()
 
 
 def test_validation_does_not_modify_library(library_root: Path) -> None:

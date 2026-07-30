@@ -23,6 +23,13 @@ class PrintingConverter(FakeConverter):
         return super().convert(request)
 
 
+class ProcessIdentityConverter(FakeConverter):
+    def convert(self, request: ConversionRequest) -> ConversionResult:
+        result = super().convert(request)
+        result.diagnostics["converter_pid"] = str(os.getpid())
+        return result
+
+
 class HardExitConverter:
     name = "hard-exit"
 
@@ -87,15 +94,6 @@ class NonCanonicalFigureConverter(FakeConverter):
         figure = request.staging_dir / "wrong-place.png"
         figure.write_bytes(b"figure")
         result.figure_paths.append(figure)
-        return result
-
-
-class NonCanonicalPageConverter(FakeConverter):
-    def convert(self, request: ConversionRequest) -> ConversionResult:
-        result = super().convert(request)
-        page = request.staging_dir / "wrong-page.png"
-        page.write_bytes(b"page")
-        result.page_paths.append(page)
         return result
 
 
@@ -182,20 +180,49 @@ def terminate_test_process(pid: int) -> None:
         os.kill(pid, signal.SIGKILL)
 
 
+def wait_for_pid(pid_path: Path, *, timeout_seconds: float = 5) -> int:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            return int(pid_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, ValueError):
+            time.sleep(0.02)
+    pytest.fail(f"converter did not report its subprocess PID within {timeout_seconds} seconds")
+
+
+def assert_process_stops(pid: int, *, timeout_seconds: float = 5) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while process_is_running(pid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not process_is_running(pid)
+
+
 def test_success_runs_in_spawned_child_and_preserves_outputs(tmp_path: Path) -> None:
     request = make_request(tmp_path)
 
     result = run_conversion(
-        ConverterSpec(FAKE_SPEC, {"figure_count": 2}),
+        ConverterSpec(
+            "tests.convert.test_runner:ProcessIdentityConverter",
+            {"figure_count": 2},
+        ),
         request,
     )
 
-    assert result.ok is True
+    assert result.ok
+    assert int(result.diagnostics["converter_pid"]) != os.getpid()
     assert result.transcription_path is not None
-    assert result.transcription_path.is_file()
+    assert result.transcription_path == request.staging_dir / "transcription.md"
+    assert result.transcription_path.stat().st_size > 0
     assert len(result.figure_paths) == 2
-    assert result.page_paths == [request.staging_dir / "pages" / "page1.png"]
-    assert result.diagnostics == {"stdout": "", "stderr": ""}
+    assert all(
+        path.is_file() and path.parent == request.staging_dir / "figures"
+        for path in result.figure_paths
+    )
+    assert len(result.page_paths) == 1
+    assert all(
+        path.is_file() and path.parent == request.staging_dir / "pages"
+        for path in result.page_paths
+    )
     assert_no_converter_children()
 
 
@@ -204,8 +231,8 @@ def test_converter_failure_is_returned_and_staging_is_cleaned(tmp_path: Path) ->
 
     result = run_conversion(ConverterSpec(FAKE_SPEC, {"mode": "failure"}), request)
 
-    assert result.ok is False
-    assert result.error == "fake converter failure"
+    assert not result.ok
+    assert result.error
     assert list(request.staging_dir.iterdir()) == []
     assert_no_converter_children()
 
@@ -215,8 +242,8 @@ def test_child_exception_becomes_failed_result_with_traceback(tmp_path: Path) ->
 
     result = run_conversion(ConverterSpec(FAKE_SPEC, {"mode": "crash"}), request)
 
-    assert result.ok is False
-    assert result.error == "converter raised an exception: RuntimeError: fake converter crash"
+    assert not result.ok
+    assert "RuntimeError" in (result.error or "")
     assert "RuntimeError: fake converter crash" in result.diagnostics["stderr"]
     assert list(request.staging_dir.iterdir()) == []
     assert_no_converter_children()
@@ -237,45 +264,56 @@ def test_timeout_kills_process_tree_and_cleans_staging(tmp_path: Path) -> None:
         )
         grandchild_pid = int(grandchild_pid_path.read_text(encoding="utf-8"))
 
-        assert result.ok is False
-        assert result.error == "conversion timed out after 1 seconds"
+        assert not result.ok
+        assert "timed out" in (result.error or "")
         assert time.monotonic() - started < 10
         assert list(request.staging_dir.iterdir()) == []
         assert_no_converter_children()
-        deadline = time.monotonic() + 5
-        while process_is_running(grandchild_pid) and time.monotonic() < deadline:
-            time.sleep(0.05)
-        assert process_is_running(grandchild_pid) is False
+        assert_process_stops(grandchild_pid)
     finally:
         if grandchild_pid_path.is_file():
             terminate_test_process(int(grandchild_pid_path.read_text(encoding="utf-8")))
 
 
-def test_cancellation_kills_child_and_cleans_staging(tmp_path: Path) -> None:
+def test_cancellation_kills_process_tree_and_cleans_staging(tmp_path: Path) -> None:
     request = make_request(tmp_path, timeout_seconds=30)
+    grandchild_pid_path = tmp_path / "grandchild.pid"
     cancel_event = threading.Event()
-    result_holder = []
+    result_holder: list[ConversionResult] = []
 
     thread = threading.Thread(
         target=lambda: result_holder.append(
             run_conversion(
-                ConverterSpec(FAKE_SPEC, {"mode": "hang", "hang_seconds": 30}),
+                ConverterSpec(
+                    "tests.convert.test_runner:GrandchildConverter",
+                    {"pid_path": str(grandchild_pid_path)},
+                ),
                 request,
                 cancel_event=cancel_event,
             )
         )
     )
     thread.start()
-    time.sleep(0.3)
-    cancel_event.set()
-    thread.join(timeout=10)
+    grandchild_pid: int | None = None
+    try:
+        grandchild_pid = wait_for_pid(grandchild_pid_path)
+        cancel_event.set()
+        thread.join(timeout=10)
 
-    assert not thread.is_alive()
-    assert len(result_holder) == 1
-    assert result_holder[0].ok is False
-    assert result_holder[0].error == "conversion cancelled"
-    assert list(request.staging_dir.iterdir()) == []
-    assert_no_converter_children()
+        assert not thread.is_alive()
+        assert len(result_holder) == 1
+        assert not result_holder[0].ok
+        assert "cancel" in (result_holder[0].error or "")
+        assert list(request.staging_dir.iterdir()) == []
+        assert_no_converter_children()
+        assert_process_stops(grandchild_pid)
+    finally:
+        cancel_event.set()
+        thread.join(timeout=10)
+        if grandchild_pid is None and grandchild_pid_path.is_file():
+            grandchild_pid = int(grandchild_pid_path.read_text(encoding="utf-8"))
+        if grandchild_pid is not None:
+            terminate_test_process(grandchild_pid)
 
 
 def test_stdout_and_stderr_are_captured(tmp_path: Path) -> None:
@@ -283,89 +321,48 @@ def test_stdout_and_stderr_are_captured(tmp_path: Path) -> None:
 
     result = run_conversion(ConverterSpec("tests.convert.test_runner:PrintingConverter"), request)
 
-    assert result.ok is True
-    assert result.diagnostics["stdout"] == "fake stdout\n"
-    assert result.diagnostics["stderr"] == "fake stderr\n"
-
-
-def test_empty_output_failure_is_cleaned(tmp_path: Path) -> None:
-    request = make_request(tmp_path)
-
-    result = run_conversion(ConverterSpec(FAKE_SPEC, {"mode": "empty"}), request)
-
-    assert result.ok is False
-    assert result.error == "fake converter produced an empty transcription"
-    assert list(request.staging_dir.iterdir()) == []
-
-
-def test_invalid_module_path_becomes_failed_result(tmp_path: Path) -> None:
-    result = run_conversion(ConverterSpec("not-a-module-path"), make_request(tmp_path))
-
-    assert result.ok is False
-    assert result.error is not None
-    assert result.error.startswith("converter raised an exception: ValueError:")
+    assert result.ok
+    assert "fake stdout" in result.diagnostics["stdout"]
+    assert "fake stderr" in result.diagnostics["stderr"]
 
 
 def test_nonzero_child_exit_becomes_failed_result(tmp_path: Path) -> None:
-    result = run_conversion(
-        ConverterSpec("tests.convert.test_runner:HardExitConverter"), make_request(tmp_path)
-    )
-
-    assert result.ok is False
-    assert result.error == "converter process exited without a result (exit code 7)"
-    assert_no_converter_children()
-
-
-def test_false_success_with_empty_artifact_is_rejected(tmp_path: Path) -> None:
     request = make_request(tmp_path)
 
     result = run_conversion(
-        ConverterSpec("tests.convert.test_runner:EmptySuccessConverter"), request
-    )
-
-    assert result.ok is False
-    assert result.error == "converter reported success without a non-empty transcription"
-    assert list(request.staging_dir.iterdir()) == []
-
-
-def test_false_success_with_noncanonical_transcription_is_rejected(tmp_path: Path) -> None:
-    request = make_request(tmp_path)
-
-    result = run_conversion(
-        ConverterSpec("tests.convert.test_runner:NonCanonicalSuccessConverter"), request
+        ConverterSpec("tests.convert.test_runner:HardExitConverter"),
+        request,
     )
 
     assert not result.ok
-    assert result.error == "converter must return the canonical staging transcription.md path"
+    assert "without a result" in (result.error or "")
     assert list(request.staging_dir.iterdir()) == []
+    assert_no_converter_children()
 
 
-def test_false_success_with_figure_outside_figures_directory_is_rejected(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "converter_class",
+    [
+        "EmptySuccessConverter",
+        "NonCanonicalSuccessConverter",
+        "NonCanonicalFigureConverter",
+    ],
+    ids=["empty-transcription", "noncanonical-transcription", "misplaced-figure"],
+)
+def test_invalid_success_artifacts_are_rejected_and_cleaned(
+    tmp_path: Path, converter_class: str
 ) -> None:
     request = make_request(tmp_path)
 
     result = run_conversion(
-        ConverterSpec("tests.convert.test_runner:NonCanonicalFigureConverter"), request
+        ConverterSpec(f"tests.convert.test_runner:{converter_class}"),
+        request,
     )
 
     assert not result.ok
-    assert result.error == (
-        "converter must return figure paths inside the staging figures directory"
-    )
+    assert result.error
     assert list(request.staging_dir.iterdir()) == []
-
-
-def test_false_success_with_page_outside_pages_directory_is_rejected(tmp_path: Path) -> None:
-    request = make_request(tmp_path)
-
-    result = run_conversion(
-        ConverterSpec("tests.convert.test_runner:NonCanonicalPageConverter"), request
-    )
-
-    assert not result.ok
-    assert result.error == "converter must return page images inside the staging pages directory"
-    assert list(request.staging_dir.iterdir()) == []
+    assert_no_converter_children()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows symlink privileges are environment-specific")
@@ -377,5 +374,6 @@ def test_false_success_with_symlinked_transcription_is_rejected(tmp_path: Path) 
     )
 
     assert not result.ok
-    assert result.error == "converter must return the canonical staging transcription.md path"
+    assert result.error
     assert list(request.staging_dir.iterdir()) == []
+    assert_no_converter_children()

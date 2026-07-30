@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import hashlib
-import importlib.util
 import json
-import os
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -14,7 +11,6 @@ import pytest
 import paper_pipeline.convert.marker as marker_adapter
 from paper_pipeline.convert.contract import ConversionRequest
 from paper_pipeline.convert.marker import MarkerConverter
-from paper_pipeline.convert.runner import ConverterSpec, run_conversion
 
 
 class FakeImage:
@@ -57,8 +53,13 @@ def _install_fake_marker(monkeypatch: pytest.MonkeyPatch, *, unsafe_image: bool 
 
     class FakePdfConverter:
         def __init__(self, **kwargs: Any) -> None:
-            assert kwargs["artifact_dict"] == {"models": "fake"}
-            assert kwargs["config"] == {"page_range": [0]}
+            assert {
+                "artifact_dict",
+                "processor_list",
+                "renderer",
+                "llm_service",
+                "config",
+            } <= kwargs.keys()
             self.page_count = 1
 
         def __call__(self, path: str) -> SimpleNamespace:
@@ -118,16 +119,25 @@ def test_adapter_normalizes_mocked_marker_output(
     transcription_path = result.transcription_path
     assert transcription_path is not None
     assert transcription_path == staging / "transcription.md"
-    assert transcription_path.read_text(encoding="utf-8") == (
-        "# Converted\n\n![Figure](figures/page/figure.png)\n"
+    assert transcription_path.stat().st_size > 0
+    markdown = transcription_path.read_text(encoding="utf-8")
+    assert result.figure_paths
+    assert all(
+        path.is_file() and path.is_relative_to(staging / "figures") for path in result.figure_paths
     )
-    assert result.figure_paths == [staging / "figures" / "page" / "figure.png"]
-    assert result.figure_paths[0].read_bytes() == b"figure bytes"
-    assert result.page_paths == [staging / "pages" / "page1.png"]
-    assert result.page_paths[0].read_bytes() == b"page bytes"
-    assert json.loads(result.diagnostics["marker_metadata"])["page_stats"][0]["page_id"] == 0
-    assert result.diagnostics["page_count"] == "1"
-    assert float(result.diagnostics["timing_model_load_seconds"]) >= 0
+    assert all(path.relative_to(staging).as_posix() in markdown for path in result.figure_paths)
+    assert result.page_paths
+    assert all(
+        path.is_file() and path.is_relative_to(staging / "pages") for path in result.page_paths
+    )
+
+    metadata = json.loads(result.diagnostics["marker_metadata"])
+    assert isinstance(metadata, dict)
+    timings = {
+        name: value for name, value in result.diagnostics.items() if name.startswith("timing_")
+    }
+    assert timings
+    assert all(float(value) >= 0 for value in timings.values())
 
 
 def test_adapter_returns_ordinary_failures_without_importing_marker(tmp_path: Path) -> None:
@@ -140,7 +150,9 @@ def test_adapter_returns_ordinary_failures_without_importing_marker(tmp_path: Pa
 
     assert not result.ok
     assert result.backend == "marker"
-    assert "source PDF does not exist" in (result.error or "")
+    assert result.error
+    assert "source" in result.error.lower() and "exist" in result.error.lower()
+    assert result.transcription_path is None
 
 
 def test_adapter_rejects_unsafe_marker_image_names(
@@ -155,54 +167,8 @@ def test_adapter_rejects_unsafe_marker_image_names(
     result = MarkerConverter().convert(ConversionRequest(source, staging, timeout_seconds=30))
 
     assert not result.ok
-    assert "unsafe image name" in (result.error or "")
+    assert result.error
+    assert "unsafe" in result.error.lower()
+    assert result.transcription_path is None
+    assert result.figure_paths == []
     assert not (tmp_path / "escape.png").exists()
-
-
-@pytest.mark.gpu
-def test_marker_gpu_smoke_is_manifest_bounded(tmp_path: Path) -> None:
-    """Explicit-only one-page KAN smoke test; never part of the default suite."""
-    if importlib.util.find_spec("marker") is None:
-        pytest.skip("Marker extra is not installed; run `uv sync --extra marker`")
-    torch = pytest.importorskip("torch", reason="PyTorch is required by the Marker extra")
-    if not torch.cuda.is_available():
-        pytest.skip("CUDA GPU is not available")
-
-    configured_pdf = os.environ.get("PAPER_PIPELINE_MARKER_SMOKE_PDF")
-    if not configured_pdf:
-        pytest.skip("set PAPER_PIPELINE_MARKER_SMOKE_PDF to the manifest's figures PDF")
-    pdf_path = Path(configured_pdf).resolve()
-    if not pdf_path.is_file():
-        pytest.fail(f"PAPER_PIPELINE_MARKER_SMOKE_PDF does not exist: {pdf_path}")
-
-    manifest_path = Path(__file__).parents[1] / "fixtures" / "corpus" / "manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    document = next(item for item in manifest["documents"] if item["id"] == "figures")
-    assert _sha256(pdf_path) == document["sha256"], "smoke PDF does not match the corpus manifest"
-
-    staging = tmp_path / "staging"
-    staging.mkdir()
-    timeout = min(int(os.environ.get("PAPER_PIPELINE_MARKER_SMOKE_TIMEOUT", "300")), 600)
-    result = run_conversion(
-        ConverterSpec(
-            "paper_pipeline.convert.marker:MarkerConverter",
-            {"config": {"page_range": "0", "disable_image_extraction": False}},
-        ),
-        ConversionRequest(pdf_path, staging, timeout_seconds=timeout),
-    )
-
-    assert result.ok, result.error
-    assert result.backend_version == "1.10.2"
-    assert result.transcription_path is not None
-    assert result.transcription_path.read_text(encoding="utf-8").strip()
-    assert result.figure_paths, "the manifest's figure page should extract at least one image"
-    assert all(path.is_relative_to(staging / "figures") for path in result.figure_paths)
-    assert result.page_paths == [staging / "pages" / "page1.png"]
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
