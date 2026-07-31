@@ -42,23 +42,53 @@
       {% if large_document_count %}<span class="bulk-selection-note">{{ large_document_count }} large document{{ '' if large_document_count == 1 else 's' }} (100+ pages) excluded from bulk selection</span>{% endif %}
     </div>
     <div class="action-controls">
-      <button class="button" type="button" hx-post="/papers/actions/convert"
+      <button class="button button-quiet configure-work-button" type="button"
+              data-work-config-open aria-haspopup="dialog">
+        Configure (<span data-configured-count>0</span> selected)
+      </button>
+      <button class="button queue-work-button" type="button"
+              hx-post="/papers/actions/queue"
               hx-include="#paper-selection" hx-target="#action-feedback"
-              hx-disabled-elt="this">Convert selected</button>
-      <button class="button button-quiet" type="button" hx-post="/papers/actions/pages"
-              hx-include="#paper-selection" hx-target="#action-feedback"
-              hx-disabled-elt="this">Render pages</button>
-      <fieldset class="recipe-picker" title="Each checked recipe runs sequentially for every selected paper">
-        <legend>Recipes</legend>
-        {% for recipe_option in recipe_options %}
-          <label><input type="checkbox" name="recipe_names" value="{{ recipe_option.name }}"{% if recipe_option.name == 'summary' %} checked{% endif %}> {{ recipe_option.name | replace('_', ' ') | title }}</label>
-        {% endfor %}
-      </fieldset>
-      <button class="button button-accent" type="button" hx-post="/papers/actions/recipes"
-              hx-include="#paper-selection" hx-target="#action-feedback"
-              hx-disabled-elt="this">Run recipe</button>
+              hx-disabled-elt="this" disabled>
+        Queue (<span data-selected-paper-count>0</span> papers)
+      </button>
     </div>
   </div>
+  <dialog id="work-config-dialog" class="work-config-dialog" aria-labelledby="work-config-title">
+    <div class="work-config-heading">
+      <div>
+        <p class="eyebrow">Queue configuration</p>
+        <h2 id="work-config-title">Choose what to run</h2>
+      </div>
+      <button class="dialog-close" type="button" data-work-config-close aria-label="Close configuration">×</button>
+    </div>
+    <p class="work-config-help">
+      Select once to run missing or stale results. Select twice to overwrite results that already exist.
+    </p>
+    <div class="work-option-list">
+      <button class="work-option" type="button" role="checkbox" aria-checked="false"
+              data-work-option="conversion" data-work-state="off">
+        <span class="tri-state-check" aria-hidden="true"></span>
+        <span class="work-option-label">Transcribe PDF <strong>(Overwrite)</strong></span>
+      </button>
+      <button class="work-option" type="button" role="checkbox" aria-checked="false"
+              data-work-option="pages" data-work-state="off">
+        <span class="tri-state-check" aria-hidden="true"></span>
+        <span class="work-option-label">Render PDF Pages <strong>(Overwrite)</strong></span>
+      </button>
+      {% for recipe_option in recipe_options %}
+        <button class="work-option" type="button" role="checkbox" aria-checked="false"
+                data-work-option="recipe_{{ recipe_option.name }}" data-work-state="off">
+          <span class="tri-state-check" aria-hidden="true"></span>
+          <span class="work-option-label">Recipe: {{ recipe_option.name | replace('_', ' ') | title }} <strong>(Overwrite)</strong></span>
+        </button>
+      {% endfor %}
+    </div>
+    <div class="work-config-footer">
+      <span><strong data-configured-count>0</strong> options selected</span>
+      <button class="button" type="button" data-work-config-close>Done</button>
+    </div>
+  </dialog>
   <div id="action-feedback" aria-live="polite"></div>
   <div class="table-wrap">
     <table class="papers-table">

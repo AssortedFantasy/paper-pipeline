@@ -29,6 +29,9 @@ from paper_pipeline.services.library_ops import (
 from paper_pipeline.services.paper_browse import browse_papers
 from paper_pipeline.services.paper_detail import get_figure, get_paper_detail, get_source_pdf
 from paper_pipeline.services.processing import (
+    ProcessingMode,
+    ProcessingSelection,
+    queue_configured_processing,
     queue_conversion,
     queue_page_render,
     queue_recipes,
@@ -335,6 +338,68 @@ def create_ui_router(context: WebContext) -> APIRouter:
         return _action_response(
             request,
             message=f"Queued page rendering for {len(jobs)} paper{'s' if len(jobs) != 1 else ''}.",
+        )
+
+    @router.post("/papers/actions/queue", response_class=HTMLResponse)
+    async def queue_selected(request: Request) -> HTMLResponse:
+        values = await _form_values(request)
+        citekeys = values.get("citekeys", [])
+        if context.runtime is None:
+            return _action_response(request, error="Open a library before launching work.")
+        if _first(values, "library_key") != context.runtime.library_key:
+            return _action_response(
+                request,
+                error="The selected library changed. Reload the papers page before launching work.",
+            )
+        if not citekeys:
+            return _action_response(request, error="Select at least one paper to queue.")
+        try:
+            recipe_names = {recipe.name for recipe in load_builtin_recipes().values()}
+            recipe_modes = tuple(
+                (name.removeprefix("mode_recipe_"), ProcessingMode(_first(values, name)))
+                for name in values
+                if name.startswith("mode_recipe_")
+                and name.removeprefix("mode_recipe_") in recipe_names
+                and _first(values, name)
+            )
+            selection = ProcessingSelection(
+                conversion=(
+                    ProcessingMode(_first(values, "mode_conversion"))
+                    if _first(values, "mode_conversion")
+                    else None
+                ),
+                page_render=(
+                    ProcessingMode(_first(values, "mode_pages"))
+                    if _first(values, "mode_pages")
+                    else None
+                ),
+                recipes=recipe_modes,
+            )
+            jobs = await queue_configured_processing(
+                context.runtime,
+                citekeys,
+                selection,
+                converter_spec=context.converter_spec,
+                converter_timeout_seconds=context.config.converter_timeout_seconds,
+                renderer_spec=context.page_renderer_spec,
+                page_render_timeout_seconds=context.config.page_render_timeout_seconds,
+                provider_name=context.provider_name,
+                model=context.config.llm_model or "",
+            )
+        except (KeyError, ValueError, RuntimeError) as error:
+            return _action_response(request, error=str(error))
+        if not jobs:
+            return _action_response(
+                request,
+                message="Nothing queued. The selected results are already up to date.",
+            )
+        paper_count = len({job.citekey for job in jobs if job.citekey is not None})
+        return _action_response(
+            request,
+            message=(
+                f"Queued {len(jobs)} job{'s' if len(jobs) != 1 else ''} "
+                f"across {paper_count} paper{'s' if paper_count != 1 else ''}."
+            ),
         )
 
     @router.get("/papers/row/{citekey}", response_class=HTMLResponse)

@@ -6,6 +6,7 @@
     authors: false,
     citekey: false
   };
+  var workOptionStates = {};
   var columnResize = null;
 
   function applyPaperWrap() {
@@ -94,6 +95,92 @@
         (mode === "pending" && input.dataset.conversionPending === "true") ||
         (mode === "pages" && input.dataset.pagesPending === "true"));
     });
+    updateWorkControls();
+  });
+
+  function optionState(option) {
+    return workOptionStates[option] || "off";
+  }
+
+  function applyWorkConfiguration() {
+    var form = document.getElementById("paper-selection");
+    if (!form) return;
+    form.querySelectorAll("[data-work-option]").forEach(function (control) {
+      var option = control.dataset.workOption;
+      var state = optionState(option);
+      control.dataset.workState = state;
+      control.setAttribute(
+        "aria-checked",
+        state === "overwrite" ? "mixed" : state === "run" ? "true" : "false"
+      );
+      var name = "mode_" + option;
+      var input = form.querySelector("input[type='hidden'][name='" + name + "']");
+      if (state === "off") {
+        if (input) input.remove();
+        return;
+      }
+      if (!input) {
+        input = document.createElement("input");
+        input.type = "hidden";
+        input.name = name;
+        form.appendChild(input);
+      }
+      input.value = state;
+    });
+    updateWorkControls();
+  }
+
+  function updateWorkControls() {
+    var form = document.getElementById("paper-selection");
+    if (!form) return;
+    var selectedPapers = form.querySelectorAll(
+      "tbody input[name='citekeys']:checked"
+    ).length;
+    var configured = Object.keys(workOptionStates).filter(function (option) {
+      return optionState(option) !== "off";
+    }).length;
+    form.querySelectorAll("[data-selected-paper-count]").forEach(function (count) {
+      count.textContent = String(selectedPapers);
+    });
+    form.querySelectorAll("[data-configured-count]").forEach(function (count) {
+      count.textContent = String(configured);
+    });
+    var queue = form.querySelector(".queue-work-button");
+    if (queue) queue.disabled = selectedPapers === 0 || configured === 0;
+  }
+
+  document.addEventListener("click", function (event) {
+    var control = event.target.closest("[data-work-option]");
+    if (!control) return;
+    var option = control.dataset.workOption;
+    var state = optionState(option);
+    workOptionStates[option] =
+      state === "off" ? "run" : state === "run" ? "overwrite" : "off";
+    applyWorkConfiguration();
+  });
+
+  document.addEventListener("click", function (event) {
+    var control = event.target.closest("[data-work-config-open]");
+    if (!control) return;
+    var dialog = document.getElementById("work-config-dialog");
+    if (dialog && !dialog.open) dialog.showModal();
+  });
+
+  document.addEventListener("click", function (event) {
+    var control = event.target.closest("[data-work-config-close]");
+    if (!control) return;
+    var dialog = control.closest("dialog");
+    if (dialog) dialog.close();
+  });
+
+  document.addEventListener("click", function (event) {
+    if (event.target.matches(".work-config-dialog")) event.target.close();
+  });
+
+  document.addEventListener("change", function (event) {
+    if (event.target.matches("#paper-selection tbody input[name='citekeys']")) {
+      updateWorkControls();
+    }
   });
 
   function payload(event) {
@@ -128,6 +215,10 @@
 
   document.addEventListener("sse:state", updateLive);
   document.addEventListener("sse:progress", updateLive);
-  document.addEventListener("htmx:load", applyPaperWrap);
+  document.addEventListener("htmx:load", function () {
+    applyPaperWrap();
+    applyWorkConfiguration();
+  });
   applyPaperWrap();
+  applyWorkConfiguration();
 })();

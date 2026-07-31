@@ -120,6 +120,13 @@ def _wait_for_jobs(page: Page, url: str, *, count: int) -> None:
     pytest.fail("jobs did not finish")
 
 
+def _configure_work(page: Page, *options: str) -> None:
+    page.get_by_role("button", name="Configure", exact=False).click()
+    for option in options:
+        page.get_by_role("checkbox", name=option, exact=False).click()
+    page.get_by_role("button", name="Done", exact=True).click()
+
+
 def test_papers_load_filter_select_and_launch(page: Page, ui_server: str, tmp_path: Path) -> None:
     _create_library(page, ui_server, tmp_path / "library")
     _import_papers(page, ui_server)
@@ -153,22 +160,26 @@ def test_papers_load_filter_select_and_launch(page: Page, ui_server: str, tmp_pa
     expect(page.locator("tbody input[type=checkbox]:checked")).to_have_count(5)
     page.get_by_role("button", name="Unselect all").click()
 
-    page.get_by_role("button", name="Convert selected").click()
-    expect(page.get_by_role("alert")).to_contain_text("Select at least one paper")
+    _configure_work(page, "Transcribe PDF")
+    expect(page.get_by_role("button", name="Configure (1 selected)")).to_be_visible()
+    queue_button = page.get_by_role("button", name="Queue (0 papers)")
+    expect(queue_button).to_be_disabled()
 
     first_checkbox = page.locator("tbody input[type=checkbox]").first
     first_checkbox.check()
-    page.get_by_role("button", name="Convert selected").click()
-    expect(page.get_by_role("status")).to_contain_text("Queued 1 conversion job")
+    queue_button = page.get_by_role("button", name="Queue (1 papers)")
+    expect(queue_button).to_be_enabled()
+    queue_button.click()
+    expect(page.get_by_role("status")).to_contain_text("Queued 1 job across 1 paper")
     _wait_for_jobs(page, ui_server, count=1)
 
     page.reload()
     page.get_by_label("Conversion").select_option("ready")
     expect(page.locator("tbody tr")).to_have_count(1)
     page.locator("tbody input[type=checkbox]").check()
-    page.get_by_label("Contributions").check()
-    page.get_by_role("button", name="Run recipe").click()
-    expect(page.get_by_role("status")).to_contain_text("Queued 1 recipe job")
+    _configure_work(page, "Recipe: Summary", "Recipe: Contributions")
+    page.get_by_role("button", name="Queue (1 papers)").click()
+    expect(page.get_by_role("status")).to_contain_text("Queued 1 job across 1 paper")
     expect(page.locator("tbody .live-job-status")).to_contain_text("running")
     _wait_for_jobs(page, ui_server, count=2)
     expect(page.locator("tbody .spend-cell")).to_contain_text("$0.0020")
@@ -218,8 +229,9 @@ def test_page_rendering_is_a_separate_local_action(
     first_row = page.locator("tbody tr").first
     first_row.locator("input[type=checkbox]").check()
 
-    page.get_by_role("button", name="Render pages", exact=True).click()
-    expect(page.get_by_role("status")).to_contain_text("Queued page rendering for 1 paper")
+    _configure_work(page, "Render PDF Pages")
+    page.get_by_role("button", name="Queue (1 papers)").click()
+    expect(page.get_by_role("status")).to_contain_text("Queued 1 job across 1 paper")
     _wait_for_jobs(page, ui_server, count=1)
 
     page.reload()
@@ -350,11 +362,48 @@ def test_stale_papers_tab_cannot_launch_against_new_library(
     _import_papers(page, ui_server)
     page.goto(f"{ui_server}/papers")
     page.locator("tbody input[type=checkbox]").first.check()
+    _configure_work(page, "Transcribe PDF")
 
     _create_library(page, ui_server, second)
-    page.get_by_role("button", name="Convert selected").click()
+    page.get_by_role("button", name="Queue (1 papers)").click()
 
     expect(page.get_by_role("alert")).to_contain_text("selected library changed")
     jobs = page.request.get(f"{ui_server}/api/jobs")
     assert jobs.ok, jobs.text()
     assert jobs.json()["jobs"] == []
+
+
+def test_configured_work_cycles_run_overwrite_and_skips_ready_results(
+    page: Page, ui_server: str, tmp_path: Path
+) -> None:
+    _create_library(page, ui_server, tmp_path / "library")
+    _import_papers(page, ui_server)
+    page.goto(f"{ui_server}/papers")
+    page.locator("tbody input[type=checkbox]").first.check()
+
+    page.get_by_role("button", name="Configure", exact=False).click()
+    summary = page.get_by_role("checkbox", name="Recipe: Summary", exact=False)
+    summary.click()
+    expect(summary).to_have_attribute("aria-checked", "true")
+    expect(summary.locator("strong")).to_be_hidden()
+    page.get_by_role("button", name="Done", exact=True).click()
+    page.get_by_role("button", name="Queue (1 papers)").click()
+    _wait_for_jobs(page, ui_server, count=1)
+
+    page.reload()
+    page.locator("tbody input[type=checkbox]").first.check()
+    _configure_work(page, "Recipe: Summary")
+    page.get_by_role("button", name="Queue (1 papers)").click()
+    expect(page.get_by_role("status")).to_contain_text("already up to date")
+    jobs = page.request.get(f"{ui_server}/api/jobs").json()["jobs"]
+    assert len([job for job in jobs if job["kind"] == "recipe"]) == 1
+
+    page.get_by_role("button", name="Configure", exact=False).click()
+    summary = page.get_by_role("checkbox", name="Recipe: Summary", exact=False)
+    summary.click()
+    expect(summary).to_have_attribute("aria-checked", "mixed")
+    expect(summary.locator("strong")).to_be_visible()
+    expect(summary.locator("strong")).to_have_text("(Overwrite)")
+    page.get_by_role("button", name="Done", exact=True).click()
+    page.get_by_role("button", name="Queue (1 papers)").click()
+    _wait_for_jobs(page, ui_server, count=2)

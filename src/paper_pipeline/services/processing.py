@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import cast
 
@@ -37,6 +38,22 @@ from paper_pipeline.services.runtime import LibraryRuntime, LibrarySession, Pape
 
 class ProcessingError(RuntimeError):
     """A queued processing operation failed safely."""
+
+
+class ProcessingMode(StrEnum):
+    """How configured work treats an already valid result."""
+
+    RUN = "run"
+    OVERWRITE = "overwrite"
+
+
+@dataclass(frozen=True)
+class ProcessingSelection:
+    """The operations configured for a multi-paper queue request."""
+
+    conversion: ProcessingMode | None = None
+    page_render: ProcessingMode | None = None
+    recipes: tuple[tuple[str, ProcessingMode], ...] = ()
 
 
 @dataclass
@@ -448,6 +465,92 @@ async def queue_recipes(
                 worker,
                 validate_completion=validate,
                 record_terminal=record_terminal,
+            )
+        )
+    return jobs
+
+
+async def queue_configured_processing(
+    runtime: LibraryRuntime,
+    citekeys: list[str],
+    selection: ProcessingSelection,
+    *,
+    converter_spec: ConverterSpec,
+    converter_timeout_seconds: int,
+    renderer_spec: PageRendererSpec,
+    page_render_timeout_seconds: int,
+    provider_name: str,
+    model: str = "",
+) -> list[Job]:
+    """Queue configured work, skipping valid results unless overwrite was selected."""
+    selected_citekeys = list(dict.fromkeys(citekeys))
+    definitions = load_builtin_recipes()
+    recipe_modes = dict(selection.recipes)
+    unknown_recipes = sorted(set(recipe_modes) - set(definitions))
+    if unknown_recipes:
+        raise ValueError(f"unknown recipe: {unknown_recipes[0]}")
+    if selection.conversion is None and selection.page_render is None and not recipe_modes:
+        raise ValueError("Choose at least one operation to queue.")
+
+    catalog = {item.record.metadata.citekey: item for item in runtime.catalog.snapshot().papers}
+    unknown_citekeys = [citekey for citekey in selected_citekeys if citekey not in catalog]
+    if unknown_citekeys:
+        raise KeyError(f"unknown paper: {unknown_citekeys[0]}")
+
+    jobs: list[Job] = []
+    if selection.conversion is not None:
+        conversion_targets = [
+            citekey
+            for citekey in selected_citekeys
+            if selection.conversion is ProcessingMode.OVERWRITE
+            or catalog[citekey].conversion_pending
+        ]
+        jobs.extend(
+            await queue_conversion(
+                runtime,
+                conversion_targets,
+                converter_spec=converter_spec,
+                timeout_seconds=converter_timeout_seconds,
+            )
+        )
+
+    if selection.page_render is not None:
+        page_targets = [
+            citekey
+            for citekey in selected_citekeys
+            if selection.page_render is ProcessingMode.OVERWRITE
+            or catalog[citekey].page_render_pending
+        ]
+        jobs.extend(
+            await queue_page_render(
+                runtime,
+                page_targets,
+                renderer_spec=renderer_spec,
+                timeout_seconds=page_render_timeout_seconds,
+            )
+        )
+
+    recipe_groups: dict[tuple[str, ...], list[str]] = {}
+    for citekey in selected_citekeys:
+        item = catalog[citekey]
+        names = tuple(
+            name
+            for name, mode in selection.recipes
+            if mode is ProcessingMode.OVERWRITE
+            or name not in item.record.recipes
+            or name in item.pending_recipes
+        )
+        if names:
+            recipe_groups.setdefault(names, []).append(citekey)
+    for names, targets in recipe_groups.items():
+        jobs.extend(
+            await queue_recipes(
+                runtime,
+                list(names),
+                targets,
+                provider_name=provider_name,
+                model=model,
+                recipes=definitions,
             )
         )
     return jobs
