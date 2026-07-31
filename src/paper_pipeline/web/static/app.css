@@ -98,7 +98,7 @@ input:focus, select:focus, button:focus-visible { outline: 3px solid rgb(25 79 6
 .configure-work-button, .queue-work-button { min-width: 145px; }
 .work-config-dialog {
   width: min(680px, calc(100vw - 2rem)); max-height: min(760px, calc(100vh - 2rem));
-  padding: 0; border: 1px solid #cbd3cd; border-radius: 10px;
+  padding: 0; overflow: auto; border: 1px solid #cbd3cd; border-radius: 10px;
   background: var(--surface); color: var(--ink); box-shadow: 0 28px 90px rgb(18 34 25 / 24%);
 }
 .work-config-dialog::backdrop { background: rgb(21 32 26 / 45%); backdrop-filter: blur(2px); }
@@ -148,6 +148,31 @@ input:focus, select:focus, button:focus-visible { outline: 3px solid rgb(25 79 6
   padding: 1rem 1.5rem; border-top: 1px solid var(--line); background: #f7f7f2;
   color: var(--muted);
 }
+.work-config-footer > span { white-space: nowrap; }
+.rebuild-config-dialog { width: min(760px, calc(100vw - 2rem)); }
+.rebuild-select-controls {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: 0 1.5rem 1rem;
+}
+.rebuild-select-controls p { margin: 0; color: var(--muted); }
+.rebuild-select-controls span { display: flex; flex: 0 0 auto; gap: .8rem; }
+.rebuild-option-group { margin: 0; padding: 0 1.5rem 1.15rem; border: 0; }
+.rebuild-option-group legend {
+  width: 100%; margin-bottom: .55rem; padding: 0 0 .4rem;
+  border-bottom: 1px solid var(--line); color: var(--muted);
+  font-size: .7rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+}
+.rebuild-option-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; }
+.rebuild-option {
+  display: flex; min-height: 58px; align-items: center; gap: .7rem; padding: .7rem .8rem;
+  border: 1px solid var(--line); border-radius: 7px; background: white; cursor: pointer;
+}
+.rebuild-option:hover { border-color: #aebbb3; background: #fafbf7; }
+.rebuild-option:has(input:checked) { border-color: #a9c4b8; background: #f8fbf9; }
+.rebuild-option input { flex: 0 0 auto; }
+.rebuild-option strong { display: block; line-height: 1.2; }
+.rebuild-option code, .rebuild-option small { display: block; margin-top: .2rem; color: var(--muted); font-size: .7rem; }
+.rebuild-option small code { display: inline; margin: 0; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
 th { padding: .4rem .55rem; background: #f1f3ee; color: var(--muted); text-align: left; font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
@@ -273,6 +298,8 @@ code { display: block; margin-top: .15rem; color: var(--muted); font-size: .72re
   .action-bar { align-items: flex-start; flex-direction: column; }
   .action-controls { justify-content: flex-start; }
   .work-option-list { grid-template-columns: 1fr; }
+  .rebuild-option-list { grid-template-columns: 1fr; }
+  .rebuild-select-controls { align-items: flex-start; flex-direction: column; }
 }
 
 .jobs-live-status { display: flex; justify-content: flex-end; margin-bottom: .75rem; }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -32,6 +33,33 @@ class PaperPage(BaseModel):
 
 class LibraryOperationError(RuntimeError):
     """A queued library operation failed before producing its result."""
+
+
+class RebuildTarget(StrEnum):
+    """One independently selectable derived-library maintenance task."""
+
+    TITLES = "titles"
+    AUTHORS = "authors"
+    YEARS = "years"
+    VENUES = "venues"
+    SUMMARIES = "summaries"
+    AGENTS = "agents"
+    GITIGNORE = "gitignore"
+    OBSOLETE_INDEXES = "obsolete_indexes"
+
+
+ALL_REBUILD_TARGETS = tuple(RebuildTarget)
+_INDEX_TARGETS = {
+    RebuildTarget.TITLES: "titles.md",
+    RebuildTarget.AUTHORS: "authors.md",
+    RebuildTarget.YEARS: "years.md",
+    RebuildTarget.VENUES: "venues.md",
+    RebuildTarget.SUMMARIES: "summaries.md",
+}
+_SUPPORT_TARGETS = {
+    RebuildTarget.AGENTS: "AGENTS.md",
+    RebuildTarget.GITIGNORE: ".gitignore",
+}
 
 
 def create(
@@ -77,13 +105,37 @@ async def validate_library(runtime: LibraryRuntime) -> ValidationReport:
     return reports[0]
 
 
-async def rebuild_indexes(runtime: LibraryRuntime) -> Job:
-    """Atomically rebuild indexes and both generated root support files."""
+async def rebuild_indexes(
+    runtime: LibraryRuntime,
+    targets: tuple[RebuildTarget, ...] | None = None,
+) -> Job:
+    """Atomically run selected derived-file rebuild tasks."""
+    selected = tuple(dict.fromkeys(targets if targets is not None else ALL_REBUILD_TARGETS))
+    if not selected:
+        raise ValueError("Select at least one rebuild task.")
+    index_files = tuple(_INDEX_TARGETS[target] for target in selected if target in _INDEX_TARGETS)
+    support_files = tuple(
+        _SUPPORT_TARGETS[target] for target in selected if target in _SUPPORT_TARGETS
+    )
+    remove_unsupported = RebuildTarget.OBSOLETE_INDEXES in selected
 
     async def rebuild(session: LibrarySession, job: Job, token: CancellationToken) -> None:
         del job, token
-        session.mutate(_rebuild_indexes)
-        session.mutate(write_library_support_files)
+        if index_files or remove_unsupported:
+            session.mutate(
+                lambda library: _rebuild_indexes(
+                    library,
+                    index_files=index_files,
+                    remove_unsupported=remove_unsupported,
+                )
+            )
+        if support_files:
+            session.mutate(
+                lambda library: write_library_support_files(
+                    library,
+                    filenames=support_files,
+                )
+            )
 
     job = await runtime.enqueue_library_write(
         JobKind.MAINTENANCE,

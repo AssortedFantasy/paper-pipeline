@@ -183,6 +183,53 @@
     }
   });
 
+  function updateRebuildControls() {
+    var dialog = document.getElementById("rebuild-config-dialog");
+    if (!dialog) return;
+    var count = dialog.querySelectorAll("[data-rebuild-option]:checked").length;
+    var countLabel = dialog.querySelector("[data-rebuild-count]");
+    var submit = dialog.querySelector("[data-rebuild-submit]");
+    if (countLabel) countLabel.textContent = String(count);
+    if (submit) {
+      submit.textContent = "Rebuild " + count + " selected";
+      submit.disabled = count === 0;
+    }
+  }
+
+  document.addEventListener("click", function (event) {
+    var control = event.target.closest("[data-rebuild-open]");
+    if (!control) return;
+    var dialog = document.getElementById("rebuild-config-dialog");
+    if (dialog && !dialog.open) dialog.showModal();
+  });
+
+  document.addEventListener("click", function (event) {
+    var control = event.target.closest("[data-rebuild-close]");
+    if (!control) return;
+    var dialog = control.closest("dialog");
+    if (dialog) dialog.close();
+  });
+
+  document.addEventListener("click", function (event) {
+    var control = event.target.closest("[data-rebuild-selection]");
+    if (!control) return;
+    var checked = control.dataset.rebuildSelection === "all";
+    document.querySelectorAll("[data-rebuild-option]").forEach(function (input) {
+      input.checked = checked;
+    });
+    updateRebuildControls();
+  });
+
+  document.addEventListener("change", function (event) {
+    if (event.target.matches("[data-rebuild-option]")) updateRebuildControls();
+  });
+
+  document.addEventListener("htmx:afterRequest", function (event) {
+    var form = event.detail && event.detail.elt;
+    if (!form || !form.matches || !form.matches("[data-rebuild-form]")) return;
+    if (event.detail.successful) form.closest("dialog").close();
+  });
+
   function payload(event) {
     var detail = event.detail || {};
     var raw = detail.data || detail.value || detail;
@@ -218,7 +265,9 @@
   document.addEventListener("htmx:load", function () {
     applyPaperWrap();
     applyWorkConfiguration();
+    updateRebuildControls();
   });
   applyPaperWrap();
   applyWorkConfiguration();
+  updateRebuildControls();
 })();

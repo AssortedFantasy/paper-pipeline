@@ -176,3 +176,30 @@ def test_rebuild_removes_deleted_entries_and_unsupported_indexes(library_root: P
     )
     assert not obsolete.exists()
     assert not unsupported.exists()
+
+
+def test_rebuild_can_update_one_index_without_touching_others(library_root: Path) -> None:
+    library = create_library(library_root)
+    record = _record("Alpha2024", "Original title", ["Original Author"])
+    library.write_paper(record)
+    rebuild_indexes(library)
+    original_authors = (library_root / "indexes" / "authors.md").read_bytes()
+
+    record.metadata.title = "Updated title"
+    record.metadata.authors = ["Updated Author"]
+    library.write_paper(record)
+    obsolete = library_root / "indexes" / "custom.md"
+    obsolete.write_text("keep until cleanup is selected\n", encoding="utf-8")
+
+    rebuild_indexes(
+        library,
+        index_files=("titles.md",),
+        remove_unsupported=False,
+    )
+
+    assert _index_entries(library_root, "titles.md") == [("Alpha2024", "Updated title")]
+    assert (library_root / "indexes" / "authors.md").read_bytes() == original_authors
+    assert obsolete.is_file()
+
+    rebuild_indexes(library, index_files=(), remove_unsupported=True)
+    assert not obsolete.exists()

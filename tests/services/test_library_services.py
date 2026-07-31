@@ -7,6 +7,7 @@ from paper_pipeline.jobs.queue import CancellationToken
 from paper_pipeline.library.model import PaperMetadata, PaperRecord
 from paper_pipeline.library.paths import FORMAT_VERSION
 from paper_pipeline.services.library_ops import (
+    RebuildTarget,
     create_library,
     get_paper,
     list_papers,
@@ -104,6 +105,22 @@ async def test_reindex_uses_the_library_write_barrier_and_builds_derived_files(
     assert (runtime.root / "indexes" / "titles.md").is_file()
     assert (runtime.root / "AGENTS.md").is_file()
     assert (runtime.root / ".gitignore").is_file()
+
+
+async def test_reindex_accepts_a_granular_derived_file_selection(tmp_path: Path) -> None:
+    runtime = create_library(tmp_path / "library", registry=RuntimeRegistry())
+    await seed(runtime, paper())
+
+    job = await rebuild_indexes(
+        runtime,
+        (RebuildTarget.TITLES, RebuildTarget.AGENTS),
+    )
+
+    assert job.state is JobState.SUCCEEDED
+    assert (runtime.root / "indexes" / "titles.md").is_file()
+    assert (runtime.root / "AGENTS.md").is_file()
+    assert not (runtime.root / "indexes" / "authors.md").exists()
+    assert not (runtime.root / ".gitignore").exists()
 
 
 async def test_list_and_get_apply_service_owned_filters_and_pagination(

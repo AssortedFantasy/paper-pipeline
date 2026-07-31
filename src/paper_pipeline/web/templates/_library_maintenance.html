@@ -1,14 +1,81 @@
 <section class="library-maintenance" aria-label="Library maintenance">
-  <div><p class="eyebrow">Active library</p><strong>{{ library_root.name }}</strong><small>{{ library_root }}</small></div>
+  <div><p class="eyebrow">Active library</p><strong class="active-library-name">{{ library_root.name }}</strong><small>{{ library_root }}</small></div>
   <div class="library-maintenance-actions">
     <form hx-post="/library/validate" hx-target="#library-maintenance-result" hx-swap="innerHTML">
       <input type="hidden" name="library_key" value="{{ library_key }}">
       <button class="button button-quiet" type="submit">Validate library</button>
     </form>
-    <form hx-post="/library/reindex" hx-target="#library-maintenance-result" hx-swap="innerHTML">
-      <input type="hidden" name="library_key" value="{{ library_key }}">
-      <button class="button button-quiet" type="submit">Rebuild indexes</button>
-    </form>
+    <button class="button button-quiet" type="button" data-rebuild-open
+            aria-haspopup="dialog">Choose rebuild files</button>
   </div>
+  <dialog id="rebuild-config-dialog" class="work-config-dialog rebuild-config-dialog"
+          aria-labelledby="rebuild-config-title">
+    <form data-rebuild-form hx-post="/library/reindex"
+          hx-target="#library-maintenance-result" hx-swap="innerHTML">
+      <input type="hidden" name="library_key" value="{{ library_key }}">
+      <div class="work-config-heading">
+        <div>
+          <p class="eyebrow">Derived library files</p>
+          <h2 id="rebuild-config-title">Choose what to rebuild</h2>
+        </div>
+        <button class="dialog-close" type="button" data-rebuild-close
+                aria-label="Close rebuild options">×</button>
+      </div>
+      <div class="rebuild-select-controls">
+        <p>Each task updates only its named derived file or cleanup action.</p>
+        <span>
+          <button class="text-button" type="button" data-rebuild-selection="all">Select all</button>
+          <button class="text-button" type="button" data-rebuild-selection="none">Clear all</button>
+        </span>
+      </div>
+      <fieldset class="rebuild-option-group">
+        <legend>Indexes</legend>
+        <div class="rebuild-option-list">
+          <label class="rebuild-option">
+            <input type="checkbox" name="rebuild_targets" value="titles" data-rebuild-option checked>
+            <span><strong>Titles</strong><code>indexes/titles.md</code></span>
+          </label>
+          <label class="rebuild-option">
+            <input type="checkbox" name="rebuild_targets" value="authors" data-rebuild-option checked>
+            <span><strong>Authors</strong><code>indexes/authors.md</code></span>
+          </label>
+          <label class="rebuild-option">
+            <input type="checkbox" name="rebuild_targets" value="years" data-rebuild-option checked>
+            <span><strong>Publication years</strong><code>indexes/years.md</code></span>
+          </label>
+          <label class="rebuild-option">
+            <input type="checkbox" name="rebuild_targets" value="venues" data-rebuild-option checked>
+            <span><strong>Publication venues</strong><code>indexes/venues.md</code></span>
+          </label>
+          <label class="rebuild-option">
+            <input type="checkbox" name="rebuild_targets" value="summaries" data-rebuild-option checked>
+            <span><strong>Summaries</strong><code>indexes/summaries.md</code></span>
+          </label>
+        </div>
+      </fieldset>
+      <fieldset class="rebuild-option-group">
+        <legend>Library support</legend>
+        <div class="rebuild-option-list">
+          <label class="rebuild-option">
+            <input type="checkbox" name="rebuild_targets" value="agents" data-rebuild-option checked>
+            <span><strong>Agent guide</strong><code>AGENTS.md</code></span>
+          </label>
+          <label class="rebuild-option">
+            <input type="checkbox" name="rebuild_targets" value="gitignore" data-rebuild-option checked>
+            <span><strong>Git ignore rules</strong><code>.gitignore</code></span>
+          </label>
+          <label class="rebuild-option">
+            <input type="checkbox" name="rebuild_targets" value="obsolete_indexes" data-rebuild-option checked>
+            <span><strong>Remove obsolete indexes</strong><small>Delete unsupported <code>indexes/*.md</code> files</small></span>
+          </label>
+        </div>
+      </fieldset>
+      <div class="work-config-footer">
+        <span><strong data-rebuild-count>8</strong> tasks selected</span>
+        <button class="button" type="submit" data-rebuild-submit
+                hx-disabled-elt="this">Rebuild 8 selected</button>
+      </div>
+    </form>
+  </dialog>
   <div id="library-maintenance-result" class="library-operation-result" aria-live="polite"></div>
 </section>

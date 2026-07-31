@@ -15,26 +15,35 @@ from paper_pipeline.library.storage import (
 INDEX_FILES = ("titles.md", "authors.md", "years.md", "venues.md", "summaries.md")
 
 
-def rebuild_indexes(library: Library) -> None:
-    """Rebuild all concise indexes from canonical paper records."""
+def rebuild_indexes(
+    library: Library,
+    *,
+    index_files: tuple[str, ...] = INDEX_FILES,
+    remove_unsupported: bool = True,
+) -> None:
+    """Rebuild selected concise indexes from canonical paper records."""
+    unknown = sorted(set(index_files) - set(INDEX_FILES))
+    if unknown:
+        raise ValueError(f"unsupported index file: {unknown[0]}")
     records, _problems = library.list_papers()
     records.sort(key=lambda record: record.metadata.citekey)
-    contents = {
-        "titles.md": _lines(records, _title),
-        "authors.md": _lines(records, _authors),
-        "years.md": _lines(records, _year),
-        "venues.md": _lines(records, _venue),
-        "summaries.md": _lines(records, lambda record: _summary(library, record)),
+    builders = {
+        "titles.md": lambda: _lines(records, _title),
+        "authors.md": lambda: _lines(records, _authors),
+        "years.md": lambda: _lines(records, _year),
+        "venues.md": lambda: _lines(records, _venue),
+        "summaries.md": lambda: _lines(records, lambda record: _summary(library, record)),
     }
 
     stage = library.stage_dir()
     try:
-        for filename in INDEX_FILES:
+        for filename in dict.fromkeys(index_files):
             staged = stage / filename
             with staged.open("w", encoding="utf-8", newline="\n") as output:
-                output.write(contents[filename])
+                output.write(builders[filename]())
             library.install_artifact(staged, f"{INDEXES_DIR}/{filename}")
-        _remove_unsupported_indexes(library)
+        if remove_unsupported:
+            _remove_unsupported_indexes(library)
     finally:
         shutil.rmtree(stage, ignore_errors=True)
 

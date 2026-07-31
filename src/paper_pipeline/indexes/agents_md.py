@@ -72,17 +72,25 @@ def render_gitignore() -> str:
     return _GITIGNORE
 
 
-def write_library_support_files(library: Library) -> None:
-    """Atomically regenerate the root AGENTS.md and .gitignore."""
+def write_library_support_files(
+    library: Library,
+    *,
+    filenames: tuple[str, ...] = (AGENTS_FILE, GITIGNORE_FILE),
+) -> None:
+    """Atomically regenerate selected root library support files."""
+    contents = {
+        AGENTS_FILE: render_agents_md(),
+        GITIGNORE_FILE: render_gitignore(),
+    }
+    unknown = sorted(set(filenames) - set(contents))
+    if unknown:
+        raise ValueError(f"unsupported library support file: {unknown[0]}")
     stage = library.stage_dir()
     try:
-        for filename, content in (
-            (AGENTS_FILE, render_agents_md()),
-            (GITIGNORE_FILE, render_gitignore()),
-        ):
+        for filename in dict.fromkeys(filenames):
             staged = stage / filename
             with staged.open("w", encoding="utf-8", newline="\n") as output:
-                output.write(content)
+                output.write(contents[filename])
             library.install_artifact(staged, filename)
     finally:
         shutil.rmtree(stage, ignore_errors=True)

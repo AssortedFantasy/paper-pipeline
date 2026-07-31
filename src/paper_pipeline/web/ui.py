@@ -21,6 +21,7 @@ from paper_pipeline.services.import_ops import (
 from paper_pipeline.services.job_ops import job_counts
 from paper_pipeline.services.library_catalog import refresh_catalog
 from paper_pipeline.services.library_ops import (
+    RebuildTarget,
     create_library,
     open_library,
     rebuild_indexes,
@@ -122,12 +123,15 @@ def create_ui_router(context: WebContext) -> APIRouter:
             return _library_result_response(request, error=error)
         assert runtime is not None
         try:
-            await rebuild_indexes(runtime)
+            targets = tuple(RebuildTarget(value) for value in values.get("rebuild_targets", []))
+            await rebuild_indexes(runtime, targets)
         except (OSError, ValueError, RuntimeError) as operation_error:
             return _library_result_response(request, error=str(operation_error))
         return _library_result_response(
             request,
-            message="Rebuilt indexes and library support files.",
+            message=(
+                f"Completed {len(targets)} selected rebuild task{'s' if len(targets) != 1 else ''}."
+            ),
             runtime=runtime,
         )
 
