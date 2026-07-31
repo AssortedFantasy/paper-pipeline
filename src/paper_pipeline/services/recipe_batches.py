@@ -234,12 +234,12 @@ async def resume_recipe_runs(runtime: LibraryRuntime) -> list[Job]:
             state = store.read_state(run_id)
             manifest = store.read_manifest(run_id)
         except (OSError, ValueError):
-            store.discard(run_id)
+            await asyncio.to_thread(store.discard, run_id)
             continue
         if run_id in active_run_ids:
             continue
         if state.phase.is_terminal and not state.cleanup_pending:
-            _prune_local_payload(store, manifest, state)
+            await asyncio.to_thread(_prune_local_payload, store, manifest, state)
             continue
         definitions = {
             invocation.recipe_name: RecipeDefinition(
@@ -365,7 +365,7 @@ async def _run_coordinator(
         state.phase = RecipeRunPhase.FAILED
     state.updated_at = _now()
     store.write_state(state)
-    local_cleanup = _prune_local_payload(store, manifest, state)
+    local_cleanup = await asyncio.to_thread(_prune_local_payload, store, manifest, state)
     _write_summary_log(store, manifest, state)
     job.log_path = f"{OPERATIONAL_DIR}/{RECIPE_RUNS_DIR}/{run_id}/summary.log"
     job.meta.update(
@@ -441,6 +441,7 @@ async def _prepare_manifest(
             if child_token.is_set() or token.is_set():
                 raise asyncio.CancelledError
             paper = session.read_record()
+            snapshots: dict[tuple[Path, str], tuple[str, str]] = {}
             for recipe in selected:
                 input_path, input_artifact = resolve_recipe_input(
                     session,
@@ -448,30 +449,34 @@ async def _prepare_manifest(
                     recipe,
                     paper.source_pdf,
                 )
-                input_sha256 = sha256_file(input_path)
-                if (
-                    recipe.input == "pdf"
-                    and paper.source_sha256 is not None
-                    and input_sha256 != paper.source_sha256
-                ):
-                    raise ValueError(f"source PDF for {citekey!r} no longer matches paper.json")
                 if recipe.input == "pdf" and input_path.stat().st_size >= _PDF_INPUT_LIMIT:
                     raise ValueError(
                         f"source PDF for {citekey!r} is too large for Responses file input"
                     )
-                suffix = input_path.suffix or ".txt"
-                snapshot_name = f"{input_sha256}{suffix.casefold()}"
-                snapshot_path = store.path(run_id, "snapshots", snapshot_name)
-                if not snapshot_path.is_file():
-                    stage = session.stage_dir()
-                    try:
-                        staged = stage / snapshot_name
-                        shutil.copy2(input_path, staged)
-                        if sha256_file(staged) != input_sha256:
-                            raise ValueError("recipe input changed while being snapshotted")
-                        os.replace(staged, snapshot_path)
-                    finally:
-                        shutil.rmtree(stage, ignore_errors=True)
+                snapshot_key = (input_path, input_artifact)
+                cached_snapshot = snapshots.get(snapshot_key)
+                if cached_snapshot is None:
+                    input_sha256 = await asyncio.to_thread(sha256_file, input_path)
+                    if (
+                        recipe.input == "pdf"
+                        and paper.source_sha256 is not None
+                        and input_sha256 != paper.source_sha256
+                    ):
+                        raise ValueError(f"source PDF for {citekey!r} no longer matches paper.json")
+                    suffix = input_path.suffix or ".txt"
+                    snapshot_name = f"{input_sha256}{suffix.casefold()}"
+                    snapshot_path = store.path(run_id, "snapshots", snapshot_name)
+                    if not snapshot_path.is_file():
+                        await asyncio.to_thread(
+                            _copy_input_snapshot,
+                            input_path,
+                            session.stage_dir(),
+                            snapshot_path,
+                            input_sha256,
+                        )
+                    snapshots[snapshot_key] = input_sha256, snapshot_name
+                else:
+                    input_sha256, snapshot_name = cached_snapshot
                 prepared.append(
                     RecipeInvocation(
                         custom_id=f"r{next_request:06d}",
@@ -626,7 +631,7 @@ async def _submit_and_collect(
             upload_done=len(state.uploads),
             upload_total=upload_total,
         )
-        _write_requests(requests_path, store, manifest, state, provider)
+        await asyncio.to_thread(_write_requests, requests_path, store, manifest, state, provider)
         if requests_path.stat().st_size >= _BATCH_FILE_LIMIT:
             raise ValueError("recipe Batch input exceeds the 200 MB provider limit")
         _publish_batch_progress(
@@ -791,7 +796,7 @@ async def _submit_and_collect(
     for file_index, (file_id, filename) in enumerate(result_files, 1):
         destination = store.path(run_id, filename)
         if not destination.is_file():
-            _download_atomic(store, provider, file_id, destination)
+            await asyncio.to_thread(_download_atomic, store, provider, file_id, destination)
         if file_id not in state.cleanup_pending:
             state.cleanup_pending.append(file_id)
         _publish_batch_progress(
@@ -802,7 +807,7 @@ async def _submit_and_collect(
             collect_done=file_index,
             collect_total=len(result_files),
         )
-    _collect_results(store, manifest, state, provider)
+    await asyncio.to_thread(_collect_results, store, manifest, state, provider)
     _publish_batch_progress(
         runtime,
         job,
@@ -814,6 +819,23 @@ async def _submit_and_collect(
     state.updated_at = _now()
     store.write_state(state)
     return state
+
+
+def _copy_input_snapshot(
+    source: Path,
+    stage: Path,
+    destination: Path,
+    expected_sha256: str,
+) -> None:
+    """Copy and verify a recipe input without blocking the application loop."""
+    try:
+        staged = stage / destination.name
+        shutil.copy2(source, staged)
+        if sha256_file(staged) != expected_sha256:
+            raise ValueError("recipe input changed while being snapshotted")
+        os.replace(staged, destination)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
 
 
 def _write_requests(
@@ -953,6 +975,7 @@ async def _finalize_results(
             del job, child_token
             paper = session.read_record()
             paper_changed = False
+            input_hashes: dict[Path, str] = {}
             for invocation in invocations:
                 outcome = state.outcomes[invocation.custom_id]
                 error = outcome.error
@@ -980,7 +1003,11 @@ async def _finalize_results(
                             ),
                             paper.source_pdf,
                         )
-                        if sha256_file(input_path) != invocation.input_sha256:
+                        input_sha256 = input_hashes.get(input_path)
+                        if input_sha256 is None:
+                            input_sha256 = await asyncio.to_thread(sha256_file, input_path)
+                            input_hashes[input_path] = input_sha256
+                        if input_sha256 != invocation.input_sha256:
                             raise ValueError("recipe input changed after Batch submission")
                         if not invocation.overwrite and recipe_is_fresh(
                             paper, invocation.recipe_name
@@ -1186,7 +1213,7 @@ async def _finish_cancelled(
     state.error = "Recipe Batch was cancelled"
     state.updated_at = _now()
     store.write_state(state)
-    local_cleanup = _prune_local_payload(store, manifest, state)
+    local_cleanup = await asyncio.to_thread(_prune_local_payload, store, manifest, state)
     _write_summary_log(store, manifest, state)
     job.log_path = f"{OPERATIONAL_DIR}/{RECIPE_RUNS_DIR}/{manifest.run_id}/summary.log"
     job.meta.update(
@@ -1389,7 +1416,6 @@ def _reject_duplicate_targets(
             state = store.read_state(run_id)
             manifest = store.read_manifest(run_id)
         except (OSError, ValueError):
-            store.discard(run_id)
             continue
         if state.phase.is_terminal:
             continue

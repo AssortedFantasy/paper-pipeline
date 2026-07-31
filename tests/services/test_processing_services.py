@@ -1,6 +1,8 @@
 """End-to-end processing service tests using only fake external edges."""
 
 import asyncio
+import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -204,6 +206,52 @@ async def test_recipe_batch_publishes_each_remote_poll_as_visible_progress(
     assert parent.meta["progress_poll_count"] == "3"
     assert parent.meta["progress_last_provider_check"]
     assert parent.meta["progress_stage"] == "done"
+
+
+async def test_recipe_batch_download_does_not_block_application_loop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = FakeLLMProvider(response="Downloaded without freezing the dashboard.")
+    runtime = await _runtime(tmp_path, provider)
+    await _seed(runtime)
+    download_started = threading.Event()
+    download_finished = threading.Event()
+    original_download = provider.download_file
+
+    def slow_download(file_id: str, destination: Path) -> None:
+        download_started.set()
+        try:
+            time.sleep(0.2)
+            original_download(file_id, destination)
+        finally:
+            download_finished.set()
+
+    monkeypatch.setattr(provider, "download_file", slow_download)
+    loop_ticks = 0
+
+    async def observe_download() -> None:
+        nonlocal loop_ticks
+        while not download_started.is_set():
+            await asyncio.sleep(0)
+        while not download_finished.is_set():
+            loop_ticks += 1
+            await asyncio.sleep(0.01)
+
+    observer = asyncio.create_task(observe_download())
+    parent = (
+        await queue_recipes(
+            runtime,
+            ["summary"],
+            ["Smith2024"],
+            provider_name="fake",
+            model="test-model",
+        )
+    )[0]
+
+    assert (await runtime.queue.wait(parent.id)).state is JobState.SUCCEEDED
+    await observer
+    assert loop_ticks >= 5
 
 
 async def test_recipe_batch_cancellation_matches_durable_run_state(
