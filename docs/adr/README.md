@@ -14,3 +14,4 @@ Durable implementation decisions for Paper Pipeline v2.
 | [0006](0006-llm-usage-and-spend.md) | LLM usage and spend accounting | Accepted |
 | [0007](0007-runtime-library-catalog.md) | Runtime library catalog | Accepted |
 | [0008](0008-independent-page-rendering.md) | Independent local page rendering | Accepted |
+| [0009](0009-batch-recipe-orchestration.md) | Durable Batch recipe orchestration | Accepted |

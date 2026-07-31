@@ -180,7 +180,8 @@ def test_papers_load_filter_select_and_launch(page: Page, ui_server: str, tmp_pa
     _configure_work(page, "Recipe: Summary", "Recipe: Contributions")
     page.get_by_role("button", name="Queue (1 papers)").click()
     expect(page.get_by_role("status")).to_contain_text("Queued 1 job across 1 paper")
-    expect(page.locator("tbody .live-job-status")).to_contain_text("running")
+    # Remote Batch polling does not occupy the paper mutation lane.
+    expect(page.locator("tbody .live-job-status")).to_contain_text("Idle")
     _wait_for_jobs(page, ui_server, count=2)
     expect(page.locator("tbody .spend-cell")).to_contain_text("$0.0020")
     expect(page.locator("tbody .spend-cell")).to_have_attribute("title", "Cache hit rate: 40.0%")
@@ -405,13 +406,28 @@ def test_configured_work_cycles_run_overwrite_and_skips_ready_results(
     page.get_by_role("button", name="Queue (1 papers)").click()
     _wait_for_jobs(page, ui_server, count=1)
 
+    page.goto(f"{ui_server}/jobs")
+    expect(page.get_by_text("Recipe Batch", exact=False).first).to_be_visible()
+    expect(page.get_by_text("1 paper · 1 request", exact=True)).to_be_visible()
+    batch_progress = page.get_by_role("status", name="Recipe Batch progress", exact=True)
+    expect(batch_progress).to_have_attribute("data-batch-stage", "done")
+    expect(batch_progress.get_by_text("Prepare", exact=True)).to_be_visible()
+    expect(batch_progress.get_by_text("Generate", exact=True)).to_be_visible()
+    expect(batch_progress.get_by_text("Cleanup", exact=True)).to_be_visible()
+    expect(batch_progress).to_contain_text("1/1 results installed")
+    expect(batch_progress).to_contain_text("provider check")
+    expect(batch_progress).to_contain_text("working files removed")
+    expect(page.get_by_text("Prepare recipe Batch", exact=False)).to_have_count(0)
+    expect(page.get_by_text("Finalize recipe Batch", exact=False)).to_have_count(0)
+
+    page.goto(f"{ui_server}/papers")
     page.reload()
     page.locator("tbody input[type=checkbox]").first.check()
     _configure_work(page, "Recipe: Summary")
     page.get_by_role("button", name="Queue (1 papers)").click()
     expect(page.get_by_role("status")).to_contain_text("already up to date")
     jobs = page.request.get(f"{ui_server}/api/jobs").json()["jobs"]
-    assert len([job for job in jobs if job["kind"] == "recipe"]) == 1
+    assert len([job for job in jobs if job["kind"] == "recipe_batch"]) == 1
 
     page.get_by_role("button", name="Configure", exact=False).click()
     summary = page.get_by_role("checkbox", name="Recipe: Summary", exact=False)

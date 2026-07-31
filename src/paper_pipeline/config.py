@@ -34,7 +34,8 @@ class AppConfig(BaseSettings):
     # Required to run recipes; there is no default model. `doctor` and the
     # recipe services fail with an actionable message when unset.
     llm_model: str | None = None
-    # Max concurrent remote recipe jobs across papers (same-paper is always sequential).
+    # Legacy immediate-recipe concurrency. Durable Batch recipe coordinators do
+    # not consume this semaphore; retained for compatibility with older config.
     llm_concurrency: int = 4
 
     # Conversion

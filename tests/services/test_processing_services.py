@@ -1,7 +1,6 @@
 """End-to-end processing service tests using only fake external edges."""
 
 import asyncio
-import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -9,6 +8,7 @@ import pytest
 from tests.fakes import FakeLLMProvider
 
 from paper_pipeline.convert.runner import ConverterSpec
+from paper_pipeline.jobs.events import JobEventKind
 from paper_pipeline.jobs.model import Job, JobKind, JobScope, JobState
 from paper_pipeline.jobs.queue import CancellationToken
 from paper_pipeline.jobs.recovery import InterruptedAttempt
@@ -20,8 +20,10 @@ from paper_pipeline.library.model import (
 )
 from paper_pipeline.library.paths import FORMAT_VERSION
 from paper_pipeline.pages.runner import PageRendererSpec
+from paper_pipeline.recipes.batch_model import RecipeRunPhase
+from paper_pipeline.recipes.batch_store import RecipeRunStore
 from paper_pipeline.recipes.model import RecipeDefinition
-from paper_pipeline.recipes.provider import ProviderRequest, ProviderResult
+from paper_pipeline.services import recipe_batches as recipe_batches_module
 from paper_pipeline.services.processing import (
     cancel_job,
     pending_conversion_citekeys,
@@ -32,6 +34,7 @@ from paper_pipeline.services.processing import (
     queue_recipes,
     retry_job,
 )
+from paper_pipeline.services.recipe_batches import resume_recipe_runs
 from paper_pipeline.services.runtime import (
     LibraryRuntime,
     LibrarySession,
@@ -101,44 +104,12 @@ async def _read(runtime: LibraryRuntime, citekey: str = "Smith2024") -> PaperRec
     return records[0]
 
 
-async def test_recipe_batches_are_concurrent_across_papers_and_sequential_within_each_lane(
+async def test_recipe_cohort_uses_one_remote_batch_and_one_upload_per_distinct_pdf(
     tmp_path: Path,
 ) -> None:
-    class BlockingProvider:
-        name = "recording"
-
-        def __init__(self) -> None:
-            self.barrier = threading.Barrier(2)
-            self.lock = threading.Lock()
-            self.active = 0
-            self.maximum_active = 0
-            self.calls: list[tuple[str, str]] = []
-
-        def generate(self, request: ProviderRequest) -> ProviderResult:
-            assert request.pdf_input is not None
-            citekey = request.pdf_input.parents[1].name
-            with self.lock:
-                self.active += 1
-                self.maximum_active = max(self.maximum_active, self.active)
-            try:
-                if request.prompt == "First.":
-                    self.barrier.wait(timeout=2)
-                with self.lock:
-                    self.calls.append((citekey, request.prompt))
-                return ProviderResult(
-                    ok=True,
-                    text=f"{citekey}: {request.prompt}",
-                    provider=self.name,
-                    model=request.model,
-                )
-            finally:
-                with self.lock:
-                    self.active -= 1
-
-    provider = BlockingProvider()
+    provider = FakeLLMProvider(response="Generated in one remote cohort.")
     runtime = RuntimeRegistry(
-        llm_concurrency=2,
-        provider_factories={"recording": lambda: provider},
+        provider_factories={"fake": lambda: provider},
     ).create(tmp_path / "library")
     await _seed(runtime)
     await _seed(runtime, citekey="Jones2025")
@@ -151,20 +122,175 @@ async def test_recipe_batches_are_concurrent_across_papers_and_sequential_within
         runtime,
         ["first", "second"],
         ["Smith2024", "Jones2025"],
-        provider_name="recording",
+        provider_name="fake",
         model="test-model",
         recipes=recipes,
     )
     completed = await asyncio.gather(*(runtime.queue.wait(job.id) for job in recipe_jobs))
 
     assert all(job.state is JobState.SUCCEEDED for job in completed)
-    assert provider.maximum_active == 2
+    assert provider.created_batch_count == 1
+    # The two fixture papers deliberately contain identical PDF bytes, so the
+    # cohort uploads that distinct input hash once and reuses its file ID.
+    assert provider.input_upload_count == 1
+    parent = completed[0]
+    assert parent.meta["progress_stage"] == "done"
+    assert parent.meta["progress_upload_done"] == "1"
+    assert parent.meta["progress_remote_finished"] == "4"
+    assert parent.meta["progress_install_successes"] == "4"
+    assert parent.meta["progress_cleanup_done"] == parent.meta["progress_cleanup_total"]
+    assert parent.meta["progress_local_cleanup"].endswith("of working files removed")
+    run_dir = RecipeRunStore(runtime.root).run_dir(parent.meta["run_id"])
+    assert {item.name for item in run_dir.iterdir()} == {
+        "manifest.json",
+        "state.json",
+        "summary.log",
+    }
+    (run_dir / "snapshots").mkdir()
+    (run_dir / "snapshots" / "legacy.pdf").write_bytes(b"duplicated PDF")
+    (run_dir / "requests.jsonl").write_text("legacy request\n", encoding="utf-8")
+    assert await resume_recipe_runs(runtime) == []
+    assert not (run_dir / "snapshots").exists()
+    assert not (run_dir / "requests.jsonl").exists()
+    assert [request.prompt for request in provider.calls] == [
+        "First.",
+        "Second.",
+        "First.",
+        "Second.",
+    ]
     for citekey in ("Smith2024", "Jones2025"):
-        assert [prompt for paper, prompt in provider.calls if paper == citekey] == [
-            "First.",
-            "Second.",
-        ]
         assert set((await _read(runtime, citekey)).recipes) == {"first", "second"}
+
+
+async def test_recipe_batch_publishes_each_remote_poll_as_visible_progress(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(recipe_batches_module, "_POLL_INTERVAL_SECONDS", 0)
+    provider = FakeLLMProvider(
+        response="Generated after visible polling.",
+        batch_statuses=["validating", "in_progress", "completed"],
+    )
+    runtime = await _runtime(tmp_path, provider)
+    await _seed(runtime)
+    subscription = runtime.queue.events.subscribe(max_queue_size=200)
+
+    parent = (
+        await queue_recipes(
+            runtime,
+            ["summary"],
+            ["Smith2024"],
+            provider_name="fake",
+            model="test-model",
+        )
+    )[0]
+    assert (await runtime.queue.wait(parent.id)).state is JobState.SUCCEEDED
+
+    events = []
+    while True:
+        try:
+            events.append(subscription.get_nowait())
+        except asyncio.QueueEmpty:
+            break
+    subscription.close()
+    progress = [
+        event.message
+        for event in events
+        if event.job_id == parent.id and event.kind is JobEventKind.PROGRESS
+    ]
+    assert any(message and "Provider validating" in message for message in progress)
+    assert any(message and "Provider in progress" in message for message in progress)
+    assert any(message and "Provider completed" in message for message in progress)
+    assert parent.meta["progress_poll_count"] == "3"
+    assert parent.meta["progress_last_provider_check"]
+    assert parent.meta["progress_stage"] == "done"
+
+
+async def test_partial_batch_installs_valid_siblings_and_retries_only_failures(
+    tmp_path: Path,
+) -> None:
+    provider = FakeLLMProvider(
+        response="Valid generated result.",
+        fail_prompts={"Second."},
+    )
+    runtime = await _runtime(tmp_path, provider)
+    await _seed(runtime)
+    recipes = {
+        "first": RecipeDefinition("first", 1, "pdf", "first.md", "First."),
+        "second": RecipeDefinition("second", 1, "pdf", "second.md", "Second."),
+    }
+
+    parent = (
+        await queue_recipes(
+            runtime,
+            ["first", "second"],
+            ["Smith2024"],
+            provider_name="fake",
+            model="test-model",
+            recipes=recipes,
+        )
+    )[0]
+    assert (await runtime.queue.wait(parent.id)).state is JobState.PARTIAL
+
+    record = await _read(runtime)
+    assert record.recipes["first"].output_artifact == "papers/Smith2024/first.md"
+    assert record.recipes["second"].output_artifact is None
+    assert record.recipes["second"].last_attempt is not None
+    assert record.recipes["second"].last_attempt.state is AttemptState.FAILED
+    first_attempt = record.recipes["first"].last_attempt
+    second_attempt = record.recipes["second"].last_attempt
+    assert first_attempt is not None and first_attempt.log_path is not None
+    assert second_attempt is not None and second_attempt.log_path is not None
+    first_log = runtime.root / first_attempt.log_path
+    second_log = runtime.root / second_attempt.log_path
+    assert "recipe=first" in first_log.read_text(encoding="utf-8")
+    assert "recipe=second" not in first_log.read_text(encoding="utf-8")
+    assert "recipe=second" in second_log.read_text(encoding="utf-8")
+    assert "recipe=first" not in second_log.read_text(encoding="utf-8")
+
+    provider.fail_prompts.clear()
+    retry = await retry_job(runtime, parent.id)
+    assert (await runtime.queue.wait(retry.id)).state is JobState.SUCCEEDED
+    assert provider.created_batch_count == 2
+    assert [request.prompt for request in provider.calls] == ["First.", "Second.", "Second."]
+    assert (await _read(runtime)).recipes["second"].output_artifact == (
+        "papers/Smith2024/second.md"
+    )
+
+
+async def test_submitted_batch_resumes_from_durable_run_state_without_resubmission(
+    tmp_path: Path,
+) -> None:
+    provider = FakeLLMProvider(response="Recovered result.", retain_deleted_files=True)
+    runtime = await _runtime(tmp_path, provider)
+    await _seed(runtime)
+    parent = (
+        await queue_recipes(
+            runtime,
+            ["summary"],
+            ["Smith2024"],
+            provider_name="fake",
+            model="test-model",
+        )
+    )[0]
+    assert (await runtime.queue.wait(parent.id)).state is JobState.SUCCEEDED
+    run_id = parent.meta["run_id"]
+    store = RecipeRunStore(runtime.root)
+    state = store.read_state(run_id)
+    state.phase = RecipeRunPhase.IN_PROGRESS
+    state.outcomes = {}
+    state.installed = []
+    store.write_state(state)
+    # Reconstruct the empty working directory that would exist for a genuinely
+    # interrupted (and therefore not yet pruned) run.
+    (store.run_dir(run_id) / "collected").mkdir()
+
+    reopened = RuntimeRegistry(provider_factories={"fake": lambda: provider}).open(runtime.root)
+    recovered = await resume_recipe_runs(reopened)
+    assert len(recovered) == 1
+    assert (await reopened.queue.wait(recovered[0].id)).state is JobState.SUCCEEDED
+    assert provider.created_batch_count == 1
+    assert store.read_state(run_id).phase is RecipeRunPhase.COMPLETED
 
 
 async def test_failed_conversion_rerun_preserves_last_good_artifact(tmp_path: Path) -> None:

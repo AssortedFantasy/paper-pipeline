@@ -39,6 +39,7 @@ from paper_pipeline.services.processing import (
     queue_page_render,
     queue_recipes,
 )
+from paper_pipeline.services.recipe_batches import resume_recipe_runs
 from paper_pipeline.services.runtime import LibraryRuntime
 from paper_pipeline.web.api import WebContext
 from paper_pipeline.web.paper_detail import build_paper_view
@@ -95,6 +96,7 @@ def create_ui_router(context: WebContext) -> APIRouter:
             return _library_result_response(request, error="Choose a library folder to open.")
         try:
             context.runtime = open_library(Path(path), registry=context.registry)
+            await resume_recipe_runs(context.runtime)
         except (OSError, ValueError, RuntimeError) as error:
             return _library_result_response(request, error=str(error))
         return _library_selected_response(request, notice="opened")
@@ -344,7 +346,11 @@ def create_ui_router(context: WebContext) -> APIRouter:
             return _action_response(request, error=str(error))
         return _action_response(
             request,
-            message=f"Queued {len(jobs)} recipe job{'s' if len(jobs) != 1 else ''}.",
+            message=(
+                f"Queued {len(recipe_names) * len(citekeys)} recipe requests "
+                f"for {len(citekeys)} paper{'s' if len(citekeys) != 1 else ''} "
+                f"in {len(jobs)} Batch{'es' if len(jobs) != 1 else ''}."
+            ),
         )
 
     @router.post("/papers/actions/pages", response_class=HTMLResponse)
@@ -427,7 +433,7 @@ def create_ui_router(context: WebContext) -> APIRouter:
                 request,
                 message="Nothing queued. The selected results are already up to date.",
             )
-        paper_count = len({job.citekey for job in jobs if job.citekey is not None})
+        paper_count = len(citekeys)
         return _action_response(
             request,
             message=(

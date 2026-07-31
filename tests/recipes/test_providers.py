@@ -96,7 +96,68 @@ def test_text_generation_returns_usage_and_preserves_the_cacheable_prefix() -> N
     assert sent["prompt_cache_key"]
     assert "paper-hash" not in sent["prompt_cache_key"]
     assert "prompt_cache_options" in sent
+    assert sent["prompt_cache_options"]["mode"] == "explicit"
+    assert sent["store"] is False
     assert client.files.calls == []
+
+
+def test_batch_request_uses_pdf_prefix_explicit_cache_and_no_response_storage() -> None:
+    provider = OpenAIProvider(config(), client=RecordingClient())
+
+    body = provider.request_body(
+        prompt="Recipe prompt",
+        model="gpt-5.6-luna",
+        input_sha256="paper-hash",
+        file_id="file-pdf",
+    )
+
+    content = body["input"][0]["content"]
+    assert content[0] == {
+        "type": "input_file",
+        "file_id": "file-pdf",
+        "prompt_cache_breakpoint": {"mode": "explicit"},
+    }
+    assert content[1] == {"type": "input_text", "text": "Recipe prompt"}
+    assert body["prompt_cache_options"] == {"mode": "explicit", "ttl": "30m"}
+    assert body["store"] is False
+    assert "paper-hash" not in body["prompt_cache_key"]
+
+
+def test_batch_result_parser_applies_batch_pricing() -> None:
+    provider = OpenAIProvider(config(), client=RecordingClient())
+    line = {
+        "custom_id": "r000001",
+        "response": {
+            "status_code": 200,
+            "request_id": "req_test",
+            "body": {
+                "status": "completed",
+                "model": "gpt-5.6-luna",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "Generated"}],
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 1_000,
+                    "input_tokens_details": {
+                        "cached_tokens": 800,
+                        "cache_write_tokens": 200,
+                    },
+                    "output_tokens": 100,
+                },
+            },
+        },
+        "error": None,
+    }
+
+    result = provider.parse_batch_line(line)
+
+    assert result.ok
+    assert result.text == "Generated"
+    assert result.request_id == "req_test"
+    assert result.cost_usd == 0.000465
 
 
 def test_cache_routing_is_stable_per_input_and_separates_different_inputs() -> None:

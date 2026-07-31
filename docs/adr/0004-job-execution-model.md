@@ -18,7 +18,9 @@ One process-wide job system serves all open libraries.
 - Conversion is globally limited to one job by default.
 - Local page rendering is independent of conversion, uses the same paper lane,
   and is limited to two concurrent jobs.
-- Recipes run concurrently across papers and sequentially within a paper lane.
+- Recipe cohorts run as remote-scope jobs without a library barrier while the
+  provider executes. Their snapshot and finalization children use the ordinary
+  exclusive paper lanes (ADR-0009).
 - Library writes wait for active paper lanes and block new ones.
 - Read-only validation uses a library read barrier.
 - Conversion runs in a fresh child process; cancellation terminates its process
@@ -27,8 +29,10 @@ One process-wide job system serves all open libraries.
   cancellation, and timeouts remain bounded.
 
 Live jobs move through `queued`, `running`, and a terminal state of
-`succeeded`, `failed`, or `cancelled`. A job succeeds only after its artifacts
-are validated, installed, hashed, and recorded.
+`succeeded`, `failed`, `cancelled`, or `partial`. `partial` is reserved for a
+coordinator whose independently valid child outcomes were durably installed
+while other children failed. A job succeeds only after its artifacts are
+validated, installed, hashed, and recorded.
 
 `paper.json` describes installed artifacts and completed attempts, not live
 jobs. In-flight markers under `.pp/attempts/` are disposable recovery hints.
@@ -37,6 +41,11 @@ artifact validity.
 
 Job events and progress are in memory and published to the dashboard with
 Server-Sent Events. Closing a browser does not cancel work.
+
+Remote-scope jobs use the same queue and event system but hold no paper lane or
+library barrier while waiting. Their resumable provider state is disposable
+operational data under `.pp`; application shutdown detaches rather than
+requesting remote cancellation.
 
 ## Consequences
 

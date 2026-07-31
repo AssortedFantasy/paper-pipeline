@@ -2,8 +2,8 @@ import asyncio
 
 import pytest
 
-from paper_pipeline.jobs.model import Job, JobKind, JobState
-from paper_pipeline.jobs.queue import CancellationToken, JobQueue
+from paper_pipeline.jobs.model import Job, JobKind, JobScope, JobState
+from paper_pipeline.jobs.queue import CancellationToken, JobQueue, PartialJobError
 
 
 async def test_two_conversions_never_overlap_even_across_libraries() -> None:
@@ -166,6 +166,61 @@ async def test_library_read_is_nonexclusive_with_paper_work() -> None:
     assert read_job.state is JobState.SUCCEEDED
     release.set()
     await queue.join()
+
+
+async def test_remote_coordinator_holds_no_library_or_paper_barrier() -> None:
+    queue = JobQueue()
+    remote_started = asyncio.Event()
+    release_remote = asyncio.Event()
+    paper_started = asyncio.Event()
+    write_started = asyncio.Event()
+
+    async def remote(job: Job) -> None:
+        del job
+        remote_started.set()
+        await release_remote.wait()
+
+    async def paper(job: Job) -> None:
+        del job
+        paper_started.set()
+
+    async def write(job: Job) -> None:
+        del job
+        write_started.set()
+
+    coordinator = await queue.enqueue_remote(
+        "library",
+        JobKind.RECIPE_BATCH,
+        "batch",
+        remote,
+    )
+    await remote_started.wait()
+    await queue.enqueue_paper("library", "paper", JobKind.IMPORT, "import", paper)
+    await asyncio.wait_for(paper_started.wait(), timeout=1)
+    await queue.enqueue_library_write("library", JobKind.MAINTENANCE, "write", write)
+    await asyncio.wait_for(write_started.wait(), timeout=1)
+
+    assert coordinator.scope is JobScope.REMOTE
+    release_remote.set()
+    await queue.join()
+
+
+async def test_partial_coordinator_has_a_first_class_terminal_state() -> None:
+    queue = JobQueue()
+
+    async def worker(job: Job) -> None:
+        del job
+        raise PartialJobError("one request failed")
+
+    job = await queue.enqueue_remote(
+        "library",
+        JobKind.RECIPE_BATCH,
+        "batch",
+        worker,
+    )
+
+    assert (await queue.wait(job.id)).state is JobState.PARTIAL
+    assert job.error == "one request failed"
 
 
 async def test_library_reads_and_writes_are_mutually_exclusive() -> None:

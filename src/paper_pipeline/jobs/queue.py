@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import cast
 from uuid import uuid4
 
@@ -28,10 +29,13 @@ type KillHook = Callable[[], Awaitable[None] | None]
 
 _LEGAL_TRANSITIONS: dict[JobState, frozenset[JobState]] = {
     JobState.QUEUED: frozenset({JobState.RUNNING, JobState.CANCELLED}),
-    JobState.RUNNING: frozenset({JobState.SUCCEEDED, JobState.FAILED, JobState.CANCELLED}),
+    JobState.RUNNING: frozenset(
+        {JobState.SUCCEEDED, JobState.FAILED, JobState.CANCELLED, JobState.PARTIAL}
+    ),
     JobState.SUCCEEDED: frozenset(),
     JobState.FAILED: frozenset(),
     JobState.CANCELLED: frozenset(),
+    JobState.PARTIAL: frozenset(),
     JobState.INTERRUPTED: frozenset(),
 }
 
@@ -40,12 +44,22 @@ class InvalidJobTransition(ValueError):
     """Raised when code attempts a state transition outside the live lifecycle."""
 
 
+class PartialJobError(RuntimeError):
+    """A coordinator completed with a durable mixture of outcomes."""
+
+
+class CancellationReason(StrEnum):
+    USER = "user"
+    SHUTDOWN = "shutdown"
+
+
 class CancellationToken:
     """Cooperative cancellation signal passed to workers that accept it."""
 
     def __init__(self) -> None:
         self._event = asyncio.Event()
         self._commit_started = False
+        self.reason: CancellationReason | None = None
 
     def is_set(self) -> bool:
         """Return whether cancellation has been requested."""
@@ -67,9 +81,10 @@ class CancellationToken:
         self._commit_started = True
         return True
 
-    def _cancel(self) -> bool:
+    def _cancel(self, reason: CancellationReason) -> bool:
         if self._commit_started:
             return False
+        self.reason = reason
         self._event.set()
         return True
 
@@ -275,6 +290,32 @@ class JobQueue:
         self._start(job, worker, barrier=barrier)
         return job
 
+    async def enqueue_remote(
+        self,
+        library_key: str,
+        kind: JobKind,
+        label: str,
+        worker: Worker,
+        *,
+        meta: dict[str, str] | None = None,
+        kill_hook: KillHook | None = None,
+    ) -> Job:
+        """Enqueue resumable remote work without holding a library barrier."""
+        self._ensure_open()
+        job = self._new_job(
+            library_key=library_key,
+            citekey=None,
+            kind=kind,
+            scope=JobScope.REMOTE,
+            label=label,
+            meta=meta,
+            worker=worker,
+            kill_hook=kill_hook,
+            recovery=None,
+        )
+        self._start(job, worker)
+        return job
+
     def get(self, job_id: str) -> Job | None:
         """Return a live in-memory job by ID."""
         return self._jobs.get(job_id)
@@ -296,7 +337,12 @@ class JobQueue:
         if tasks:
             await asyncio.gather(*(asyncio.shield(task) for task in tasks), return_exceptions=True)
 
-    async def cancel(self, job_id: str) -> bool:
+    async def cancel(
+        self,
+        job_id: str,
+        *,
+        reason: CancellationReason = CancellationReason.USER,
+    ) -> bool:
         """Cancel queued work immediately or signal a running worker."""
         job = self._jobs[job_id]
         if job.state.is_terminal:
@@ -305,7 +351,7 @@ class JobQueue:
         token = self._tokens[job_id]
         if token.is_set():
             return False
-        if not token._cancel():
+        if not token._cancel(reason):
             return False
         task = self._tasks[job_id]
         if job.state is JobState.QUEUED:
@@ -330,8 +376,8 @@ class JobQueue:
     async def retry(self, job_id: str) -> Job:
         """Create a fresh job from a failed or cancelled job's definition."""
         original = self._jobs[job_id]
-        if original.state not in {JobState.FAILED, JobState.CANCELLED}:
-            raise ValueError("only failed or cancelled jobs can be retried")
+        if original.state not in {JobState.FAILED, JobState.CANCELLED, JobState.PARTIAL}:
+            raise ValueError("only failed, cancelled, or partial jobs can be retried")
         definition = self._definitions[job_id]
         meta = {**definition.meta, "retry_of": original.id}
         if definition.scope is JobScope.PAPER:
@@ -356,14 +402,23 @@ class JobQueue:
                 kill_hook=definition.kill_hook,
                 recovery=definition.recovery,
             )
-        return await self.enqueue_library_write(
+        if definition.scope is JobScope.LIBRARY_WRITE:
+            return await self.enqueue_library_write(
+                definition.library_key,
+                definition.kind,
+                definition.label,
+                definition.worker,
+                meta=meta,
+                kill_hook=definition.kill_hook,
+                recovery=definition.recovery,
+            )
+        return await self.enqueue_remote(
             definition.library_key,
             definition.kind,
             definition.label,
             definition.worker,
             meta=meta,
             kill_hook=definition.kill_hook,
-            recovery=definition.recovery,
         )
 
     async def shutdown(self, *, grace_seconds: float = 1.0) -> None:
@@ -373,7 +428,7 @@ class JobQueue:
         self._closed = True
         for job in tuple(self._jobs.values()):
             if not job.state.is_terminal:
-                await self.cancel(job.id)
+                await self.cancel(job.id, reason=CancellationReason.SHUTDOWN)
 
         pending = [task for task in self._tasks.values() if not task.done()]
         if pending:
@@ -478,6 +533,9 @@ class JobQueue:
                     JobState.CANCELLED,
                     error="job task cancelled",
                 )
+        except PartialJobError as exc:
+            if not job.state.is_terminal:
+                await self._finish_guarded(job, JobState.PARTIAL, error=str(exc))
         except Exception as exc:
             if not job.state.is_terminal:
                 if token.is_set():

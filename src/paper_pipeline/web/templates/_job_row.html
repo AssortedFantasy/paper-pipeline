@@ -1,14 +1,19 @@
-<article class="job-row" data-job-id="{{ job.id }}">
+<article class="job-row{% if job.kind.value == 'recipe_batch' %} is-recipe-batch{% endif %}" data-job-id="{{ job.id }}">
   <div class="job-main">
-    {% if selectable_retry and job.state.value in ('failed', 'cancelled') %}
+    {% if selectable_retry and job.state.value in ('failed', 'cancelled', 'partial') %}
       <input class="job-select" type="checkbox" name="job_ids" value="{{ job.id }}"
              aria-label="Select {{ job.label }} for retry">
     {% endif %}
     <span class="badge badge-{{ job.state.value }}">{{ job.state.value }}</span>
     <div>
       <strong>{{ job.label }}</strong>
-      <code>{{ job.citekey or 'Library operation' }}</code>
+      {% if job.kind.value == 'recipe_batch' %}
+        <code>{{ job.meta.paper_count or '?' }} paper{% if job.meta.paper_count != '1' %}s{% endif %} · {{ job.meta.request_count or '?' }} request{% if job.meta.request_count != '1' %}s{% endif %}</code>
+      {% else %}
+        <code>{{ job.citekey or 'Library operation' }}</code>
+      {% endif %}
       {% if job.meta.retry_of %}<small class="retry-note">Retry of {{ job.meta.retry_of }}</small>{% endif %}
+      {% if job.progress and job.kind.value != 'recipe_batch' %}<small class="job-progress">{{ job.progress }}</small>{% endif %}
     </div>
   </div>
   <div class="job-meta">
@@ -22,12 +27,67 @@
     {% endif %}
     {% if job.state.value in ('queued', 'running') %}
       <button class="button button-danger" type="button" hx-post="/jobs/{{ job.id }}/cancel"
-              hx-target="#jobs-list" hx-swap="innerHTML" hx-disabled-elt="this">Cancel</button>
-    {% elif job.state.value in ('failed', 'cancelled') %}
+              hx-target="#jobs-list" hx-swap="innerHTML" hx-disabled-elt="this">
+        {% if job.kind.value == 'recipe_batch' %}Stop remaining{% else %}Cancel{% endif %}
+      </button>
+    {% elif job.state.value in ('failed', 'cancelled', 'partial') %}
       <button class="button button-quiet" type="button" hx-post="/jobs/{{ job.id }}/retry"
-              hx-target="#jobs-list" hx-swap="innerHTML" hx-disabled-elt="this">Retry</button>
+              hx-target="#jobs-list" hx-swap="innerHTML" hx-disabled-elt="this">
+        {% if job.kind.value == 'recipe_batch' %}Retry failed{% else %}Retry{% endif %}
+      </button>
     {% endif %}
   </div>
+  {% if job.kind.value == 'recipe_batch' %}
+    {% set stage_index = job.meta.progress_stage_index | int %}
+    <div class="batch-progress-panel" role="status" aria-label="Recipe Batch progress"
+         data-batch-stage="{{ job.meta.progress_stage or 'queued' }}">
+      <ol class="batch-progress-steps" aria-label="Batch stages">
+        {% for number, label in ((1, 'Prepare'), (2, 'Upload'), (3, 'Generate'), (4, 'Collect'), (5, 'Install'), (6, 'Cleanup')) %}
+          <li class="{% if stage_index > number %}is-complete{% elif stage_index == number %}is-current{% endif %}"
+              {% if stage_index == number %}aria-current="step"{% endif %}>
+            <span class="batch-step-marker" aria-hidden="true"></span>{{ label }}
+          </li>
+        {% endfor %}
+      </ol>
+      <div class="batch-progress-summary">
+        <div>
+          <strong>{{ job.meta.progress_stage_label or 'Waiting to start' }}</strong>
+          <span>{{ job.progress or 'The coordinator has not started yet.' }}</span>
+        </div>
+        {% if job.meta.progress_updated_at %}
+          <small>Updated {{ job.meta.progress_updated_at }}</small>
+        {% endif %}
+      </div>
+      {% if job.meta.progress_stage == 'generate' %}
+        {% set remote_done = job.meta.progress_remote_finished | int %}
+        {% set remote_total = job.meta.request_count | int %}
+        <progress class="batch-request-meter"
+                  {% if remote_done > 0 or job.meta.progress_remote_status in ('completed', 'failed', 'expired', 'cancelled') %}value="{{ remote_done }}"{% endif %}
+                  max="{{ remote_total }}">{{ remote_done }}/{{ remote_total }}</progress>
+      {% endif %}
+      <div class="batch-progress-facts">
+        {% if job.meta.progress_upload_total and job.meta.progress_upload_total != '0' %}
+          <span><b>{{ job.meta.progress_upload_done or '0' }}/{{ job.meta.progress_upload_total }}</b> PDFs uploaded</span>
+        {% endif %}
+        {% if job.meta.progress_remote_status %}
+          <span><b>{{ job.meta.progress_remote_status | replace('_', ' ') }}</b> provider status</span>
+          <span><b>{{ job.meta.progress_remote_finished or '0' }}/{{ job.meta.request_count }}</b> requests returned{% if job.meta.progress_remote_failed and job.meta.progress_remote_failed != '0' %} · {{ job.meta.progress_remote_failed }} failed{% endif %}</span>
+        {% endif %}
+        {% if job.meta.progress_poll_count %}
+          <span><b>{{ job.meta.progress_poll_count }}</b> provider check{% if job.meta.progress_poll_count != '1' %}s{% endif %}{% if job.meta.progress_last_provider_check %} · last at {{ job.meta.progress_last_provider_check }}{% endif %}</span>
+        {% endif %}
+        {% if job.meta.progress_install_total %}
+          <span><b>{{ job.meta.progress_install_successes or '0' }}/{{ job.meta.progress_install_total }}</b> results installed</span>
+        {% endif %}
+        {% if job.meta.progress_cleanup_total %}
+          <span><b>{{ job.meta.progress_cleanup_done or '0' }}/{{ job.meta.progress_cleanup_total }}</b> temporary files deleted</span>
+        {% endif %}
+        {% if job.meta.progress_local_cleanup %}
+          <span>{{ job.meta.progress_local_cleanup }}</span>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
   {% if job.error %}<p class="job-error">{{ job.error }}</p>{% endif %}
   <div id="log-{{ job.id }}" class="log-slot"></div>
 </article>

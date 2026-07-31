@@ -34,6 +34,7 @@ T = TypeVar("T")
 type ProviderFactory = Callable[[], object]
 type PaperWorker = Callable[["PaperSession", Job, CancellationToken], Awaitable[None]]
 type LibraryWorker = Callable[["LibrarySession", Job, CancellationToken], Awaitable[None]]
+type RemoteWorker = Callable[[Job, CancellationToken], Awaitable[None]]
 type PaperCompletionValidator = Callable[
     ["PaperSession"], CompletionResult | Awaitable[CompletionResult]
 ]
@@ -318,6 +319,23 @@ class LibraryRuntime:
             kind,
             label,
             self._library_worker(worker, writable=True),
+            meta=meta,
+        )
+
+    async def enqueue_remote(
+        self,
+        kind: JobKind,
+        label: str,
+        worker: RemoteWorker,
+        *,
+        meta: dict[str, str] | None = None,
+    ) -> Job:
+        """Schedule resumable provider work without holding any paper lane."""
+        return await self.queue.enqueue_remote(
+            self.library_key,
+            kind,
+            label,
+            worker,
             meta=meta,
         )
 

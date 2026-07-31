@@ -30,7 +30,11 @@ class LogTail:
 
 def job_dashboard(runtime: LibraryRuntime) -> JobDashboard:
     """Return jobs for one library grouped for operational presentation."""
-    jobs = [job for job in runtime.queue.list_jobs() if job.library_key == runtime.library_key]
+    jobs = [
+        job
+        for job in runtime.queue.list_jobs()
+        if job.library_key == runtime.library_key and job.meta.get("internal") != "true"
+    ]
     jobs.reverse()
     return JobDashboard(
         active=tuple(job for job in jobs if not job.state.is_terminal),
@@ -69,7 +73,7 @@ def list_interrupted_attempts(
 
 
 def job_counts(runtime: LibraryRuntime) -> dict[str, int]:
-    jobs = list_runtime_jobs(runtime)
+    jobs = tuple(job for job in list_runtime_jobs(runtime) if job.meta.get("internal") != "true")
     return {state.value: sum(job.state is state for job in jobs) for state in JobState}
 
 
@@ -94,7 +98,7 @@ async def retry_selected_jobs(
         job = runtime.queue.get(job_id)
         if job is None or job.library_key != runtime.library_key:
             raise ValueError(f"selected job does not belong to this library: {job_id}")
-        if job.state not in {JobState.FAILED, JobState.CANCELLED}:
+        if job.state not in {JobState.FAILED, JobState.CANCELLED, JobState.PARTIAL}:
             raise ValueError(f"selected job is not retryable: {job_id}")
         selected.append(job)
 

@@ -7,7 +7,6 @@ import shutil
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import cast
 
 from paper_pipeline.convert.contract import ConversionRequest, ConversionResult
 from paper_pipeline.convert.runner import ConverterSpec, run_conversion
@@ -19,7 +18,6 @@ from paper_pipeline.library.model import (
     AttemptState,
     ConversionRecord,
     PageRenderRecord,
-    RecipeRecord,
 )
 from paper_pipeline.library.paths import PAPERS_DIR
 from paper_pipeline.library.storage import (
@@ -31,8 +29,10 @@ from paper_pipeline.library.storage import (
 from paper_pipeline.pages.contract import PageRenderRequest, PageRenderResult
 from paper_pipeline.pages.runner import PageRendererSpec, run_page_render
 from paper_pipeline.recipes.model import RecipeDefinition, load_builtin_recipes
-from paper_pipeline.recipes.provider import LLMProvider
-from paper_pipeline.recipes.runner import RecipeRunResult, run_recipe
+from paper_pipeline.services.recipe_batches import (
+    queue_recipe_batch,
+    retry_failed_recipe_batch,
+)
 from paper_pipeline.services.runtime import LibraryRuntime, LibrarySession, PaperSession
 
 
@@ -61,13 +61,6 @@ class _ConversionState:
     source_sha256: str | None = None
     result: ConversionResult | None = None
     artifacts: dict[str, str] = field(default_factory=dict)
-    log_path: str | None = None
-
-
-@dataclass
-class _RecipeBatchState:
-    results: dict[str, RecipeRunResult] = field(default_factory=dict)
-    active_recipe: str | None = None
     log_path: str | None = None
 
 
@@ -336,135 +329,29 @@ async def queue_recipes(
     provider_name: str,
     model: str = "",
     recipes: dict[str, RecipeDefinition] | None = None,
+    overwrite_targets: frozenset[tuple[str, str]] | None = None,
 ) -> list[Job]:
-    """Queue one sequential recipe batch per paper, concurrent across papers."""
-    definitions = recipes or load_builtin_recipes()
-    selected: list[RecipeDefinition] = []
-    for name in recipe_names:
-        try:
-            selected.append(definitions[name])
-        except KeyError as error:
-            raise ValueError(f"unknown recipe: {name}") from error
-    outputs: dict[str, str] = {}
-    for recipe in selected:
-        collision = outputs.get(recipe.output.casefold())
-        if collision is not None:
-            raise ValueError(
-                f"recipes {collision!r} and {recipe.name!r} declare the same output "
-                f"filename: {recipe.output}"
-            )
-        outputs[recipe.output.casefold()] = recipe.name
-    provider = cast(LLMProvider, runtime.provider(provider_name))
+    """Queue the fewest durable provider Batches allowed by request limits."""
+    if not recipe_names:
+        raise ValueError("choose at least one recipe")
+    max_papers = max(1, 50_000 // len(recipe_names))
     jobs: list[Job] = []
-    for citekey in citekeys:
-        state = _RecipeBatchState()
-
-        async def worker(
-            session: PaperSession,
-            job: Job,
-            token: CancellationToken,
-            *,
-            state: _RecipeBatchState = state,
-        ) -> None:
-            state.results.clear()
-            state.active_recipe = None
-            state.log_path = None
-            staged_results: list[tuple[RecipeDefinition, RecipeRunResult]] = []
-            try:
-                for index, recipe in enumerate(selected, start=1):
-                    if token.is_set():
-                        raise asyncio.CancelledError
-                    state.active_recipe = recipe.name
-                    runtime.queue.publish_progress(
-                        job.id,
-                        f"Running {recipe.name} ({index}/{len(selected)})",
-                    )
-                    result = await asyncio.to_thread(
-                        run_recipe,
-                        session,
-                        session.citekey,
-                        recipe,
-                        provider,
-                        model=model,
-                    )
-                    staged_results.append((recipe, result))
-                for recipe, result in staged_results:
-                    if not token.begin_commit():
-                        raise asyncio.CancelledError
-                    state.active_recipe = recipe.name
-                    runtime.queue.publish_progress(job.id, f"Installing {recipe.name}")
-                    session.install_artifact(result.staged_path, result.destination)
-                    state.results[recipe.name] = result
-                state.log_path = _install_text_log(
-                    session,
-                    f"recipe-{job.id}.log",
-                    _recipe_usage_text(staged_results),
-                )
-                job.log_path = state.log_path
-            except Exception as error:
-                state.log_path = _install_text_log(
-                    session,
-                    f"recipe-{job.id}.log",
-                    _recipe_usage_text(staged_results, error=error),
-                )
-                job.log_path = state.log_path
-                raise
-            finally:
-                for _recipe, result in staged_results:
-                    shutil.rmtree(result.staged_path.parent, ignore_errors=True)
-
-        def validate(
-            session: PaperSession,
-            *,
-            state: _RecipeBatchState = state,
-        ) -> CompletionResult:
-            expected = {
-                result.record.output_artifact or result.destination: result.record.output_sha256
-                or ""
-                for result in state.results.values()
-            }
-            return validate_artifacts(
-                {path: session.root_path(path) for path in expected},
-                expected_hashes=expected,
-            )
-
-        def record_terminal(
-            session: PaperSession,
-            outcome: TerminalOutcome,
-            *,
-            state: _RecipeBatchState = state,
-        ) -> None:
-            def update(paper):  # type: ignore[no-untyped-def]
-                attempt = _attempt(outcome, state.log_path)
-                if outcome.state is JobState.SUCCEEDED:
-                    for recipe_name, result in state.results.items():
-                        recipe_record = result.record.model_copy(deep=True)
-                        recipe_record.last_attempt = attempt
-                        paper.recipes[recipe_name] = recipe_record
-                else:
-                    for recipe_name, result in state.results.items():
-                        recipe_record = result.record.model_copy(deep=True)
-                        recipe_record.last_attempt = AttemptRecord(
-                            id=outcome.attempt_id,
-                            state=AttemptState.SUCCEEDED,
-                            started_at=outcome.started_at,
-                            finished_at=outcome.finished_at,
-                        )
-                        paper.recipes[recipe_name] = recipe_record
-                if outcome.state is not JobState.SUCCEEDED and state.active_recipe is not None:
-                    recipe_record = paper.recipes.setdefault(state.active_recipe, RecipeRecord())
-                    recipe_record.last_attempt = attempt
-
-            session.update_record(update)
-
+    for start in range(0, len(citekeys), max_papers):
+        shard = citekeys[start : start + max_papers]
+        shard_targets = (
+            None
+            if overwrite_targets is None
+            else frozenset(target for target in overwrite_targets if target[0] in set(shard))
+        )
         jobs.append(
-            await runtime.enqueue_paper(
-                citekey,
-                JobKind.RECIPE,
-                "recipes:" + ",".join(recipe_names),
-                worker,
-                validate_completion=validate,
-                record_terminal=record_terminal,
+            await queue_recipe_batch(
+                runtime,
+                recipe_names,
+                shard,
+                provider_name=provider_name,
+                model=model,
+                recipes=recipes,
+                overwrite_targets=shard_targets,
             )
         )
     return jobs
@@ -543,6 +430,12 @@ async def queue_configured_processing(
         if names:
             recipe_groups.setdefault(names, []).append(citekey)
     for names, targets in recipe_groups.items():
+        overwrite_targets = frozenset(
+            (citekey, name)
+            for citekey in targets
+            for name in names
+            if recipe_modes[name] is ProcessingMode.OVERWRITE
+        )
         jobs.extend(
             await queue_recipes(
                 runtime,
@@ -551,6 +444,7 @@ async def queue_configured_processing(
                 provider_name=provider_name,
                 model=model,
                 recipes=definitions,
+                overwrite_targets=overwrite_targets,
             )
         )
     return jobs
@@ -577,6 +471,11 @@ async def retry_job(
     existing = runtime.queue.get(job_id)
     if existing is not None:
         _runtime_job(runtime, job_id)
+        if existing.kind is JobKind.RECIPE_BATCH:
+            try:
+                return await retry_failed_recipe_batch(runtime, existing)
+            except ValueError:
+                pass
         return await runtime.queue.retry(job_id)
 
     interrupted = runtime.interrupted(job_id)
@@ -750,38 +649,6 @@ def _install_text_log(session: PaperSession, filename: str, text: str) -> str:
     finally:
         shutil.rmtree(stage, ignore_errors=True)
     return relative
-
-
-def _recipe_usage_text(
-    results: list[tuple[RecipeDefinition, RecipeRunResult]],
-    *,
-    error: Exception | None = None,
-) -> str:
-    lines = []
-    for recipe, result in results:
-        usage = result.record
-        hit_rate = usage.cached_tokens / usage.prompt_tokens if usage.prompt_tokens else 0.0
-        lines.append(
-            f"{recipe.name}: prompt={usage.prompt_tokens} cached={usage.cached_tokens} "
-            f"cache_write={usage.cache_write_tokens} cache_hit_rate={hit_rate:.1%} "
-            f"completion={usage.completion_tokens} "
-            f"cost_usd={usage.cost_usd:.8f}"
-        )
-    totals = (
-        sum(result.record.prompt_tokens for _recipe, result in results),
-        sum(result.record.cached_tokens for _recipe, result in results),
-        sum(result.record.cache_write_tokens for _recipe, result in results),
-        sum(result.record.completion_tokens for _recipe, result in results),
-        sum(result.record.cost_usd for _recipe, result in results),
-    )
-    hit_rate = totals[1] / totals[0] if totals[0] else 0.0
-    lines.append(
-        f"total: prompt={totals[0]} cached={totals[1]} cache_hit_rate={hit_rate:.1%} "
-        f"cache_write={totals[2]} completion={totals[3]} cost_usd={totals[4]:.8f}"
-    )
-    if error is not None:
-        lines.append(f"{type(error).__name__}: {error}")
-    return "\n".join(lines)
 
 
 def _runtime_job(runtime: LibraryRuntime, job_id: str) -> Job:

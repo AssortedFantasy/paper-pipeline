@@ -395,10 +395,31 @@ def test_visual_jobs_running_failed_interrupted(
     running = runtime.queue.get(job_ids[0])
     failed = runtime.queue.get(job_ids[1])
     assert running is not None and failed is not None
+    running.kind = JobKind.RECIPE_BATCH
+    running.scope = JobScope.REMOTE
+    running.citekey = None
+    running.label = "Recipe Batch · 3 papers · 12 requests"
     running.state = JobState.RUNNING
     running.started_at = FIXED_TIME
     running.finished_at = None
     running.error = None
+    running.progress = "Provider in progress · 4/12 requests returned"
+    running.meta = {
+        "paper_count": "3",
+        "request_count": "12",
+        "progress_stage": "generate",
+        "progress_stage_index": "3",
+        "progress_stage_count": "6",
+        "progress_stage_label": "Generating responses",
+        "progress_updated_at": "12:35:10",
+        "progress_upload_done": "3",
+        "progress_upload_total": "3",
+        "progress_remote_status": "in_progress",
+        "progress_remote_finished": "4",
+        "progress_remote_failed": "0",
+        "progress_poll_count": "7",
+        "progress_last_provider_check": "12:35:10",
+    }
     failed.state = JobState.FAILED
     failed.started_at = FIXED_TIME
     failed.finished_at = FIXED_TIME

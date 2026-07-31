@@ -9,7 +9,8 @@ Operations:
 - ``preview_import(runtime, export_path) -> ImportPlan``
 - ``apply_import(runtime, plan) -> ImportReport``
 - ``queue_conversion(runtime, citekeys) -> [Job]``
-- ``queue_recipes(runtime, recipe_names, citekeys) -> [Job]``
+- ``queue_recipes(runtime, recipe_names, citekeys) -> [Job]`` creates the
+  fewest durable remote Batch coordinators allowed by provider limits.
 - ``cancel_job`` / ``retry_job``
 - ``rebuild_indexes(library)``
 - ``refresh_catalog(runtime)``

@@ -34,6 +34,7 @@ INDEXES_DIR = "indexes"
 PAPERS_DIR = "papers"
 OPERATIONAL_DIR = ".pp"
 ATTEMPTS_DIR = "attempts"
+RECIPE_RUNS_DIR = "recipe-runs"
 
 # Per-paper entries
 PAPER_FILE = "paper.json"

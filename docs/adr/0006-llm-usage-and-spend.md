@@ -11,7 +11,10 @@ prompt-cache effectiveness without maintaining a separate accounting store.
 
 Provider results report input, cached-input, cache-write, and output tokens
 when supplied by the provider. The OpenAI adapter computes cost from a reviewed
-model price table and fails visibly when pricing for a model is unknown.
+model price table and an explicit processing mode. Batch results apply the
+documented Batch discount; standard Responses calls, where used outside
+production scheduling, do not. Unknown pricing fails the affected result
+visibly instead of recording a false zero cost.
 
 Installed recipe records persist token counts and computed cost in
 `paper.json`. The dashboard totals those records rather than storing separate
@@ -21,6 +24,10 @@ For models that support explicit prompt caching, requests use a stable key
 derived from the paper input hash and place the cache boundary after the paper
 content. Recipes for the same paper can therefore reuse the common input
 prefix.
+
+GPT-5.6 Batch requests use explicit-only caching so changing recipe suffixes do
+not create avoidable cache writes. One uploaded PDF file ID is reused by every
+recipe request for that input inside its remote Batch (ADR-0009).
 
 Provider payloads, credentials, and API endpoints are not stored in usage
 records or logs.

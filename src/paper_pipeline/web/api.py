@@ -41,6 +41,7 @@ from paper_pipeline.services.processing import (
     queue_recipes,
     retry_job,
 )
+from paper_pipeline.services.recipe_batches import resume_recipe_runs
 from paper_pipeline.services.runtime import (
     LibraryRuntime,
     RuntimeRegistry,
@@ -205,7 +206,7 @@ def create_api_router(context: WebContext) -> APIRouter:
                 name=body.name,
                 registry=context.registry,
             )
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, RuntimeError) as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
         return LibraryResponse.from_runtime(context.runtime)
 
@@ -213,7 +214,8 @@ def create_api_router(context: WebContext) -> APIRouter:
     async def open_library_route(body: LibraryPathRequest) -> LibraryResponse:
         try:
             context.runtime = open_library(body.path, registry=context.registry)
-        except (OSError, ValueError) as error:
+            await resume_recipe_runs(context.runtime)
+        except (OSError, ValueError, RuntimeError) as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
         return LibraryResponse.from_runtime(context.runtime)
 
