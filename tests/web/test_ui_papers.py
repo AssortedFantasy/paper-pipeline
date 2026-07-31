@@ -133,6 +133,7 @@ def test_papers_load_filter_select_and_launch(page: Page, ui_server: str, tmp_pa
 
     page.goto(f"{ui_server}/papers")
     expect(page).to_have_title("Papers · Paper Pipeline")
+    expect(page.get_by_role("button", name="Exit Paper Pipeline", exact=True)).to_be_visible()
     expect(page.get_by_role("heading", name="Papers", exact=True)).to_have_count(0)
     expect(page.locator("tbody tr")).to_have_count(5)
     expect(page.locator("script[src*='htmx.min.js']")).to_have_count(1)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -56,6 +57,7 @@ class WebContext:
     page_renderer_spec: PageRendererSpec
     provider_name: str = "openai"
     runtime: LibraryRuntime | None = None
+    request_shutdown: Callable[[], None] | None = None
 
 
 class LibraryPathRequest(BaseModel):

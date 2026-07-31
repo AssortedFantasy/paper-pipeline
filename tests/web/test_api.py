@@ -40,6 +40,27 @@ async def test_cross_origin_mutation_is_rejected(tmp_path: Path) -> None:
     assert not (tmp_path / "library").exists()
 
 
+@pytest.mark.asyncio
+async def test_exit_stops_jobs_then_requests_server_shutdown(tmp_path: Path) -> None:
+    shutdown_requested: list[bool] = []
+    registry = RuntimeRegistry()
+    app = create_app(
+        registry=registry,
+        config=_config(tmp_path),
+        request_shutdown=lambda: shutdown_requested.append(True),
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://paper-pipeline.test",
+    ) as client:
+        response = await client.post("/exit")
+
+    assert response.status_code == 200
+    assert "Paper Pipeline has stopped" in response.text
+    assert "window.close()" in response.text
+    assert shutdown_requested == [True]
+
+
 def _config(tmp_path: Path) -> AppConfig:
     values: dict[str, object] = {
         "config_dir": tmp_path / "config",
@@ -293,10 +314,11 @@ async def test_cancel_and_retry_routes(tmp_path: Path) -> None:
 def test_serve_defaults_to_a_loopback_interface(monkeypatch: pytest.MonkeyPatch) -> None:
     invocation: dict[str, object] = {}
 
-    def record_server_start(_app: str, **options: object) -> None:
-        invocation.update(options)
+    def record_server_start(host: str, port: int) -> int:
+        invocation.update({"host": host, "port": port})
+        return 0
 
-    monkeypatch.setattr("uvicorn.run", record_server_start)
+    monkeypatch.setattr("paper_pipeline.cli._run_serve", record_server_start)
 
     assert main(["serve"]) == 0
     assert invocation["host"] in {"127.0.0.1", "localhost", "::1"}

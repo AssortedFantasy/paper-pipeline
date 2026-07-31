@@ -1,6 +1,7 @@
 """FastAPI application factory and shared production wiring."""
 
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -27,6 +28,7 @@ def create_app(
     converter_spec: ConverterSpec | None = None,
     page_renderer_spec: PageRendererSpec | None = None,
     provider_name: str = "openai",
+    request_shutdown: Callable[[], None] | None = None,
 ) -> FastAPI:
     """Create one web app over the process-shared runtime registry."""
     config = config or load_config()
@@ -53,6 +55,7 @@ def create_app(
         page_renderer_spec=page_renderer_spec
         or PageRendererSpec("paper_pipeline.pages.pdfium:PdfiumPageRenderer"),
         provider_name=provider_name,
+        request_shutdown=request_shutdown,
     )
     app.state.web_context = context
     app.mount(

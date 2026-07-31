@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% if stopped %}Paper Pipeline stopped{% else %}Could not stop Paper Pipeline{% endif %}</title>
+    <style>
+      :root { color-scheme: light; font-family: Inter, system-ui, sans-serif; }
+      body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: #f6f4ed; color: #17211b; }
+      main { width: min(440px, 88vw); padding: 2rem; border: 1px solid #d9ded8; border-radius: 10px; background: #fffef9; text-align: center; }
+      .mark { display: grid; place-items: center; width: 42px; height: 42px; margin: 0 auto 1rem; border-radius: 10px; background: #194f3d; color: white; font-weight: 800; }
+      h1 { margin: 0; font: 700 1.8rem Georgia, serif; }
+      p { margin: .75rem 0 0; color: #607067; line-height: 1.55; }
+    </style>
+  </head>
+  <body>
+    <main role="status">
+      <span class="mark">PP</span>
+      {% if stopped %}
+        <h1>Paper Pipeline has stopped</h1>
+        <p>This tab should close automatically. If it remains open, it is safe to close.</p>
+      {% else %}
+        <h1>Paper Pipeline could not stop</h1>
+        <p>This server was not started with dashboard shutdown control.</p>
+      {% endif %}
+    </main>
+    {% if stopped %}<script>window.setTimeout(() => window.close(), 250);</script>{% endif %}
+  </body>
+</html>

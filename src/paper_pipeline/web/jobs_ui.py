@@ -110,12 +110,18 @@ def _page_context(context: WebContext, request: Request) -> dict[str, object]:
 
 def _dashboard_context(context: WebContext) -> dict[str, object]:
     if context.runtime is None:
-        return {"active_jobs": (), "terminal_jobs": (), "interrupted_jobs": ()}
+        return {
+            "active_jobs": (),
+            "terminal_jobs": (),
+            "interrupted_jobs": (),
+            "job_active": 0,
+        }
     dashboard = job_dashboard(context.runtime)
     return {
         "active_jobs": dashboard.active,
         "terminal_jobs": dashboard.terminal,
         "interrupted_jobs": dashboard.interrupted,
+        "job_active": len(dashboard.active),
     }
 
 

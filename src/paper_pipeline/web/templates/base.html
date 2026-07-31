@@ -4,10 +4,11 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Paper Pipeline{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}?v=15">
+    <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}?v=16">
     <script src="{{ url_for('static', path='/htmx.min.js') }}" defer></script>
     <script src="{{ url_for('static', path='/htmx-sse.js') }}" defer></script>
     <script src="{{ url_for('static', path='/papers.js') }}?v=6" defer></script>
+    <script src="{{ url_for('static', path='/exit.js') }}?v=1" defer></script>
   </head>
   <body hx-ext="sse"{% if library_root %} sse-connect="/events"{% endif %}>
     <header class="app-header">
@@ -20,10 +21,17 @@
         <a href="/papers"{% if active_page == 'papers' %} aria-current="page"{% endif %}>Papers</a>
         <a href="/jobs"{% if active_page == 'jobs' %} aria-current="page"{% endif %}>Jobs</a>
       </nav>
-      <a id="library-chip" class="library-chip" href="/library#library-setup" title="{{ library_root or 'No library open' }}">
-        <span class="status-dot{% if library_root %} is-online{% endif %}"></span>
-        {{ library_root.name if library_root else 'No library' }}
-      </a>
+      <div class="header-actions">
+        <a id="library-chip" class="library-chip" href="/library#library-setup" title="{{ library_root or 'No library open' }}">
+          <span class="status-dot{% if library_root %} is-online{% endif %}"></span>
+          {{ library_root.name if library_root else 'No library' }}
+        </a>
+        <form class="exit-form" action="/exit" method="post" data-active-jobs="{{ job_active or 0 }}">
+          <button class="exit-button" type="submit" aria-label="Exit Paper Pipeline" title="Stop Paper Pipeline and close this tab">
+            <span aria-hidden="true">⏻</span> Exit
+          </button>
+        </form>
+      </div>
     </header>
 
     <div class="job-stream"{% if library_root %} hx-get="/fragments/job-strip" hx-trigger="sse:state" hx-swap="innerHTML"{% endif %}>

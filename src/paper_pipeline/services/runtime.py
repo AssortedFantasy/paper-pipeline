@@ -440,6 +440,10 @@ class RuntimeRegistry:
                 raise ValueError(f"library already has an open runtime: {resolved}")
             return self._register(create_library(resolved, name=name), key)
 
+    async def shutdown(self, *, grace_seconds: float = 1.0) -> None:
+        """Stop shared work before the owning application process exits."""
+        await self.queue.shutdown(grace_seconds=grace_seconds)
+
     def _register(self, library: Library, key: str) -> LibraryRuntime:
         providers = {name: factory() for name, factory in self._provider_factories.items()}
         runtime = LibraryRuntime(library, self.queue, providers, key)

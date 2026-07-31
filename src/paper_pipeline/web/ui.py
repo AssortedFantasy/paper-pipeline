@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import parse_qs
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -72,6 +72,19 @@ def create_ui_router(context: WebContext) -> APIRouter:
             elif notice == "opened":
                 page["library_message"] = f"Opened library {context.runtime.root.name!r}."
         return templates.TemplateResponse(request, "library.html", page)
+
+    @router.post("/exit", response_class=HTMLResponse)
+    async def exit_application(request: Request, background_tasks: BackgroundTasks) -> HTMLResponse:
+        if context.request_shutdown is None:
+            return templates.TemplateResponse(
+                request,
+                "exit.html",
+                {"stopped": False},
+                status_code=503,
+            )
+        await context.registry.shutdown(grace_seconds=1.0)
+        background_tasks.add_task(context.request_shutdown)
+        return templates.TemplateResponse(request, "exit.html", {"stopped": True})
 
     @router.post("/library/create", response_class=HTMLResponse)
     async def create_library_control(request: Request) -> Response:
@@ -567,9 +580,19 @@ async def _table_context(
 
 def _job_context(context: WebContext) -> dict[str, object]:
     if context.runtime is None:
-        return {"job_counts": {}, "job_total": 0, "job_error": "No library open"}
+        return {
+            "job_counts": {},
+            "job_total": 0,
+            "job_active": 0,
+            "job_error": "No library open",
+        }
     counts = job_counts(context.runtime)
-    return {"job_counts": counts, "job_total": sum(counts.values()), "job_error": None}
+    return {
+        "job_counts": counts,
+        "job_total": sum(counts.values()),
+        "job_active": counts.get("queued", 0) + counts.get("running", 0),
+        "job_error": None,
+    }
 
 
 def _guard_library_operation(

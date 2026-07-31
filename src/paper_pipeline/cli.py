@@ -118,6 +118,19 @@ def _run_reindex(path: Path) -> int:
     return 0
 
 
+def _run_serve(host: str, port: int) -> int:
+    """Run the dashboard with an in-process graceful-shutdown hook."""
+    import uvicorn
+
+    from paper_pipeline.web.app import create_app
+
+    app = create_app()
+    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port))
+    app.state.web_context.request_shutdown = lambda: setattr(server, "should_exit", True)
+    server.run()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="paper-pipeline",
@@ -151,15 +164,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "doctor":
         return _run_doctor(args.target)
     if args.command == "serve":
-        import uvicorn
-
-        uvicorn.run(
-            "paper_pipeline.web.app:create_app",
-            factory=True,
-            host=args.host,
-            port=args.port,
-        )
-        return 0
+        return _run_serve(args.host, args.port)
     if args.command == "validate":
         return _run_validate(args.library)
     if args.command == "reindex":
