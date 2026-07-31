@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 from paper_pipeline.library.paths import OPERATIONAL_DIR, RECIPE_RUNS_DIR
@@ -19,6 +20,7 @@ _DISPOSABLE_FILES = (
     "requests.jsonl",
 )
 _DISPOSABLE_DIRECTORIES = ("collected", "snapshots")
+_REPLACE_RETRY_DELAYS = (0.01, 0.02, 0.04, 0.08, 0.16)
 
 
 class RecipeRunStore:
@@ -143,7 +145,7 @@ class RecipeRunStore:
                 output.write("\n")
                 output.flush()
                 os.fsync(output.fileno())
-            os.replace(temporary, destination)
+            _replace_with_retry(temporary, destination)
         except BaseException:
             temporary.unlink(missing_ok=True)
             raise
@@ -152,3 +154,14 @@ class RecipeRunStore:
     def _validate_id(run_id: str) -> None:
         if not _SAFE_ID.fullmatch(run_id):
             raise ValueError(f"unsafe recipe run ID: {run_id!r}")
+
+
+def _replace_with_retry(source: Path, destination: Path) -> None:
+    """Tolerate brief Windows sharing locks without weakening atomic replacement."""
+    for delay in _REPLACE_RETRY_DELAYS:
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            time.sleep(delay)
+    os.replace(source, destination)
