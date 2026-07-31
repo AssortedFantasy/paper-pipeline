@@ -16,7 +16,6 @@ _SAFE_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 _DISPOSABLE_FILES = (
     "errors.jsonl",
     "output.jsonl",
-    "request-map.json",
     "requests.jsonl",
 )
 _DISPOSABLE_DIRECTORIES = ("collected", "snapshots")
@@ -120,6 +119,14 @@ class RecipeRunStore:
             )
             shutil.rmtree(path)
         return removed_bytes
+
+    def discard(self, run_id: str) -> None:
+        """Discard an unreadable operational run without affecting library artifacts."""
+        run_dir = self.run_dir(run_id)
+        if run_dir.is_symlink():
+            run_dir.unlink()
+        elif run_dir.is_dir():
+            shutil.rmtree(run_dir)
 
     def _atomic_write(self, destination: Path, value: object) -> None:
         self.temp_root.mkdir(parents=True, exist_ok=True)

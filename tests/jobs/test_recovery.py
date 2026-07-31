@@ -149,7 +149,7 @@ async def test_invalid_artifact_fails_before_success(
     job = await queue.enqueue_paper(
         "library",
         "Smith2024",
-        JobKind.RECIPE,
+        JobKind.RECIPE_FINALIZE,
         "summary",
         worker,
         recovery=RecoveryHooks(

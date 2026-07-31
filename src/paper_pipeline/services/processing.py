@@ -463,9 +463,6 @@ async def retry_job(
     page_renderer_spec: PageRendererSpec | None = None,
     timeout_seconds: int | None = None,
     page_render_timeout_seconds: int | None = None,
-    provider_name: str = "openai",
-    model: str = "",
-    recipes: dict[str, RecipeDefinition] | None = None,
 ) -> Job:
     """Retry a live failure or reconstruct a startup-interrupted operation."""
     existing = runtime.queue.get(job_id)
@@ -505,20 +502,6 @@ async def retry_job(
                 [citekey],
                 renderer_spec=page_renderer_spec,
                 timeout_seconds=page_render_timeout_seconds,
-            )
-        )[0]
-    elif interrupted.kind is JobKind.RECIPE and interrupted.operation.startswith("recipes:"):
-        names = [name for name in interrupted.operation.removeprefix("recipes:").split(",") if name]
-        if not names:
-            raise ValueError("interrupted recipe operation declares no recipes")
-        replacement = (
-            await queue_recipes(
-                runtime,
-                names,
-                [citekey],
-                provider_name=provider_name,
-                model=model,
-                recipes=recipes,
             )
         )[0]
     else:

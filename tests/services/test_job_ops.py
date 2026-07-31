@@ -21,8 +21,8 @@ async def test_retry_selected_jobs_is_library_scoped_and_validate_first(tmp_path
     ) -> None:
         raise RuntimeError("expected failure")
 
-    own = await first.enqueue_paper("Own2026", JobKind.RECIPE, "own", fail)
-    other = await second.enqueue_paper("Other2026", JobKind.RECIPE, "other", fail)
+    own = await first.enqueue_paper("Own2026", JobKind.RECIPE_FINALIZE, "own", fail)
+    other = await second.enqueue_paper("Other2026", JobKind.RECIPE_FINALIZE, "other", fail)
     assert (await first.queue.wait(own.id)).state is JobState.FAILED
     assert (await second.queue.wait(other.id)).state is JobState.FAILED
     before = len(first.queue.list_jobs())
@@ -33,7 +33,6 @@ async def test_retry_selected_jobs_is_library_scoped_and_validate_first(tmp_path
             [own.id, other.id],
             converter_spec=ConverterSpec("tests.fakes:FakeConverter"),
             timeout_seconds=5,
-            provider_name="fake",
         )
 
     assert len(first.queue.list_jobs()) == before
@@ -52,7 +51,7 @@ async def test_retry_selected_jobs_enqueues_one_replacement_per_job(tmp_path: Pa
         raise RuntimeError("expected failure")
 
     originals = [
-        await runtime.enqueue_paper(citekey, JobKind.RECIPE, "batch", fail)
+        await runtime.enqueue_paper(citekey, JobKind.RECIPE_FINALIZE, "batch", fail)
         for citekey in ("First2026", "Second2026")
     ]
     for job in originals:
@@ -63,7 +62,6 @@ async def test_retry_selected_jobs_enqueues_one_replacement_per_job(tmp_path: Pa
         [job.id for job in originals],
         converter_spec=ConverterSpec("tests.fakes:FakeConverter"),
         timeout_seconds=5,
-        provider_name="fake",
     )
 
     assert [job.meta["retry_of"] for job in replacements] == [job.id for job in originals]

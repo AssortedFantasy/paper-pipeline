@@ -11,8 +11,6 @@ from typing import Any
 from paper_pipeline.config import AppConfig
 from paper_pipeline.recipes.provider import (
     BatchLineResult,
-    ProviderRequest,
-    ProviderResult,
     RemoteBatch,
     RemoteFile,
 )
@@ -33,70 +31,13 @@ _PRICING: tuple[tuple[str, float, float, float, float], ...] = (
 
 
 class OpenAIProvider:
-    """OpenAI Responses and Batch API adapter."""
+    """OpenAI Batch API adapter."""
 
     name = "openai"
 
     def __init__(self, config: AppConfig, *, client: Any | None = None) -> None:
         self._config = config
         self._client = client
-        self._pdf_file_ids: dict[str, str] = {}
-
-    def generate(self, request: ProviderRequest) -> ProviderResult:
-        """Legacy immediate generation retained outside the production queue path."""
-
-        model = request.model or self._config.llm_model or ""
-        if not model:
-            return self._failure(model, "OpenAI model is not configured")
-        if self._client is None and not self._config.llm_api_key:
-            return self._failure(model, "OpenAI API key is not configured")
-        if (request.text_input is None) == (request.pdf_input is None):
-            return self._failure(model, "provider request must contain exactly one input")
-
-        try:
-            client = self._get_client()
-            content = self._content(client, request, model)
-            cache_key = _cache_key(request)
-            response_args: dict[str, Any] = {
-                "model": model,
-                "input": [{"role": "user", "content": content}],
-                "store": False,
-            }
-            if cache_key:
-                response_args["prompt_cache_key"] = cache_key
-            if _uses_explicit_cache_breakpoints(model):
-                response_args["prompt_cache_options"] = {
-                    "mode": "explicit",
-                    "ttl": "30m",
-                }
-            response = client.responses.create(
-                **response_args,
-            )
-            prompt_tokens, cached_tokens, cache_write_tokens, completion_tokens = _usage(response)
-            cost_usd = _cost_usd(
-                model,
-                prompt_tokens=prompt_tokens,
-                cached_tokens=cached_tokens,
-                cache_write_tokens=cache_write_tokens,
-                completion_tokens=completion_tokens,
-            )
-            return ProviderResult(
-                ok=True,
-                text=getattr(response, "output_text", "") or "",
-                provider=self.name,
-                model=model,
-                prompt_tokens=prompt_tokens,
-                cached_tokens=cached_tokens,
-                cache_write_tokens=cache_write_tokens,
-                completion_tokens=completion_tokens,
-                cost_usd=cost_usd,
-            )
-        except ModuleNotFoundError:
-            return self._failure(model, "OpenAI provider unavailable; reinstall Paper Pipeline")
-        except ValueError as error:
-            return self._failure(model, str(error))
-        except Exception as error:
-            return self._failure(model, _safe_request_failure(error))
 
     def request_body(
         self,
@@ -288,6 +229,8 @@ class OpenAIProvider:
             details.get("cache_write_tokens", 0),
             "cache write tokens",
         )
+        if cached + cache_write > prompt:
+            raise ValueError("OpenAI Batch response reported invalid input token details")
         completion = _nonnegative_int(usage.get("output_tokens"), "output tokens")
         model = body.get("model")
         if not isinstance(model, str) or not model:
@@ -325,61 +268,6 @@ class OpenAIProvider:
             kwargs["base_url"] = self._config.llm_base_url
         self._client = openai.OpenAI(**kwargs)
         return self._client
-
-    def _content(self, client: Any, request: ProviderRequest, model: str) -> list[dict[str, Any]]:
-        breakpoint = (
-            {"prompt_cache_breakpoint": {"mode": "explicit"}}
-            if _uses_explicit_cache_breakpoints(model)
-            else {}
-        )
-        if request.text_input is not None:
-            return [
-                {"type": "input_text", "text": request.text_input, **breakpoint},
-                {"type": "input_text", "text": request.prompt},
-            ]
-
-        pdf_path = request.pdf_input
-        assert pdf_path is not None
-        file_id = self._uploaded_file_id(client, pdf_path, request.input_sha256)
-        return [
-            {"type": "input_file", "file_id": file_id, **breakpoint},
-            {"type": "input_text", "text": request.prompt},
-        ]
-
-    def _uploaded_file_id(self, client: Any, pdf_path: Path, input_sha256: str) -> str:
-        if input_sha256 and input_sha256 in self._pdf_file_ids:
-            return self._pdf_file_ids[input_sha256]
-
-        with pdf_path.open("rb") as pdf_file:
-            uploaded = client.files.create(file=pdf_file, purpose="user_data")
-        file_id = getattr(uploaded, "id", None)
-        if not isinstance(file_id, str) or not file_id:
-            raise ValueError("OpenAI file upload returned no file ID")
-        if input_sha256:
-            self._pdf_file_ids[input_sha256] = file_id
-        return file_id
-
-    def _failure(self, model: str, message: str) -> ProviderResult:
-        return ProviderResult(
-            ok=False,
-            provider=self.name,
-            model=model,
-            error=message,
-        )
-
-
-def _usage(response: Any) -> tuple[int, int, int, int]:
-    usage = getattr(response, "usage", None)
-    if usage is None:
-        raise ValueError("OpenAI response contained no token usage")
-    prompt = _nonnegative_int(getattr(usage, "input_tokens", None), "input tokens")
-    completion = _nonnegative_int(getattr(usage, "output_tokens", None), "output tokens")
-    details = getattr(usage, "input_tokens_details", None)
-    cached = _nonnegative_int(getattr(details, "cached_tokens", 0), "cached tokens")
-    cache_write = _nonnegative_int(getattr(details, "cache_write_tokens", 0), "cache write tokens")
-    if cached + cache_write > prompt:
-        raise ValueError("OpenAI response reported invalid input token details")
-    return prompt, cached, cache_write, completion
 
 
 def _nonnegative_int(value: Any, label: str) -> int:
@@ -422,14 +310,6 @@ def _cost_usd(
     if batch:
         total *= 0.5
     return round(total, 10)
-
-
-def _cache_key(request: ProviderRequest) -> str:
-    """Return a stable, non-content cache-routing key for one paper input."""
-
-    if not request.input_sha256:
-        return ""
-    return _cache_key_for_hash(request.input_sha256)
 
 
 def _cache_key_for_hash(input_sha256: str) -> str:
@@ -522,11 +402,11 @@ def _safe_request_failure(error: Exception) -> str:
     elif status == 422:
         message = "OpenAI could not process the request parameters"
     elif status == 429:
-        message = "OpenAI rate limit or quota was exceeded after automatic retries"
+        message = "OpenAI rate limit or quota was exceeded"
     elif isinstance(status, int) and status >= 500:
-        message = "OpenAI service failed after automatic retries"
+        message = "OpenAI service failed the request"
     elif error_name == "APIConnectionError":
-        message = "OpenAI connection failed after automatic retries"
+        message = "OpenAI connection failed"
     else:
         message = "OpenAI request failed; check credentials, model, endpoint, and network"
 

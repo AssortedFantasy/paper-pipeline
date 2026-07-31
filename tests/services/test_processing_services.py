@@ -206,6 +206,40 @@ async def test_recipe_batch_publishes_each_remote_poll_as_visible_progress(
     assert parent.meta["progress_stage"] == "done"
 
 
+async def test_recipe_batch_cancellation_matches_durable_run_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(recipe_batches_module, "_POLL_INTERVAL_SECONDS", 0.01)
+    provider = FakeLLMProvider(
+        response="Should not be installed.",
+        batch_statuses=["in_progress"] * 20,
+    )
+    runtime = await _runtime(tmp_path, provider)
+    await _seed(runtime)
+    parent = (
+        await queue_recipes(
+            runtime,
+            ["summary"],
+            ["Smith2024"],
+            provider_name="fake",
+            model="test-model",
+        )
+    )[0]
+    for _attempt in range(100):
+        if provider.created_batch_count:
+            break
+        await asyncio.sleep(0.01)
+
+    assert await cancel_job(runtime, parent.id)
+    assert (await runtime.queue.wait(parent.id)).state is JobState.CANCELLED
+    state = RecipeRunStore(runtime.root).read_state(parent.meta["run_id"])
+
+    assert state.phase is RecipeRunPhase.CANCELLED
+    assert state.finalized == []
+    assert (await _read(runtime)).recipes == {}
+
+
 async def test_partial_batch_installs_valid_siblings_and_retries_only_failures(
     tmp_path: Path,
 ) -> None:
@@ -279,7 +313,7 @@ async def test_submitted_batch_resumes_from_durable_run_state_without_resubmissi
     state = store.read_state(run_id)
     state.phase = RecipeRunPhase.IN_PROGRESS
     state.outcomes = {}
-    state.installed = []
+    state.finalized = []
     store.write_state(state)
     # Reconstruct the empty working directory that would exist for a genuinely
     # interrupted (and therefore not yet pruned) run.
@@ -291,6 +325,17 @@ async def test_submitted_batch_resumes_from_durable_run_state_without_resubmissi
     assert (await reopened.queue.wait(recovered[0].id)).state is JobState.SUCCEEDED
     assert provider.created_batch_count == 1
     assert store.read_state(run_id).phase is RecipeRunPhase.COMPLETED
+
+
+async def test_unreadable_disposable_recipe_run_is_discarded(tmp_path: Path) -> None:
+    runtime = await _runtime(tmp_path)
+    store = RecipeRunStore(runtime.root)
+    run_dir = store.initialize("broken-run")
+    (run_dir / "manifest.json").write_text("{}", encoding="utf-8")
+    (run_dir / "state.json").write_text("{}", encoding="utf-8")
+
+    assert await resume_recipe_runs(runtime) == []
+    assert not run_dir.exists()
 
 
 async def test_failed_conversion_rerun_preserves_last_good_artifact(tmp_path: Path) -> None:

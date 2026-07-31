@@ -20,12 +20,19 @@ from __future__ import annotations
 import unicodedata
 from collections import Counter
 from pathlib import Path
+from typing import Protocol
 
 from pydantic import BaseModel, Field
 
 from paper_pipeline.ingest.rdf import ImportRecord
 from paper_pipeline.library.model import PaperMetadata, PaperRecord
-from paper_pipeline.library.storage import Library, validate_citekey
+from paper_pipeline.library.storage import validate_citekey
+
+
+class PaperCollection(Protocol):
+    """Read surface needed to compare an import against existing papers."""
+
+    def list_papers(self) -> tuple[list[PaperRecord], list[str]]: ...
 
 
 class PlannedImport(BaseModel):
@@ -76,7 +83,7 @@ class ImportPlan(BaseModel):
         return self.duplicate_candidates
 
 
-def build_import_plan(library: Library, records: list[ImportRecord]) -> ImportPlan:
+def build_import_plan(library: PaperCollection, records: list[ImportRecord]) -> ImportPlan:
     """Compare parsed records with a library without mutating either input."""
     existing_records, library_problems = library.list_papers()
     existing = {record.metadata.citekey: record for record in existing_records}

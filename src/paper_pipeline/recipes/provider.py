@@ -11,49 +11,6 @@ from typing import Any, Protocol
 
 
 @dataclass(frozen=True)
-class ProviderRequest:
-    """One recipe invocation against one paper input."""
-
-    prompt: str
-    # Exactly one of text_input / pdf_input is set, per the recipe's declared input.
-    text_input: str | None = None
-    pdf_input: Path | None = None
-    # Hash of the selected PDF or transcription. Adapters may use it to reuse
-    # uploaded files/provider context across one paper's sequential recipe batch.
-    input_sha256: str = ""
-    model: str = ""
-
-
-@dataclass(frozen=True)
-class ProviderResult:
-    ok: bool
-    text: str = ""
-    provider: str = ""
-    model: str = ""
-    prompt_tokens: int = 0
-    cached_tokens: int = 0
-    cache_write_tokens: int = 0
-    completion_tokens: int = 0
-    cost_usd: float = 0.0
-    error: str | None = None
-
-
-class LLMProvider(Protocol):
-    """Legacy immediate provider contract retained for runner compatibility.
-
-    Production recipe scheduling uses :class:`BatchLLMProvider`; this protocol
-    remains only so the low-level recipe runner can be tested independently
-    during the Batch migration.
-    """
-
-    name: str
-
-    def generate(self, request: ProviderRequest) -> ProviderResult:
-        """Run one generation. Must not raise for ordinary failures; return ok=False."""
-        ...
-
-
-@dataclass(frozen=True)
 class RemoteFile:
     id: str
 

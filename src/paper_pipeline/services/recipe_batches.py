@@ -31,9 +31,9 @@ from paper_pipeline.recipes.batch_model import (
     RecipeRunState,
 )
 from paper_pipeline.recipes.batch_store import RecipeRunStore
+from paper_pipeline.recipes.input import resolve_recipe_input
 from paper_pipeline.recipes.model import RecipeDefinition, load_builtin_recipes
 from paper_pipeline.recipes.provider import BatchLLMProvider
-from paper_pipeline.recipes.runner import _resolve_input
 from paper_pipeline.services.runtime import LibraryRuntime, PaperSession
 
 _TERMINAL_REMOTE = frozenset({"completed", "failed", "expired", "cancelled"})
@@ -102,7 +102,8 @@ async def retry_failed_recipe_batch(runtime: LibraryRuntime, job: Job) -> Job:
     failed = [
         invocation
         for invocation in manifest.invocations
-        if not state.outcomes.get(invocation.custom_id)
+        if invocation.custom_id not in state.finalized
+        or not state.outcomes.get(invocation.custom_id)
         or not state.outcomes[invocation.custom_id].ok
     ]
     if not failed:
@@ -176,7 +177,15 @@ async def _queue_recipe_targets(
                 selected_by_citekey=targets,
                 overwrite_targets=overwrite_targets,
             )
-        except (PartialJobError, asyncio.CancelledError):
+        except PartialJobError:
+            raise
+        except asyncio.CancelledError:
+            if token.reason is CancellationReason.USER:
+                state = store.read_state(run_id)
+                state.phase = RecipeRunPhase.CANCELLED
+                state.error = "Recipe Batch was cancelled"
+                state.updated_at = _now()
+                store.write_state(state)
             raise
         except Exception as error:
             state = store.read_state(run_id)
@@ -221,10 +230,14 @@ async def resume_recipe_runs(runtime: LibraryRuntime) -> list[Job]:
         and not job.state.is_terminal
     }
     for run_id in store.list_run_ids():
-        state = store.read_state(run_id)
+        try:
+            state = store.read_state(run_id)
+            manifest = store.read_manifest(run_id)
+        except (OSError, ValueError):
+            store.discard(run_id)
+            continue
         if run_id in active_run_ids:
             continue
-        manifest = store.read_manifest(run_id)
         if state.phase.is_terminal and not state.cleanup_pending:
             _prune_local_payload(store, manifest, state)
             continue
@@ -316,6 +329,9 @@ async def _run_coordinator(
         state = await _submit_and_collect(runtime, job, token, store, manifest, state, provider)
     if token.is_set() and token.reason is CancellationReason.SHUTDOWN:
         return
+    if token.is_set() and token.reason is CancellationReason.USER:
+        await _finish_cancelled(runtime, job, store, manifest, state, provider)
+        return
     state.phase = RecipeRunPhase.INSTALLING
     state.updated_at = _now()
     store.write_state(state)
@@ -324,15 +340,18 @@ async def _run_coordinator(
         job,
         stage="install",
         detail=f"Installing results into {job.meta.get('paper_count', '?')} papers",
-        install_done=len(state.installed),
+        install_done=len(state.finalized),
         install_total=len(manifest.invocations),
     )
     await _finalize_results(runtime, job, token, store, manifest, state, definitions)
     state = store.read_state(run_id)
+    if token.is_set() and token.reason is CancellationReason.USER:
+        await _finish_cancelled(runtime, job, store, manifest, state, provider)
+        return
     await _cleanup_remote(runtime, job, store, state, provider)
     state = store.read_state(run_id)
     successes = sum(
-        outcome.ok and custom_id in state.installed for custom_id, outcome in state.outcomes.items()
+        outcome.ok and custom_id in state.finalized for custom_id, outcome in state.outcomes.items()
     )
     failures = len(manifest.invocations) - successes
     state.completed = successes
@@ -365,7 +384,7 @@ async def _run_coordinator(
             if failures == 0
             else f"Installed {successes}; {failures} need attention"
         ),
-        install_done=len(state.installed),
+        install_done=len(state.finalized),
         install_successes=successes,
         install_total=len(manifest.invocations),
         local_cleanup=local_cleanup,
@@ -423,7 +442,7 @@ async def _prepare_manifest(
                 raise asyncio.CancelledError
             paper = session.read_record()
             for recipe in selected:
-                input_path, input_artifact = _resolve_input(
+                input_path, input_artifact = resolve_recipe_input(
                     session,
                     citekey,
                     recipe,
@@ -498,11 +517,6 @@ async def _prepare_manifest(
         invocations=invocations,
     )
     store.write_manifest(manifest)
-    store.write_json(
-        run_id,
-        "request-map.json",
-        {item.custom_id: item.model_dump(mode="json") for item in invocations},
-    )
     state.total = len(invocations)
     state.updated_at = _now()
     store.write_state(state)
@@ -862,42 +876,43 @@ def _collect_results(
         path = store.path(manifest.run_id, filename)
         if not path.is_file():
             continue
-        for line_number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if not raw.strip():
-                continue
-            try:
-                value = json.loads(raw)
-                parsed = provider.parse_batch_line(value)
-            except Exception as error:
-                raise ValueError(f"{filename}:{line_number}: invalid Batch result") from error
-            if parsed.custom_id in seen:
-                raise ValueError(f"duplicate Batch result custom_id: {parsed.custom_id}")
-            seen.add(parsed.custom_id)
-            invocation = expected.get(parsed.custom_id)
-            if invocation is None:
-                raise ValueError(f"unknown Batch result custom_id: {parsed.custom_id}")
-            text_filename = None
-            if parsed.ok:
-                text_filename = f"{parsed.custom_id}.md"
-                _atomic_text(
-                    store,
-                    store.path(manifest.run_id, "collected", text_filename),
-                    parsed.text.strip() + "\n",
+        with path.open("r", encoding="utf-8") as lines:
+            for line_number, raw in enumerate(lines, 1):
+                if not raw.strip():
+                    continue
+                try:
+                    value = json.loads(raw)
+                    parsed = provider.parse_batch_line(value)
+                except Exception as error:
+                    raise ValueError(f"{filename}:{line_number}: invalid Batch result") from error
+                if parsed.custom_id in seen:
+                    raise ValueError(f"duplicate Batch result custom_id: {parsed.custom_id}")
+                seen.add(parsed.custom_id)
+                invocation = expected.get(parsed.custom_id)
+                if invocation is None:
+                    raise ValueError(f"unknown Batch result custom_id: {parsed.custom_id}")
+                text_filename = None
+                if parsed.ok:
+                    text_filename = f"{parsed.custom_id}.md"
+                    _atomic_text(
+                        store,
+                        store.path(manifest.run_id, "collected", text_filename),
+                        parsed.text.strip() + "\n",
+                    )
+                state.outcomes[parsed.custom_id] = CollectedRecipeResult(
+                    custom_id=parsed.custom_id,
+                    ok=parsed.ok,
+                    text_filename=text_filename,
+                    provider=parsed.provider or manifest.provider,
+                    model=parsed.model or manifest.model,
+                    prompt_tokens=parsed.prompt_tokens,
+                    cached_tokens=parsed.cached_tokens,
+                    cache_write_tokens=parsed.cache_write_tokens,
+                    completion_tokens=parsed.completion_tokens,
+                    cost_usd=parsed.cost_usd,
+                    request_id=parsed.request_id,
+                    error=parsed.error,
                 )
-            state.outcomes[parsed.custom_id] = CollectedRecipeResult(
-                custom_id=parsed.custom_id,
-                ok=parsed.ok,
-                text_filename=text_filename,
-                provider=parsed.provider or manifest.provider,
-                model=parsed.model or manifest.model,
-                prompt_tokens=parsed.prompt_tokens,
-                cached_tokens=parsed.cached_tokens,
-                cache_write_tokens=parsed.cache_write_tokens,
-                completion_tokens=parsed.completion_tokens,
-                cost_usd=parsed.cost_usd,
-                request_id=parsed.request_id,
-                error=parsed.error,
-            )
     for custom_id in sorted(set(expected) - seen):
         state.outcomes[custom_id] = CollectedRecipeResult(
             custom_id=custom_id,
@@ -922,10 +937,10 @@ async def _finalize_results(
 ) -> None:
     by_paper: dict[str, list[RecipeInvocation]] = defaultdict(list)
     for invocation in manifest.invocations:
-        if invocation.custom_id not in state.installed:
+        if invocation.custom_id not in state.finalized:
             by_paper[invocation.citekey].append(invocation)
     for citekey, invocations in by_paper.items():
-        if token.is_set() and token.reason is CancellationReason.SHUTDOWN:
+        if token.is_set():
             return
 
         async def finalize(
@@ -936,6 +951,8 @@ async def _finalize_results(
             invocations: list[RecipeInvocation] = invocations,
         ) -> None:
             del job, child_token
+            paper = session.read_record()
+            paper_changed = False
             for invocation in invocations:
                 outcome = state.outcomes[invocation.custom_id]
                 error = outcome.error
@@ -951,8 +968,7 @@ async def _finalize_results(
                             != invocation.prompt_sha256
                         ):
                             raise ValueError("recipe definition changed after Batch submission")
-                        paper = session.read_record()
-                        input_path, _artifact = _resolve_input(
+                        input_path, _artifact = resolve_recipe_input(
                             session,
                             session.citekey,
                             RecipeDefinition(
@@ -969,8 +985,7 @@ async def _finalize_results(
                         if not invocation.overwrite and recipe_is_fresh(
                             paper, invocation.recipe_name
                         ):
-                            state.installed.append(invocation.custom_id)
-                            store.write_state(state)
+                            state.finalized.append(invocation.custom_id)
                             continue
                         assert outcome.text_filename is not None
                         collected = store.path(
@@ -1030,14 +1045,8 @@ async def _finalize_results(
                             outcome.local_error = error
                             finalized = False
                 if installed_record is not None:
-                    recipe_name = invocation.recipe_name
-                    session.update_record(
-                        lambda paper, record=installed_record, recipe_name=recipe_name: _set_recipe(
-                            paper,
-                            recipe_name,
-                            record,
-                        )
-                    )
+                    paper.recipes[invocation.recipe_name] = installed_record
+                    paper_changed = True
                 else:
                     log_path = _install_attempt_log(
                         session,
@@ -1047,37 +1056,35 @@ async def _finalize_results(
                         status="failed",
                     )
                     finished_at = _now()
-                    recipe_name = invocation.recipe_name
                     attempt_id = f"{manifest.run_id}-{invocation.custom_id}"
                     attempt_error = error or "recipe request failed"
-
-                    def fail(  # type: ignore[no-untyped-def]
-                        paper,
-                        *,
-                        recipe_name: str = recipe_name,
-                        attempt_id: str = attempt_id,
-                        finished_at: datetime = finished_at,
-                        attempt_error: str = attempt_error,
-                        log_path: str = log_path,
-                    ):
-                        record = paper.recipes.setdefault(
-                            recipe_name,
-                            RecipeRecord(),
-                        )
-                        record.last_attempt = AttemptRecord(
-                            id=attempt_id,
-                            state=AttemptState.FAILED,
-                            started_at=manifest.created_at,
-                            finished_at=finished_at,
-                            error=attempt_error,
-                            log_path=log_path,
-                        )
-
-                    session.update_record(fail)
+                    record = paper.recipes.setdefault(
+                        invocation.recipe_name,
+                        RecipeRecord(),
+                    )
+                    record.last_attempt = AttemptRecord(
+                        id=attempt_id,
+                        state=AttemptState.FAILED,
+                        started_at=manifest.created_at,
+                        finished_at=finished_at,
+                        error=attempt_error,
+                        log_path=log_path,
+                    )
+                    paper_changed = True
                 if finalized:
-                    state.installed.append(invocation.custom_id)
-                state.updated_at = _now()
-                store.write_state(state)
+                    state.finalized.append(invocation.custom_id)
+
+            if paper_changed:
+                session.write_record(paper)
+            state.updated_at = _now()
+            store.write_state(state)
+            pending_local = [
+                invocation.custom_id
+                for invocation in invocations
+                if invocation.custom_id not in state.finalized
+            ]
+            if pending_local:
+                raise RuntimeError(f"could not install {len(pending_local)} local recipe result(s)")
 
         child = await runtime.enqueue_paper(
             citekey,
@@ -1091,7 +1098,7 @@ async def _finalize_results(
             raise RuntimeError(completed.error or f"could not finalize {citekey}")
         installed_successes = sum(
             state.outcomes[custom_id].ok
-            for custom_id in state.installed
+            for custom_id in state.finalized
             if custom_id in state.outcomes
         )
         _publish_batch_progress(
@@ -1099,10 +1106,10 @@ async def _finalize_results(
             parent,
             stage="install",
             detail=(
-                f"Finalized {len(state.installed)}/{len(manifest.invocations)} results · "
+                f"Finalized {len(state.finalized)}/{len(manifest.invocations)} results · "
                 f"{installed_successes} installed"
             ),
-            install_done=len(state.installed),
+            install_done=len(state.finalized),
             install_successes=installed_successes,
             install_total=len(manifest.invocations),
         )
@@ -1158,6 +1165,49 @@ async def _cleanup_remote(
     )
 
 
+async def _finish_cancelled(
+    runtime: LibraryRuntime,
+    job: Job,
+    store: RecipeRunStore,
+    manifest: RecipeRunManifest,
+    state: RecipeRunState,
+    provider: BatchLLMProvider,
+) -> None:
+    """Make durable run state agree with a user-cancelled queue job."""
+    await _cleanup_remote(runtime, job, store, state, provider)
+    state = store.read_state(manifest.run_id)
+    successes = sum(
+        outcome.ok and custom_id in state.finalized for custom_id, outcome in state.outcomes.items()
+    )
+    state.phase = RecipeRunPhase.CANCELLED
+    state.completed = successes
+    state.failed = len(manifest.invocations) - successes
+    state.total = len(manifest.invocations)
+    state.error = "Recipe Batch was cancelled"
+    state.updated_at = _now()
+    store.write_state(state)
+    local_cleanup = _prune_local_payload(store, manifest, state)
+    _write_summary_log(store, manifest, state)
+    job.log_path = f"{OPERATIONAL_DIR}/{RECIPE_RUNS_DIR}/{manifest.run_id}/summary.log"
+    job.meta.update(
+        {
+            "completed": str(state.completed),
+            "failed": str(state.failed),
+            "remote_status": state.remote_status or "",
+        }
+    )
+    _publish_batch_progress(
+        runtime,
+        job,
+        stage="done",
+        detail="Recipe Batch cancelled",
+        install_done=len(state.finalized),
+        install_successes=successes,
+        install_total=len(manifest.invocations),
+        local_cleanup=local_cleanup,
+    )
+
+
 def _prune_local_payload(
     store: RecipeRunStore,
     manifest: RecipeRunManifest,
@@ -1168,7 +1218,10 @@ def _prune_local_payload(
     if (
         not state.phase.is_terminal
         or state.cleanup_pending
-        or not expected.issubset(set(state.installed))
+        or (
+            state.phase is not RecipeRunPhase.CANCELLED
+            and not expected.issubset(set(state.finalized))
+        )
     ):
         return "Recovery files retained"
     try:
@@ -1293,10 +1346,6 @@ def _atomic_text(store: RecipeRunStore, destination: Path, text: str) -> None:
         raise
 
 
-def _set_recipe(paper, name: str, record: RecipeRecord):  # type: ignore[no-untyped-def]
-    paper.recipes[name] = record
-
-
 def _select_recipes(
     definitions: dict[str, RecipeDefinition],
     recipe_names: list[str],
@@ -1336,10 +1385,14 @@ def _reject_duplicate_targets(
                 raise ValueError(f"recipe work is already in flight for {sorted(overlap)[0]}")
     store = RecipeRunStore(runtime.root)
     for run_id in store.list_run_ids():
-        state = store.read_state(run_id)
+        try:
+            state = store.read_state(run_id)
+            manifest = store.read_manifest(run_id)
+        except (OSError, ValueError):
+            store.discard(run_id)
+            continue
         if state.phase.is_terminal:
             continue
-        manifest = store.read_manifest(run_id)
         active = {f"{item.citekey}/{item.recipe_name}" for item in manifest.invocations}
         overlap = requested.intersection(active)
         if overlap:

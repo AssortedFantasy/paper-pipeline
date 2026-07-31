@@ -34,10 +34,6 @@ class AppConfig(BaseSettings):
     # Required to run recipes; there is no default model. `doctor` and the
     # recipe services fail with an actionable message when unset.
     llm_model: str | None = None
-    # Legacy immediate-recipe concurrency. Durable Batch recipe coordinators do
-    # not consume this semaphore; retained for compatibility with older config.
-    llm_concurrency: int = 4
-
     # Conversion
     converter_timeout_seconds: int = 1800
     conversion_concurrency: int = 1  # keep 1 unless testing proves otherwise

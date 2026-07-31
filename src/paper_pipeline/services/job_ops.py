@@ -85,8 +85,6 @@ async def retry_selected_jobs(
     page_renderer_spec: PageRendererSpec | None = None,
     timeout_seconds: int,
     page_render_timeout_seconds: int | None = None,
-    provider_name: str,
-    model: str = "",
 ) -> tuple[Job, ...]:
     """Validate and retry a selected live-job batch within one library."""
     if not job_ids:
@@ -112,8 +110,6 @@ async def retry_selected_jobs(
                 page_renderer_spec=page_renderer_spec,
                 timeout_seconds=timeout_seconds,
                 page_render_timeout_seconds=page_render_timeout_seconds,
-                provider_name=provider_name,
-                model=model,
             )
         )
     return tuple(replacements)

@@ -32,7 +32,7 @@ async def test_two_conversions_never_overlap_even_across_libraries() -> None:
 
 
 async def test_conversion_recipe_and_import_share_one_paper_lane() -> None:
-    queue = JobQueue(llm_concurrency=3)
+    queue = JobQueue()
     running = 0
     maximum = 0
     completed: set[JobKind] = set()
@@ -46,63 +46,39 @@ async def test_conversion_recipe_and_import_share_one_paper_lane() -> None:
         completed.add(job.kind)
 
     await queue.enqueue_paper("library", "paper", JobKind.CONVERSION, "convert", worker)
-    await queue.enqueue_paper("library", "paper", JobKind.RECIPE, "recipes", worker)
+    await queue.enqueue_paper("library", "paper", JobKind.RECIPE_FINALIZE, "recipes", worker)
     await queue.enqueue_paper("library", "paper", JobKind.IMPORT, "refresh", worker)
 
     await queue.join()
     assert maximum == 1
-    assert completed == {JobKind.CONVERSION, JobKind.RECIPE, JobKind.IMPORT}
+    assert completed == {JobKind.CONVERSION, JobKind.RECIPE_FINALIZE, JobKind.IMPORT}
 
 
-async def test_recipes_are_concurrent_across_papers_but_sequential_within_a_paper() -> None:
-    queue = JobQueue(llm_concurrency=2)
+async def test_paper_lanes_are_independent_between_papers() -> None:
+    queue = JobQueue()
     first_started = asyncio.Event()
     other_started = asyncio.Event()
     same_paper_started = asyncio.Event()
-    third_paper_started = asyncio.Event()
-    releases = {
-        "first": asyncio.Event(),
-        "other": asyncio.Event(),
-        "same-paper": asyncio.Event(),
-        "third-paper": asyncio.Event(),
-    }
-    running = 0
-    maximum = 0
+    release = asyncio.Event()
 
-    async def recipe_batch(job: Job) -> None:
-        nonlocal maximum, running
-        running += 1
-        maximum = max(maximum, running)
+    async def worker(job: Job) -> None:
         {
             "first": first_started,
             "other": other_started,
-            "same-paper": same_paper_started,
-            "third-paper": third_paper_started,
+            "same": same_paper_started,
         }[job.label].set()
-        await releases[job.label].wait()
-        running -= 1
+        await release.wait()
 
-    await queue.enqueue_paper("library", "one", JobKind.RECIPE, "first", recipe_batch)
-    await queue.enqueue_paper("library", "two", JobKind.RECIPE, "other", recipe_batch)
-    await asyncio.gather(first_started.wait(), other_started.wait())
+    await queue.enqueue_paper("library", "one", JobKind.IMPORT, "first", worker)
+    await first_started.wait()
+    await queue.enqueue_paper("library", "one", JobKind.IMPORT, "same", worker)
+    await queue.enqueue_paper("library", "two", JobKind.IMPORT, "other", worker)
 
-    await queue.enqueue_paper("library", "one", JobKind.RECIPE, "same-paper", recipe_batch)
-    await queue.enqueue_paper("library", "three", JobKind.RECIPE, "third-paper", recipe_batch)
-    await asyncio.sleep(0)
+    await asyncio.wait_for(other_started.wait(), timeout=1)
     assert same_paper_started.is_set() is False
-    assert third_paper_started.is_set() is False
-
-    releases["other"].set()
-    await third_paper_started.wait()
-    assert same_paper_started.is_set() is False
-
-    releases["first"].set()
-    await same_paper_started.wait()
-    releases["third-paper"].set()
-    releases["same-paper"].set()
+    release.set()
     await queue.join()
-
-    assert maximum == 2
+    assert same_paper_started.is_set()
 
 
 async def test_library_write_waits_for_papers_and_blocks_new_papers() -> None:

@@ -182,7 +182,7 @@ async def test_recovery_callbacks_receive_scoped_paper_sessions(
 
     job = await runtime.enqueue_paper(
         "Smith2024",
-        JobKind.RECIPE,
+        JobKind.RECIPE_FINALIZE,
         "recipe:test",
         worker,
         validate_completion=validate,

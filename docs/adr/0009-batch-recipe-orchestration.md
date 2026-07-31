@@ -18,11 +18,12 @@ that paper.
 
 ## Decision
 
-One user queue action creates one logical recipe run across all compatible
-papers and recipes. It is submitted as the fewest provider Batches allowed by
-endpoint, model, request-count, input-file-size, and queued-token constraints.
-The paper is the unit of input caching and artifact installation, not normally
-the unit of remote Batch submission.
+One user queue action creates logical recipe runs across all compatible papers
+and recipes, partitioned only by the provider's 50,000-request Batch limit.
+Oversized PDFs and request files are rejected explicitly; Paper Pipeline does
+not attempt to predict the provider's queued-token accounting. The paper is the
+unit of input caching and artifact installation, not normally the unit of
+remote Batch submission.
 
 Recipe execution has three phases:
 
@@ -33,10 +34,11 @@ Recipe execution has three phases:
 3. Per-paper finalizers reacquire paper lanes, reject stale results, and
    independently install every valid recipe output atomically.
 
-Resumable operational state lives under `.pp/recipe-runs/<run-id>/`. It records
-request mappings, source hashes, provider file and Batch IDs, downloaded
-results, installation progress, and cleanup state. It is disposable recovery
-data, never artifact truth. Provider resource IDs never enter `paper.json`.
+Resumable operational state lives under `.pp/recipe-runs/<run-id>/`. Its
+manifest is the request mapping; state records provider file and Batch IDs,
+downloaded outcomes, finalization progress, and cleanup work. It is disposable
+recovery data, never artifact truth. Unreadable run directories are discarded.
+Provider resource IDs never enter `paper.json`.
 
 OpenAI PDF requests place the uploaded PDF first, mark an explicit cache
 breakpoint after it, put the recipe prompt second, use explicit-only 30-minute
@@ -53,8 +55,9 @@ local collection or installation recovery never repeats a paid request.
 Batch creation is treated as non-idempotent. Submission intent is persisted
 before the create call and automatic SDK retries are disabled for that call.
 When a crash leaves submission ambiguous, Paper Pipeline reconciles recent
-Batches by the persisted input file ID and run metadata. It never automatically
-submits a replacement when acceptance is uncertain.
+Batches by the persisted input file ID and proceeds only when exactly one match
+exists. It never automatically submits a replacement when acceptance is
+uncertain.
 
 Human-readable diagnostics consist of one run summary and one immutable log per
 paper/recipe attempt. Raw prompts, paper contents, credentials, and provider
@@ -66,11 +69,11 @@ error bodies are excluded from logs.
   other mutations of the affected papers.
 - Process restarts can resume submitted work without a second database.
 - One failed recipe no longer discards successful paid siblings.
-- Existing installed `RecipeRecord` values remain compatible; no library
-  format bump is required.
+- Batch-only execution removes the old immediate-call provider and queue path;
+  no transition implementation is retained.
 - Closing or shutting down the application detaches from remote work rather
   than cancelling it. Explicit user cancellation stops remaining remote
-  requests while retaining already completed results.
+  requests, retains already installed artifacts, and discards uninstalled
+  operational results.
 - Provider Batch lifecycle, partial results, stale installation, cleanup, and
   ambiguous submission require dedicated failure-injection tests.
-

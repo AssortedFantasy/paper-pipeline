@@ -13,7 +13,7 @@ import threading
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import MappingProxyType
-from typing import Any, TypeVar
+from typing import TypeVar
 
 from paper_pipeline.jobs.model import Job, JobKind
 from paper_pipeline.jobs.queue import CancellationToken, JobQueue, KillHook
@@ -25,7 +25,7 @@ from paper_pipeline.jobs.recovery import (
     TerminalOutcome,
     reconcile_attempts,
 )
-from paper_pipeline.library.model import PaperRecord
+from paper_pipeline.library.model import LibraryInfo, PaperRecord
 from paper_pipeline.library.paths import ATTEMPTS_DIR, PAPERS_DIR
 from paper_pipeline.library.storage import Library, create_library, open_library
 from paper_pipeline.services.library_catalog import LibraryCatalog
@@ -61,7 +61,7 @@ class LibrarySession(_ScopedSession):
         super().__init__(library)
         self._writable = writable
 
-    def inspect(self, operation: Callable[[Any], T]) -> T:
+    def inspect(self, operation: Callable[[_LibraryReadView], T]) -> T:
         """Invoke read-only infrastructure against a mutation-free view."""
         self._require_active()
         return operation(_LibraryReadView(self._library))
@@ -110,7 +110,7 @@ class _LibraryReadView:
         return self._library.root
 
     @property
-    def info(self):  # type: ignore[no-untyped-def]
+    def info(self) -> LibraryInfo:
         return self._library.info
 
     def list_papers(self) -> tuple[list[PaperRecord], list[str]]:
@@ -414,11 +414,10 @@ class RuntimeRegistry:
     def __init__(
         self,
         *,
-        llm_concurrency: int = 4,
         provider_factories: Mapping[str, ProviderFactory] | None = None,
         queue: JobQueue | None = None,
     ) -> None:
-        self.queue = queue or JobQueue(llm_concurrency=llm_concurrency)
+        self.queue = queue or JobQueue()
         self._provider_factories = dict(provider_factories or {})
         self._runtimes: dict[str, LibraryRuntime] = {}
         self._lock = threading.RLock()

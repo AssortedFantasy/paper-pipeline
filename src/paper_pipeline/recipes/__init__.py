@@ -4,8 +4,8 @@ Responsibilities:
 
 - Load and validate recipe definitions (``model``).
 - Provide the LLM provider contract and adapters (``provider``).
-- Resolve declared inputs, call the provider, validate output, and record
-  provenance (``runner``).
+- Resolve declared inputs (``input``) and define the provider Batch contract
+  (``provider``). Durable orchestration and installation live in services.
 
 Recipes describe work; they never implement queueing, HTTP, or storage.
 Built-in recipe templates ship with the application in ``builtin/``, not

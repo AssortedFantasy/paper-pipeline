@@ -6,9 +6,8 @@ Expanded by the work packages that need them:
   deterministic transcription and optional figure files into staging.
 - ``FakePageRenderer``: writes deterministic page images independently of
   transcription conversion.
-- ``FakeLLMProvider``: implements ``recipes.provider.LLMProvider``. Returns
-  canned text; records calls so scheduler tests can assert per-paper
-  sequencing. Configurable to fail or delay.
+- ``FakeLLMProvider``: implements ``recipes.provider.BatchLLMProvider``. Returns
+  canned Batch output and records request preparation.
 """
 
 import json
@@ -22,8 +21,6 @@ from paper_pipeline.convert.contract import ConversionRequest, ConversionResult
 from paper_pipeline.pages.contract import PageRenderRequest, PageRenderResult
 from paper_pipeline.recipes.provider import (
     BatchLineResult,
-    ProviderRequest,
-    ProviderResult,
     RemoteBatch,
     RemoteFile,
 )
@@ -165,6 +162,16 @@ class FakePageRenderer:
 
 
 @dataclass
+class FakeBatchCall:
+    """One request reconstructed from a fake provider's submitted JSONL."""
+
+    prompt: str
+    model: str
+    text_input: str | None = None
+    pdf_input: Path | None = None
+
+
+@dataclass
 class FakeLLMProvider:
     """Deterministic LLM double with call recording and failure/delay modes."""
 
@@ -181,7 +188,7 @@ class FakeLLMProvider:
     cache_write_tokens: int = 0
     completion_tokens: int = 20
     cost_usd: float = 0.001
-    calls: list[ProviderRequest] = field(default_factory=list, init=False)
+    calls: list[FakeBatchCall] = field(default_factory=list, init=False)
     _files: dict[str, bytes] = field(default_factory=dict, init=False)
     _file_paths: dict[str, Path] = field(default_factory=dict, init=False)
     _batches: dict[str, RemoteBatch] = field(default_factory=dict, init=False)
@@ -189,29 +196,6 @@ class FakeLLMProvider:
     deleted_file_ids: list[str] = field(default_factory=list, init=False)
     input_upload_count: int = field(default=0, init=False)
     created_batch_count: int = field(default=0, init=False)
-
-    def generate(self, request: ProviderRequest) -> ProviderResult:
-        self.calls.append(request)
-        if self.delay_seconds > 0:
-            time.sleep(self.delay_seconds)
-        if self.fail:
-            return ProviderResult(
-                ok=False,
-                provider=self.name,
-                model=request.model,
-                error=self.failure_message,
-            )
-        return ProviderResult(
-            ok=True,
-            text=self.response,
-            provider=self.name,
-            model=request.model,
-            prompt_tokens=self.prompt_tokens,
-            cached_tokens=self.cached_tokens,
-            cache_write_tokens=self.cache_write_tokens,
-            completion_tokens=self.completion_tokens,
-            cost_usd=self.cost_usd,
-        )
 
     def request_body(
         self,
@@ -280,7 +264,7 @@ class FakeLLMProvider:
             stable = content[0]
             prompt = content[1]["text"]
             file_id = stable.get("file_id")
-            request = ProviderRequest(
+            request = FakeBatchCall(
                 prompt=prompt,
                 text_input=stable.get("text"),
                 pdf_input=self._file_paths.get(file_id) if file_id else None,

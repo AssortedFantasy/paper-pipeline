@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RecipeRunPhase(StrEnum):
@@ -41,6 +41,8 @@ class RecipeRunPhase(StrEnum):
 class RecipeInvocation(BaseModel):
     """One expected Batch line and its local installation contract."""
 
+    model_config = ConfigDict(extra="forbid")
+
     custom_id: str
     citekey: str
     recipe_name: str
@@ -56,6 +58,8 @@ class RecipeInvocation(BaseModel):
 
 
 class RecipeRunManifest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     schema_version: Literal[1] = 1
     run_id: str
     provider: str
@@ -67,6 +71,8 @@ class RecipeRunManifest(BaseModel):
 
 class CollectedRecipeResult(BaseModel):
     """One remote request outcome after result-file parsing and validation."""
+
+    model_config = ConfigDict(extra="forbid")
 
     custom_id: str
     ok: bool
@@ -84,7 +90,9 @@ class CollectedRecipeResult(BaseModel):
 
 
 class RecipeRunState(BaseModel):
-    schema_version: Literal[1] = 1
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[2] = 2
     run_id: str
     phase: RecipeRunPhase = RecipeRunPhase.PLANNING
     updated_at: datetime
@@ -95,7 +103,7 @@ class RecipeRunState(BaseModel):
     error_file_id: str | None = None
     uploads: dict[str, str] = Field(default_factory=dict)
     outcomes: dict[str, CollectedRecipeResult] = Field(default_factory=dict)
-    installed: list[str] = Field(default_factory=list)
+    finalized: list[str] = Field(default_factory=list)
     cleanup_pending: list[str] = Field(default_factory=list)
     cleanup_warnings: list[str] = Field(default_factory=list)
     total: int = 0

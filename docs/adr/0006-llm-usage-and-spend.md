@@ -11,10 +11,9 @@ prompt-cache effectiveness without maintaining a separate accounting store.
 
 Provider results report input, cached-input, cache-write, and output tokens
 when supplied by the provider. The OpenAI adapter computes cost from a reviewed
-model price table and an explicit processing mode. Batch results apply the
-documented Batch discount; standard Responses calls, where used outside
-production scheduling, do not. Unknown pricing fails the affected result
-visibly instead of recording a false zero cost.
+model price table. Batch results apply the documented Batch discount. Unknown
+pricing fails the affected result visibly instead of recording a false zero
+cost. Paper Pipeline has no immediate Responses execution path.
 
 Installed recipe records persist token counts and computed cost in
 `paper.json`. The dashboard totals those records rather than storing separate

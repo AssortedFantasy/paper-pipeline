@@ -187,9 +187,7 @@ def transition_job(
 class JobQueue:
     """Own live jobs, paper lanes, and ordered event publication."""
 
-    def __init__(self, *, llm_concurrency: int = 4, events: EventBus | None = None) -> None:
-        if llm_concurrency < 1:
-            raise ValueError("llm_concurrency must be at least 1")
+    def __init__(self, *, events: EventBus | None = None) -> None:
         self.events = events or EventBus()
         self._jobs: dict[str, Job] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
@@ -197,7 +195,6 @@ class JobQueue:
         self._library_barriers: dict[str, _LibraryBarrier] = {}
         self._conversion_slots = asyncio.Semaphore(1)
         self._page_render_slots = asyncio.Semaphore(2)
-        self._recipe_slots = asyncio.Semaphore(llm_concurrency)
         self._tokens: dict[str, CancellationToken] = {}
         self._definitions: dict[str, _JobDefinition] = {}
         self._closed = False
@@ -636,8 +633,6 @@ class JobQueue:
             semaphore = self._conversion_slots
         elif kind is JobKind.PAGE_RENDER:
             semaphore = self._page_render_slots
-        elif kind is JobKind.RECIPE:
-            semaphore = self._recipe_slots
         if semaphore is None:
             yield
         else:
