@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
@@ -12,7 +14,7 @@ from paper_pipeline.indexes.build import rebuild_indexes as _rebuild_indexes
 from paper_pipeline.jobs.model import Job, JobKind, JobState
 from paper_pipeline.jobs.queue import CancellationToken
 from paper_pipeline.library.model import PaperRecord
-from paper_pipeline.library.validation import ValidationReport
+from paper_pipeline.library.validation import ValidationPhase, ValidationReport
 from paper_pipeline.library.validation import validate_library as _validate_library
 from paper_pipeline.services.runtime import (
     LibraryRuntime,
@@ -33,6 +35,14 @@ class PaperPage(BaseModel):
 
 class LibraryOperationError(RuntimeError):
     """A queued library operation failed before producing its result."""
+
+
+@dataclass(frozen=True)
+class ValidationRun:
+    """A live validation job and its eventual structured report."""
+
+    job: Job
+    result: asyncio.Task[ValidationReport]
 
 
 class RebuildTarget(StrEnum):
@@ -89,20 +99,41 @@ open_library = open
 
 async def validate_library(runtime: LibraryRuntime) -> ValidationReport:
     """Run read-only validation through the runtime's library-read entry point."""
+    run = await start_library_validation(runtime)
+    return await run.result
+
+
+async def start_library_validation(runtime: LibraryRuntime) -> ValidationRun:
+    """Start phased validation and publish each completed category as progress."""
     reports: list[ValidationReport] = []
 
     async def validate(session: LibrarySession, job: Job, token: CancellationToken) -> None:
-        del job, token
-        reports.append(session.inspect(lambda view: _validate_library(view.root)))
+        del token
+
+        def publish(phase: ValidationPhase) -> None:
+            runtime.queue.publish_progress(job.id, phase.model_dump_json())
+
+        reports.append(
+            session.inspect(
+                lambda view: _validate_library(
+                    view.root,
+                    on_phase=publish,
+                )
+            )
+        )
 
     job = await runtime.enqueue_library_read(
         JobKind.MAINTENANCE,
         "validate",
         validate,
     )
-    result = await runtime.queue.wait(job.id)
-    _require_success(result)
-    return reports[0]
+
+    async def finish() -> ValidationReport:
+        result = await runtime.queue.wait(job.id)
+        _require_success(result)
+        return reports[0]
+
+    return ValidationRun(job=job, result=asyncio.create_task(finish()))
 
 
 async def rebuild_indexes(

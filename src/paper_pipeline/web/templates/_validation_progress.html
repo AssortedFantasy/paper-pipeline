@@ -1,0 +1,17 @@
+<section class="validation-run" data-validation-job="{{ job_id }}" aria-live="polite">
+  <header class="validation-run-heading">
+    <div>
+      <strong>Validating library</strong>
+      <span data-validation-summary>Waiting for validation checks…</span>
+    </div>
+    <span class="validation-spinner" aria-hidden="true"></span>
+  </header>
+  <ol class="validation-phase-list">
+    {% for key, label in categories %}
+      <li class="validation-phase validation-phase-pending" data-validation-phase="{{ key }}">
+        <span class="validation-phase-icon" aria-hidden="true">·</span>
+        <span><strong>{{ label }}</strong><small>Waiting to run</small></span>
+      </li>
+    {% endfor %}
+  </ol>
+</section>

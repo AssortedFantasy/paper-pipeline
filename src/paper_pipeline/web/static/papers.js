@@ -7,6 +7,7 @@
     citekey: false
   };
   var workOptionStates = {};
+  var validationEvents = {};
   var columnResize = null;
 
   function applyPaperWrap() {
@@ -240,6 +241,74 @@
     }
   }
 
+  function validationState(jobId) {
+    if (!validationEvents[jobId]) {
+      validationEvents[jobId] = {
+        phases: {},
+        state: null,
+        resultRequested: false
+      };
+    }
+    return validationEvents[jobId];
+  }
+
+  function applyValidationProgress(jobId) {
+    var panel = document.querySelector("[data-validation-job='" + CSS.escape(jobId) + "']");
+    if (!panel) return;
+    var state = validationState(jobId);
+    Object.keys(state.phases).forEach(function (key) {
+      var phase = state.phases[key];
+      var row = panel.querySelector("[data-validation-phase='" + CSS.escape(key) + "']");
+      if (!row) return;
+      row.className = "validation-phase validation-phase-" + phase.status;
+      row.querySelector(".validation-phase-icon").textContent =
+        phase.status === "ok" ? "✓" :
+          phase.status === "warning" ? "!" :
+            phase.status === "error" ? "×" : "—";
+      row.querySelector("small").textContent = phase.sentence;
+    });
+    var completed = Object.keys(state.phases).length;
+    var total = panel.querySelectorAll("[data-validation-phase]").length;
+    var summary = panel.querySelector("[data-validation-summary]");
+    if (summary) {
+      summary.textContent = completed + " of " + total + " checks complete";
+    }
+    if (
+      ["succeeded", "failed", "cancelled"].indexOf(state.state) >= 0 &&
+      !state.resultRequested
+    ) {
+      state.resultRequested = true;
+      htmx.ajax("GET", "/library/validate/" + encodeURIComponent(jobId) + "/result", {
+        target: document.getElementById("library-maintenance-result"),
+        swap: "innerHTML"
+      });
+    }
+  }
+
+  function updateValidationProgress(event) {
+    var job = payload(event);
+    if (!job || job.label !== "validate") return;
+    var state = validationState(job.job_id);
+    if (job.message) {
+      try {
+        var phase = JSON.parse(job.message);
+        if (phase.key && phase.status && phase.sentence) {
+          state.phases[phase.key] = phase;
+        }
+      } catch (_error) {
+        return;
+      }
+    }
+    applyValidationProgress(job.job_id);
+  }
+
+  function updateValidationState(event) {
+    var job = payload(event);
+    if (!job || job.label !== "validate") return;
+    validationState(job.job_id).state = job.state;
+    applyValidationProgress(job.job_id);
+  }
+
   function updateLive(event) {
     var job = payload(event);
     if (!job || !job.citekey) return;
@@ -262,10 +331,15 @@
 
   document.addEventListener("sse:state", updateLive);
   document.addEventListener("sse:progress", updateLive);
+  document.addEventListener("sse:state", updateValidationState);
+  document.addEventListener("sse:progress", updateValidationProgress);
   document.addEventListener("htmx:load", function () {
     applyPaperWrap();
     applyWorkConfiguration();
     updateRebuildControls();
+    document.querySelectorAll("[data-validation-job]").forEach(function (panel) {
+      applyValidationProgress(panel.dataset.validationJob);
+    });
   });
   applyPaperWrap();
   applyWorkConfiguration();

@@ -339,7 +339,11 @@ def test_active_library_can_validate_and_rebuild(
     page.goto(f"{ui_server}/library")
 
     page.get_by_role("button", name="Validate library").click()
-    expect(page.get_by_role("status")).to_contain_text("validation passed")
+    validation = page.locator(".validation-run-complete")
+    expect(validation).to_contain_text("All validation checks passed")
+    expect(validation.locator(".validation-phase")).to_have_count(8)
+    expect(validation.locator(".validation-phase-ok")).to_have_count(8)
+    expect(validation).to_contain_text("Checked source PDF paths and hashes")
 
     page.get_by_role("button", name="Choose rebuild files").click()
     rebuild_dialog = page.get_by_role("dialog", name="Choose what to rebuild")
@@ -359,8 +363,9 @@ def test_active_library_can_validate_and_rebuild(
     source.unlink()
     page.get_by_role("button", name="Validate library").click()
     validation = page.locator("#library-maintenance-result").get_by_role("alert")
-    expect(validation).to_contain_text("Validation found 1 problem")
+    expect(validation).to_contain_text("Found 1 problem")
     expect(validation).to_contain_text("Source PDF is missing")
+    expect(validation.locator(".validation-phase-warning")).to_contain_text("Source PDFs")
 
 
 def test_stale_papers_tab_cannot_launch_against_new_library(

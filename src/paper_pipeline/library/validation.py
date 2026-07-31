@@ -18,6 +18,7 @@ Validation never deletes or rewrites paper content.
 """
 
 import re
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
@@ -44,8 +45,19 @@ from paper_pipeline.library.storage import (
 )
 
 Severity = Literal["error", "warning", "info"]
+ValidationPhaseStatus = Literal["ok", "warning", "error", "skipped"]
 _RECIPE_NAME = re.compile(r"^[a-z][a-z0-9_-]*$")
 _INDEX_ENTRY = re.compile(r"^([^:\s][^:]*):")
+VALIDATION_CATEGORIES = (
+    ("metadata", "Library metadata"),
+    ("records", "Paper records"),
+    ("sources", "Source PDFs"),
+    ("transcriptions", "Transcriptions"),
+    ("pages", "Page images"),
+    ("recipes", "Recipe outputs"),
+    ("folders", "Paper folder contents"),
+    ("indexes", "Index references"),
+)
 
 
 class ValidationProblem(BaseModel):
@@ -57,20 +69,36 @@ class ValidationProblem(BaseModel):
     action: str
 
 
+class ValidationPhase(BaseModel):
+    """One completed or skipped category in a validation pass."""
+
+    key: str
+    label: str
+    status: ValidationPhaseStatus
+    sentence: str
+    problem_count: int = Field(default=0, ge=0)
+
+
 class ValidationReport(BaseModel):
     """Structured, serializable result of a read-only validation pass."""
 
     problems: list[ValidationProblem] = Field(default_factory=list)
+    phases: list[ValidationPhase] = Field(default_factory=list)
 
     @property
     def ok(self) -> bool:
         return not any(problem.severity == "error" for problem in self.problems)
 
 
-def validate_library(library_or_root: Library | Path) -> ValidationReport:
+def validate_library(
+    library_or_root: Library | Path,
+    *,
+    on_phase: Callable[[ValidationPhase], None] | None = None,
+) -> ValidationReport:
     """Validate durable library content and derived index references."""
     root = library_or_root.root if isinstance(library_or_root, Library) else library_or_root
     report = ValidationReport()
+    started = len(report.problems)
     try:
         library = open_library(root)
     except (OSError, ValueError) as error:
@@ -80,8 +108,24 @@ def validate_library(library_or_root: Library | Path) -> ValidationReport:
             f"Library metadata is unreadable or unsupported: {error}",
             "Restore a valid library.json or open the library with a compatible version.",
         )
+        _complete_phase(
+            report,
+            "metadata",
+            "Library metadata is readable and uses a supported format.",
+            started,
+            on_phase,
+        )
+        _skip_remaining(report, "metadata", on_phase)
         return report
+    _complete_phase(
+        report,
+        "metadata",
+        "Library metadata is readable and uses a supported format.",
+        started,
+        on_phase,
+    )
 
+    started = len(report.problems)
     papers_root = library.root / PAPERS_DIR
     if not papers_root.is_dir():
         _add(
@@ -90,9 +134,18 @@ def validate_library(library_or_root: Library | Path) -> ValidationReport:
             "The papers directory is missing.",
             "Restore the papers directory from backup.",
         )
+        _complete_phase(
+            report,
+            "records",
+            "The papers directory and paper records are readable.",
+            started,
+            on_phase,
+        )
+        _skip_remaining(report, "records", on_phase)
         return report
 
     existing_citekeys = {entry.name for entry in papers_root.iterdir() if entry.is_dir()}
+    records = []
     for entry in sorted(papers_root.iterdir(), key=lambda path: path.name.casefold()):
         if not entry.is_dir():
             _add(
@@ -115,15 +168,75 @@ def validate_library(library_or_root: Library | Path) -> ValidationReport:
                 citekey,
             )
             continue
-        _validate_paper(library, record, report)
+        records.append(record)
+    _complete_phase(
+        report,
+        "records",
+        f"Checked {len(records)} paper record{'s' if len(records) != 1 else ''} and citekeys.",
+        started,
+        on_phase,
+    )
 
+    _run_paper_phase(
+        report,
+        "sources",
+        f"Checked source PDF paths and hashes across {len(records)} paper"
+        f"{'s' if len(records) != 1 else ''}.",
+        records,
+        lambda record: _validate_source(library, record, report),
+        on_phase,
+    )
+    _run_paper_phase(
+        report,
+        "transcriptions",
+        f"Checked transcription provenance across {len(records)} paper"
+        f"{'s' if len(records) != 1 else ''}.",
+        records,
+        lambda record: _validate_transcription(library, record, report),
+        on_phase,
+    )
+    _run_paper_phase(
+        report,
+        "pages",
+        f"Checked rendered page provenance across {len(records)} paper"
+        f"{'s' if len(records) != 1 else ''}.",
+        records,
+        lambda record: _validate_pages(library, record, report),
+        on_phase,
+    )
+    _run_paper_phase(
+        report,
+        "recipes",
+        f"Checked recipe output provenance across {len(records)} paper"
+        f"{'s' if len(records) != 1 else ''}.",
+        records,
+        lambda record: _validate_recipes(library, record, report),
+        on_phase,
+    )
+    _run_paper_phase(
+        report,
+        "folders",
+        f"Checked allowed folder contents across {len(records)} paper"
+        f"{'s' if len(records) != 1 else ''}.",
+        records,
+        lambda record: _validate_paper_entries(library, record, report),
+        on_phase,
+    )
+
+    started = len(report.problems)
     _validate_indexes(library.root / INDEXES_DIR, existing_citekeys, report)
+    _complete_phase(
+        report,
+        "indexes",
+        "Checked index references against the current paper folders.",
+        started,
+        on_phase,
+    )
     return report
 
 
-def _validate_paper(library: Library, record, report: ValidationReport) -> None:
+def _validate_source(library: Library, record, report: ValidationReport) -> None:
     citekey = record.metadata.citekey
-    paper_root = library.root / PAPERS_DIR / citekey
     if record.source_pdf is not None:
         expected_prefix = f"papers/{citekey}/source/"
         if not record.source_pdf.startswith(expected_prefix):
@@ -176,6 +289,10 @@ def _validate_paper(library: Library, record, report: ValidationReport) -> None:
             citekey,
         )
 
+
+def _validate_transcription(library: Library, record, report: ValidationReport) -> None:
+    citekey = record.metadata.citekey
+    paper_root = library.root / PAPERS_DIR / citekey
     conversion = record.conversion
     transcription = paper_root / TRANSCRIPTION_FILE
     if conversion.transcription_sha256 is not None:
@@ -204,6 +321,10 @@ def _validate_paper(library: Library, record, report: ValidationReport) -> None:
             citekey,
         )
 
+
+def _validate_pages(library: Library, record, report: ValidationReport) -> None:
+    citekey = record.metadata.citekey
+    paper_root = library.root / PAPERS_DIR / citekey
     pages_root = paper_root / PAGES_DIR
     declared_pages = set(record.pages.artifacts)
     if declared_pages:
@@ -251,7 +372,9 @@ def _validate_paper(library: Library, record, report: ValidationReport) -> None:
             citekey,
         )
 
-    recorded_outputs: set[str] = set()
+
+def _validate_recipes(library: Library, record, report: ValidationReport) -> None:
+    citekey = record.metadata.citekey
     for recipe_name, recipe in sorted(record.recipes.items()):
         if not _RECIPE_NAME.fullmatch(recipe_name):
             _add(
@@ -264,7 +387,6 @@ def _validate_paper(library: Library, record, report: ValidationReport) -> None:
             continue
         output = None
         if recipe.output_artifact is not None:
-            recorded_outputs.add(recipe.output_artifact)
             output = library.root.joinpath(*PurePosixPath(recipe.output_artifact).parts)
         if recipe.output_sha256 is not None:
             if output is None:
@@ -301,6 +423,15 @@ def _validate_paper(library: Library, record, report: ValidationReport) -> None:
                 citekey,
             )
 
+
+def _validate_paper_entries(library: Library, record, report: ValidationReport) -> None:
+    citekey = record.metadata.citekey
+    paper_root = library.root / PAPERS_DIR / citekey
+    recorded_outputs = {
+        recipe.output_artifact
+        for recipe in record.recipes.values()
+        if recipe.output_artifact is not None
+    }
     allowed_names = {
         PAPER_FILE.casefold(),
         SOURCE_DIR.casefold(),
@@ -320,6 +451,75 @@ def _validate_paper(library: Library, record, report: ValidationReport) -> None:
             "Remove the entry or install recipe output through Paper Pipeline.",
             citekey,
         )
+
+
+def _run_paper_phase(
+    report: ValidationReport,
+    key: str,
+    sentence: str,
+    records,  # type: ignore[no-untyped-def]
+    validate,  # type: ignore[no-untyped-def]
+    on_phase: Callable[[ValidationPhase], None] | None,
+) -> None:
+    started = len(report.problems)
+    for record in records:
+        validate(record)
+    _complete_phase(report, key, sentence, started, on_phase)
+
+
+def _complete_phase(
+    report: ValidationReport,
+    key: str,
+    success_sentence: str,
+    problem_start: int,
+    on_phase: Callable[[ValidationPhase], None] | None,
+) -> None:
+    label = dict(VALIDATION_CATEGORIES)[key]
+    problems = report.problems[problem_start:]
+    if any(problem.severity == "error" for problem in problems):
+        status: ValidationPhaseStatus = "error"
+    elif problems:
+        status = "warning"
+    else:
+        status = "ok"
+    sentence = (
+        success_sentence
+        if not problems
+        else f"{label} check found {len(problems)} problem{'s' if len(problems) != 1 else ''}."
+    )
+    phase = ValidationPhase(
+        key=key,
+        label=label,
+        status=status,
+        sentence=sentence,
+        problem_count=len(problems),
+    )
+    report.phases.append(phase)
+    if on_phase is not None:
+        on_phase(phase)
+
+
+def _skip_remaining(
+    report: ValidationReport,
+    completed_key: str,
+    on_phase: Callable[[ValidationPhase], None] | None,
+) -> None:
+    completed = False
+    for key, label in VALIDATION_CATEGORIES:
+        if key == completed_key:
+            completed = True
+            continue
+        if not completed:
+            continue
+        phase = ValidationPhase(
+            key=key,
+            label=label,
+            status="skipped",
+            sentence=f"{label} were not checked because an earlier validation phase failed.",
+        )
+        report.phases.append(phase)
+        if on_phase is not None:
+            on_phase(phase)
 
 
 def _check_recorded_artifact(

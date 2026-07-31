@@ -1,0 +1,40 @@
+<section class="validation-run validation-run-complete"
+         role="{{ 'alert' if report.problems else 'status' }}">
+  <header class="validation-run-heading">
+    <div>
+      <strong>Validation complete</strong>
+      <span>
+        {% if report.problems %}
+          Found {{ report.problems | length }} problem{{ '' if report.problems | length == 1 else 's' }}.
+        {% else %}
+          All validation checks passed.
+        {% endif %}
+      </span>
+    </div>
+    <a class="text-button" href="/papers">View papers</a>
+  </header>
+  <ol class="validation-phase-list">
+    {% for phase in report.phases %}
+      <li class="validation-phase validation-phase-{{ phase.status }}">
+        <span class="validation-phase-icon" aria-hidden="true">
+          {{ '✓' if phase.status == 'ok' else '!' if phase.status == 'warning' else '×' if phase.status == 'error' else '—' }}
+        </span>
+        <span><strong>{{ phase.label }}</strong><small>{{ phase.sentence }}</small></span>
+      </li>
+    {% endfor %}
+  </ol>
+  {% if report.problems %}
+    <details class="validation-problems" open>
+      <summary>Problems requiring attention</summary>
+      <ul>
+        {% for problem in report.problems %}
+          <li>
+            <span class="validation-severity">{{ problem.severity }}</span>
+            {{ problem.message }}
+            <small>{{ problem.action }}</small>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endif %}
+</section>

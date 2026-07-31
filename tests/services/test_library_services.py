@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 
 from paper_pipeline.cli import main
@@ -13,6 +14,7 @@ from paper_pipeline.services.library_ops import (
     list_papers,
     open_library,
     rebuild_indexes,
+    start_library_validation,
     validate_library,
 )
 from paper_pipeline.services.runtime import LibraryRuntime, PaperSession, RuntimeRegistry
@@ -71,6 +73,40 @@ async def test_validation_is_read_only_and_returns_structured_corruption(
     assert any(problem.severity == "error" and problem.action for problem in corrupt.problems)
     assert unexpected.read_text(encoding="utf-8") == "bad"
     assert runtime.queue.list_jobs()[-1].scope is JobScope.LIBRARY_READ
+
+
+async def test_validation_publishes_one_completed_event_per_category(tmp_path: Path) -> None:
+    runtime = create_library(tmp_path / "library", registry=RuntimeRegistry())
+    await seed(runtime, paper())
+    subscription = runtime.queue.events.subscribe()
+    try:
+        run = await start_library_validation(runtime)
+        report = await run.result
+        events = []
+        while True:
+            try:
+                events.append(subscription.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+    finally:
+        subscription.close()
+
+    phases = [
+        json.loads(event.message)
+        for event in events
+        if event.job_id == run.job.id and event.message is not None
+    ]
+    assert [phase["key"] for phase in phases] == [
+        "metadata",
+        "records",
+        "sources",
+        "transcriptions",
+        "pages",
+        "recipes",
+        "folders",
+        "indexes",
+    ]
+    assert report.phases[-1].key == "indexes"
 
 
 async def test_reindex_uses_the_library_write_barrier_and_builds_derived_files(

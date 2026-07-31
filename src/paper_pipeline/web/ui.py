@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from paper_pipeline.ingest.plan import ImportPlan
+from paper_pipeline.library.validation import VALIDATION_CATEGORIES
 from paper_pipeline.recipes.model import load_builtin_recipes
 from paper_pipeline.services.import_ops import (
     ImportReport,
@@ -22,10 +23,11 @@ from paper_pipeline.services.job_ops import job_counts
 from paper_pipeline.services.library_catalog import refresh_catalog
 from paper_pipeline.services.library_ops import (
     RebuildTarget,
+    ValidationRun,
     create_library,
     open_library,
     rebuild_indexes,
-    validate_library,
+    start_library_validation,
 )
 from paper_pipeline.services.paper_browse import browse_papers
 from paper_pipeline.services.paper_detail import get_figure, get_paper_detail, get_source_pdf
@@ -49,6 +51,7 @@ def create_ui_router(context: WebContext) -> APIRouter:
     """Create stable page and fragment routes over the shared web context."""
     router = APIRouter(include_in_schema=False)
     import_previews: dict[str, tuple[str, ImportPlan]] = {}
+    validation_runs: dict[str, ValidationRun] = {}
 
     @router.get("/papers", response_class=HTMLResponse)
     async def papers_page(request: Request) -> HTMLResponse:
@@ -104,15 +107,42 @@ def create_ui_router(context: WebContext) -> APIRouter:
             return _library_result_response(request, error=error)
         assert runtime is not None
         try:
-            report = await validate_library(runtime)
+            run = await start_library_validation(runtime)
         except (OSError, ValueError, RuntimeError) as operation_error:
             return _library_result_response(request, error=str(operation_error))
-        if report.problems:
-            return _library_result_response(request, report=report, runtime=runtime)
-        return _library_result_response(
+        for existing_id, existing in tuple(validation_runs.items()):
+            if existing.result.done():
+                validation_runs.pop(existing_id, None)
+        validation_runs[run.job.id] = run
+        return templates.TemplateResponse(
             request,
-            message="Library validation passed with no problems.",
-            runtime=runtime,
+            "_validation_progress.html",
+            {
+                "job_id": run.job.id,
+                "categories": VALIDATION_CATEGORIES,
+            },
+        )
+
+    @router.get("/library/validate/{job_id}/result", response_class=HTMLResponse)
+    async def validation_result(request: Request, job_id: str) -> HTMLResponse:
+        run = validation_runs.get(job_id)
+        if (
+            run is None
+            or context.runtime is None
+            or run.job.library_key != context.runtime.library_key
+        ):
+            raise HTTPException(status_code=404, detail="Validation run not found")
+        try:
+            report = await run.result
+        except (OSError, ValueError, RuntimeError) as operation_error:
+            return _library_result_response(request, error=str(operation_error))
+        return templates.TemplateResponse(
+            request,
+            "_validation_result.html",
+            {
+                "report": report,
+                "library_root": context.runtime.root,
+            },
         )
 
     @router.post("/library/reindex", response_class=HTMLResponse)
