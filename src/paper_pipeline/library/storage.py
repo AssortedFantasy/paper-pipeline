@@ -35,7 +35,6 @@ import os
 import re
 import shutil
 import tempfile
-import time
 import uuid
 from collections.abc import Callable, Iterator
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -62,7 +61,6 @@ _WINDOWS_RESERVED_NAMES = {
     *(f"COM{number}" for number in range(1, 10)),
     *(f"LPT{number}" for number in range(1, 10)),
 }
-_PROCESS_STARTED_AT = time.time()
 ArtifactValidator = Callable[[Path], None]
 
 
@@ -182,26 +180,6 @@ class Library:
         _ensure_safe_managed_path(self.root, temp_root)
         temp_root.mkdir(parents=True, exist_ok=True)
         return Path(tempfile.mkdtemp(prefix=f"{os.getpid()}-", dir=temp_root))
-
-    def clean_stale_staging(self) -> list[Path]:
-        """Remove staging directories that predate this process.
-
-        Only children of ``.pp/tmp`` are considered, and installed library
-        content is therefore outside the cleanup boundary.
-        """
-        temp_root = self.operational_dir() / "tmp"
-        removed: list[Path] = []
-        for candidate in temp_root.iterdir():
-            try:
-                is_stale_dir = (
-                    candidate.is_dir() and candidate.stat().st_mtime < _PROCESS_STARTED_AT
-                )
-            except FileNotFoundError:
-                continue
-            if is_stale_dir:
-                shutil.rmtree(candidate)
-                removed.append(candidate)
-        return removed
 
     def install_artifact(
         self,

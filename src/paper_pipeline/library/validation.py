@@ -371,6 +371,14 @@ def _validate_pages(library: Library, record, report: ValidationReport) -> None:
             "Rerun page rendering.",
             citekey,
         )
+    elif pages_root.is_dir() and any(path.is_file() for path in pages_root.rglob("*")):
+        _add(
+            report,
+            "error",
+            "Rendered pages exist without installed-artifact provenance.",
+            "Rerun page rendering to install one complete declared page set.",
+            citekey,
+        )
 
 
 def _validate_recipes(library: Library, record, report: ValidationReport) -> None:

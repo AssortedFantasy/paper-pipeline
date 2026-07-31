@@ -2,7 +2,7 @@
 
 Dependency direction (enforced by review; see AGENTS.md):
 
-    web client -> web API -> services
+    HTMX templates -> web routes -> services
         -> {library, ingest, convert, pages, recipes, jobs, indexes}
             -> external tools (Marker, PDFium, RDF, LLM SDKs, filesystem)
 

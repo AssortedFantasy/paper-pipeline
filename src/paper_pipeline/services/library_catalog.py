@@ -13,6 +13,7 @@ import json
 import os
 import threading
 import time
+from bisect import bisect_left
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -74,6 +75,7 @@ class LibraryCatalog:
         self._library = library
         self._lock = threading.RLock()
         self._page_counts = self._load_cache()
+        self._cache_dirty = False
         self._snapshot = CatalogSnapshot((), (), 0, datetime.now(UTC))
         self._fingerprint: tuple[tuple[object, ...], ...] = ()
         self._stale = False
@@ -88,7 +90,9 @@ class LibraryCatalog:
 
     def replace(self, records: list[PaperRecord], problems: list[str]) -> CatalogSnapshot:
         """Build and atomically install a complete snapshot from one disk scan."""
-        projected = tuple(self._project(record) for record in records)
+        projected = tuple(
+            sorted((self._project(record) for record in records), key=_catalog_sort_key)
+        )
         with self._lock:
             return self._install(projected, problems)
 
@@ -100,7 +104,9 @@ class LibraryCatalog:
         expected_generation: int,
     ) -> CatalogSnapshot | None:
         """Install a rescan only if no paper write updated the catalog meanwhile."""
-        projected = tuple(self._project(record) for record in records)
+        projected = tuple(
+            sorted((self._project(record) for record in records), key=_catalog_sort_key)
+        )
         with self._lock:
             if self._snapshot.generation != expected_generation:
                 return None
@@ -108,23 +114,37 @@ class LibraryCatalog:
 
     def upsert(self, record: PaperRecord) -> CatalogSnapshot:
         """Replace one entry after its canonical ``paper.json`` write succeeds."""
-        entry = self._project(record)
-        citekey = record.metadata.citekey
         with self._lock:
-            papers = [
-                existing
-                for existing in self._snapshot.papers
-                if existing.record.metadata.citekey != citekey
-            ]
-            papers.append(entry)
-            papers.sort(key=lambda item: item.record.metadata.citekey.casefold())
+            entry = self._project(record)
+            citekey = record.metadata.citekey
+            sort_key = (citekey.casefold(), citekey)
+            papers = list(self._snapshot.papers)
+            index = bisect_left(papers, sort_key, key=_catalog_sort_key)
+            if index < len(papers) and papers[index].record.metadata.citekey == citekey:
+                papers[index] = entry
+            else:
+                papers.insert(index, entry)
             self._snapshot = CatalogSnapshot(
                 papers=tuple(papers),
                 problems=self._snapshot.problems,
                 generation=self._snapshot.generation + 1,
                 refreshed_at=datetime.now(UTC),
             )
-            self._fingerprint = self._disk_fingerprint(self._snapshot.papers)
+            fingerprint = list(self._fingerprint)
+            fingerprint_index = bisect_left(
+                fingerprint,
+                (citekey.casefold(), citekey),
+                key=lambda row: (str(row[0]).casefold(), str(row[0])),
+            )
+            row = self._disk_fingerprint_row(entry)
+            if (
+                fingerprint_index < len(fingerprint)
+                and fingerprint[fingerprint_index][0] == citekey
+            ):
+                fingerprint[fingerprint_index] = row
+            else:
+                fingerprint.insert(fingerprint_index, row)
+            self._fingerprint = tuple(fingerprint)
             self._stale = False
             self._last_stale_check = time.monotonic()
             self._save_cache()
@@ -203,6 +223,7 @@ class LibraryCatalog:
         count = pdf_page_count(source)
         if cache_key is not None:
             self._page_counts[cache_key] = count
+            self._cache_dirty = True
         return count
 
     def _artifact_matches(self, relative: str, expected_sha256: str) -> bool:
@@ -231,20 +252,26 @@ class LibraryCatalog:
         try:
             directories = sorted(
                 (path for path in papers_root.iterdir() if path.is_dir()),
-                key=lambda path: path.name.casefold(),
+                key=lambda path: (path.name.casefold(), path.name),
             )
         except OSError:
             return (("<papers-unavailable>",),)
         for directory in directories:
-            paper_stat = _stat_signature(directory / PAPER_FILE)
-            source = sources.get(directory.name)
-            source_stat = (
-                _stat_signature(self._library.root.joinpath(*source.split("/")))
-                if source is not None
-                else None
-            )
-            rows.append((directory.name, paper_stat, source, source_stat))
+            rows.append(self._disk_fingerprint_values(directory.name, sources.get(directory.name)))
         return tuple(rows)
+
+    def _disk_fingerprint_row(self, entry: CatalogPaper) -> tuple[object, ...]:
+        record = entry.record
+        return self._disk_fingerprint_values(record.metadata.citekey, record.source_pdf)
+
+    def _disk_fingerprint_values(self, citekey: str, source: str | None) -> tuple[object, ...]:
+        paper_stat = _stat_signature(self._library.root / PAPERS_DIR / citekey / PAPER_FILE)
+        source_stat = (
+            _stat_signature(self._library.root.joinpath(*source.split("/")))
+            if source is not None
+            else None
+        )
+        return citekey, paper_stat, source, source_stat
 
     def _load_cache(self) -> dict[str, int | None]:
         path = self._library.root / OPERATIONAL_DIR / _CACHE_FILE
@@ -264,6 +291,8 @@ class LibraryCatalog:
             return {}
 
     def _save_cache(self) -> None:
+        if not self._cache_dirty:
+            return
         try:
             operational = self._library.operational_dir()
         except OSError:
@@ -282,6 +311,7 @@ class LibraryCatalog:
                     newline="\n",
                 )
                 os.replace(temporary, destination)
+                self._cache_dirty = False
             except OSError:
                 # A disposable optimization must never fail a canonical paper write.
                 return
@@ -327,3 +357,8 @@ def _stat_signature(path: Path) -> tuple[int, int] | None:
         return stat.st_size, stat.st_mtime_ns
     except OSError:
         return None
+
+
+def _catalog_sort_key(item: CatalogPaper) -> tuple[str, str]:
+    citekey = item.record.metadata.citekey
+    return citekey.casefold(), citekey

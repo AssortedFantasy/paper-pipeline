@@ -46,7 +46,9 @@ PDF page counts are cached in `.pp/catalog-cache.json`, keyed by source
 identity and file stat signature. This file is disposable acceleration only:
 it is never artifact truth, may be missing or malformed, and may be deleted
 without affecting the library. Cache writes are best effort and cannot fail a
-canonical paper write.
+canonical paper write. A normal paper write updates its fingerprint row in
+place; it does not rescan all paper directories. The cache file is rewritten
+only when PDF inspection added a value.
 
 Full validation remains an explicit library operation. The catalog is a fast
 read model, not proof that every artifact is currently intact.

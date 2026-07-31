@@ -28,7 +28,9 @@ and safe to update after interrupted work.
 ```
 
 `library.json` and `paper.json` use library format version 2. Citekeys identify
-papers and must be safe as cross-platform directory names.
+papers and must be safe as cross-platform directory names. Serialized models
+reject unknown fields so typos and schema drift fail visibly instead of being
+silently discarded.
 
 Library state has four classes:
 

@@ -77,12 +77,6 @@ class ImportPlan(BaseModel):
     problems: list[str] = Field(default_factory=list)
     duplicate_candidates: list[DuplicateCandidate] = Field(default_factory=list)
 
-    @property
-    def duplicates(self) -> list[DuplicateCandidate]:
-        """Concise alias for callers that label duplicate candidates as duplicates."""
-        return self.duplicate_candidates
-
-
 def build_import_plan(library: PaperCollection, records: list[ImportRecord]) -> ImportPlan:
     """Compare parsed records with a library without mutating either input."""
     existing_records, library_problems = library.list_papers()

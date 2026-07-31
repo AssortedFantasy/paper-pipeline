@@ -134,6 +134,22 @@ async def test_paper_session_write_updates_catalog_without_losing_fields(
         captured[0].read_record()
 
 
+async def test_paper_session_write_updates_fingerprint_without_rescanning_library(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = RuntimeRegistry().create(tmp_path / "library")
+    await seed(runtime, record())
+
+    def unexpected_scan(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("a canonical paper write rescanned the full library")
+
+    monkeypatch.setattr(runtime.catalog, "_disk_fingerprint", unexpected_scan)
+    await seed(runtime, record(title="Updated"))
+
+    assert catalog_record(runtime, "Smith2024").metadata.title == "Updated"
+    assert not runtime.catalog.is_stale()
+
+
 async def test_library_read_session_can_inspect_but_not_mutate(
     tmp_path: Path,
 ) -> None:

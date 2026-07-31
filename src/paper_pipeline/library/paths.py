@@ -24,7 +24,7 @@ Layout (ADR-0002):
                 .pp/                # per-paper diagnostics and logs (disposable)
 """
 
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 # Library root entries
 LIBRARY_FILE = "library.json"
@@ -60,8 +60,3 @@ CITEKEY_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9_.+-]*[A-Za-z0-9_+-])?$"
 def paper_dir(library_root: Path, citekey: str) -> Path:
     """Absolute path of a paper directory (for application use only)."""
     return library_root / PAPERS_DIR / citekey
-
-
-def relative_paper_dir(citekey: str) -> PurePosixPath:
-    """Library-relative paper directory, as stored inside library files."""
-    return PurePosixPath(PAPERS_DIR) / citekey

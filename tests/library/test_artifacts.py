@@ -283,27 +283,3 @@ def test_bundle_install_failure_preserves_previous_bundle(
         library.install_transcription_bundle("Smith2024", stage)
 
     assert _files_under(paper) == before
-
-
-def test_clean_stale_staging_only_removes_old_temp_directories(
-    library_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    library = _paper_library(library_root)
-    stale = library.stage_dir()
-    current = library.stage_dir()
-    stale_file = stale.parent / "old-file"
-    stale_file.write_text("not a staging directory", encoding="utf-8")
-    installed = library_root / "papers" / "Smith2024" / "keep.txt"
-    installed.write_text("keep", encoding="utf-8")
-    monkeypatch.setattr("paper_pipeline.library.storage._PROCESS_STARTED_AT", 1_000.0)
-    os.utime(stale, (999.0, 999.0))
-    os.utime(stale_file, (999.0, 999.0))
-    os.utime(current, (1_001.0, 1_001.0))
-
-    removed = library.clean_stale_staging()
-
-    assert removed == [stale]
-    assert not stale.exists()
-    assert current.exists()
-    assert stale_file.read_text(encoding="utf-8") == "not a staging directory"
-    assert installed.read_text(encoding="utf-8") == "keep"

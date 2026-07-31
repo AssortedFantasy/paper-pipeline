@@ -72,7 +72,7 @@ _SUPPORT_TARGETS = {
 }
 
 
-def create(
+def create_library(
     root: Path,
     *,
     name: str = "",
@@ -84,17 +84,11 @@ def create(
     return create_runtime(root, name=name)
 
 
-def open(root: Path, *, registry: RuntimeRegistry | None = None) -> LibraryRuntime:
+def open_library(root: Path, *, registry: RuntimeRegistry | None = None) -> LibraryRuntime:
     """Return the canonical runtime for an existing library."""
     if registry is not None:
         return registry.open(root)
     return open_runtime(root)
-
-
-# Public service names from the product contract. The implementation names avoid
-# looking like direct raw-storage calls in architecture enforcement scans.
-create_library = create
-open_library = open
 
 
 async def validate_library(runtime: LibraryRuntime) -> ValidationReport:

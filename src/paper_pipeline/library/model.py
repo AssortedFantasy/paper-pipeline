@@ -11,10 +11,16 @@ All stored paths are library-relative POSIX paths (forward slashes).
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class LibraryInfo(BaseModel):
+class _SerializedModel(BaseModel):
+    """Reject schema drift instead of silently discarding misspelled fields."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class LibraryInfo(_SerializedModel):
     """Contents of ``library.json`` at the library root."""
 
     format_version: int
@@ -23,7 +29,7 @@ class LibraryInfo(BaseModel):
     name: str = ""
 
 
-class PaperMetadata(BaseModel):
+class PaperMetadata(_SerializedModel):
     """Bibliographic metadata, normalized from the import source.
 
     Zotero owns these fields: a metadata refresh from a later export
@@ -53,7 +59,7 @@ class AttemptState(StrEnum):
     CANCELLED = "cancelled"
 
 
-class AttemptRecord(BaseModel):
+class AttemptRecord(_SerializedModel):
     """The latest normally completed attempt, whether or not it succeeded."""
 
     id: str
@@ -65,7 +71,7 @@ class AttemptRecord(BaseModel):
     log_path: str | None = None
 
 
-class ConversionRecord(BaseModel):
+class ConversionRecord(_SerializedModel):
     """Provenance of the installed transcription bundle plus the latest attempt.
 
     A failed rerun changes ``last_attempt`` without erasing the provenance of
@@ -81,7 +87,7 @@ class ConversionRecord(BaseModel):
     last_attempt: AttemptRecord | None = None
 
 
-class PageRenderRecord(BaseModel):
+class PageRenderRecord(_SerializedModel):
     """Provenance of an independently installed set of rendered PDF pages."""
 
     source_sha256: str | None = None
@@ -95,7 +101,7 @@ class PageRenderRecord(BaseModel):
     last_attempt: AttemptRecord | None = None
 
 
-class RecipeRecord(BaseModel):
+class RecipeRecord(_SerializedModel):
     """Provenance of an installed recipe output plus the latest attempt.
 
     Provenance only — never credentials.
@@ -121,7 +127,7 @@ class RecipeRecord(BaseModel):
     last_attempt: AttemptRecord | None = None
 
 
-class PaperRecord(BaseModel):
+class PaperRecord(_SerializedModel):
     """Contents of ``paper.json`` in each paper directory.
 
     The durable source of truth for per-paper metadata and completed artifact

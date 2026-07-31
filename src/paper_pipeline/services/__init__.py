@@ -1,7 +1,7 @@
 """Application services: the single implementation of user-level operations.
 
-Both the web API and the CLI call these functions; business rules live here
-and nowhere above (see AGENTS.md architecture rules).
+Both the server-rendered web routes and the CLI call these functions; business
+rules live here and nowhere above (see AGENTS.md architecture rules).
 
 Operations:
 

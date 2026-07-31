@@ -189,6 +189,18 @@ def test_rendered_pages_have_independent_freshness_and_integrity(
     assert any("rendered page" in problem.message.lower() for problem in report.problems)
 
 
+def test_unrecorded_rendered_pages_are_invalid(library_root: Path) -> None:
+    library, _record = _library_with_source(library_root)
+    page = library_root / "papers" / "Smith2024" / "pages" / "page1.png"
+    page.parent.mkdir()
+    page.write_bytes(b"unrecorded")
+
+    report = validate_library(library)
+
+    assert not report.ok
+    assert any("without installed-artifact provenance" in item.message for item in report.problems)
+
+
 def test_paper_directory_rejects_unexpected_entries(library_root: Path) -> None:
     library, _record = _library_with_source(library_root)
     paper_root = library_root / "papers" / "Smith2024"

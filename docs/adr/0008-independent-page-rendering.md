@@ -36,14 +36,12 @@ Page rendering is explicit rather than automatically chained to conversion.
 This avoids introducing workflow dependencies and lets users choose whether
 large page-image sets are useful.
 
-Existing unrecorded `pages/` directories remain permitted as legacy artifacts.
-They are preserved by transcription reruns and become fully tracked after an
-explicit page-render job.
+Unrecorded files in `pages/` are invalid, just like unrecorded transcription or
+recipe artifacts. An explicit page-render job replaces the directory with a
+fully tracked set.
 
-The library format remains version 2. The new `pages` record is additive with a
-default empty value, fixed artifact paths are unchanged, and existing format-2
-records and page directories remain readable. This compatibility decision was
-reviewed alongside the serialized model change.
+The library format remains version 2. The `pages` record has a default empty
+value, and fixed artifact paths are unchanged.
 
 ## Consequences
 

@@ -71,6 +71,14 @@ def test_format_two_records_remain_compatible_with_later_optional_recipe_fields(
     assert recipe.cache_write_tokens == 0
 
 
+def test_serialized_models_reject_unknown_fields() -> None:
+    payload = make_record().model_dump(mode="json")
+    payload["metadata"]["titel"] = "misspelled"
+
+    with pytest.raises(ValueError, match="titel"):
+        PaperRecord.model_validate(payload)
+
+
 def test_create_refuses_non_empty_directory(library_root: Path) -> None:
     (library_root / "keep.txt").write_text("user data", encoding="utf-8")
 

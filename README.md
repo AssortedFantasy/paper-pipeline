@@ -14,6 +14,7 @@ Libraries are ordinary folders that can be used by agents for literature search.
 - Built-in summary, contribution, introduction, and method recipes
 - Rebuildable indexes for titles, authors, years, venues, and summaries
 - A local dashboard for importing, processing, inspecting, and retrying work
+- One server-rendered HTMX interaction surface (plus SSE job updates)
 - Local or SSH-based conversion
 
 ## Installation
@@ -50,6 +51,14 @@ PAPER_PIPELINE_LLM_MODEL=...
 ```
 
 `PAPER_PIPELINE_LLM_BASE_URL` may be set for an OpenAI-compatible endpoint.
+
+Optional SSH conversion uses these user-level settings:
+
+```dotenv
+PAPER_PIPELINE_REMOTE_CONVERTER_HOST=gpu-host
+PAPER_PIPELINE_REMOTE_CONVERTER_ROOT=/tmp/paper-pipeline
+PAPER_PIPELINE_REMOTE_CONVERTER_PYTHON=python3
+```
 
 ## Usage
 
@@ -96,7 +105,10 @@ uv run ruff format .
 uv run ruff check --fix .
 uv run pyright
 uv run pytest
+uv run pytest -m browser
 ```
 
 See [AGENTS.md](AGENTS.md) for repository rules and optional test suites.
-Architecture decisions are recorded in [docs/adr/](docs/adr/).
+[AGENTS.md](AGENTS.md), the code, and tests describe the current architecture.
+[ADRs](docs/adr/) record decision context and are not an independent source of
+current behavior.
