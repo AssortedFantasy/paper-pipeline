@@ -85,6 +85,9 @@
         {% if job.meta.progress_local_cleanup %}
           <span>{{ job.meta.progress_local_cleanup }}</span>
         {% endif %}
+        {% if job.meta.total_cost_usd is defined %}
+          <span><b>${{ '%.4f' | format(job.meta.total_cost_usd | float) }}</b> total spend</span>
+        {% endif %}
       </div>
     </div>
   {% endif %}

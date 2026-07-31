@@ -142,12 +142,16 @@ async def test_recipe_cohort_uses_one_remote_batch_and_one_upload_per_distinct_p
     assert parent.meta["progress_install_successes"] == "4"
     assert parent.meta["progress_cleanup_done"] == parent.meta["progress_cleanup_total"]
     assert parent.meta["progress_local_cleanup"].endswith("of working files removed")
+    assert float(parent.meta["total_cost_usd"]) == pytest.approx(4 * provider.cost_usd)
     run_dir = RecipeRunStore(runtime.root).run_dir(parent.meta["run_id"])
     assert {item.name for item in run_dir.iterdir()} == {
         "manifest.json",
         "state.json",
         "summary.log",
     }
+    assert "total_cost_usd=0.00400000" in (run_dir / "summary.log").read_text(
+        encoding="utf-8"
+    )
     (run_dir / "snapshots").mkdir()
     (run_dir / "snapshots" / "legacy.pdf").write_bytes(b"duplicated PDF")
     (run_dir / "requests.jsonl").write_text("legacy request\n", encoding="utf-8")

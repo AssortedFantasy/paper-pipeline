@@ -21,7 +21,10 @@
     <p>Open a library before monitoring its work queue.</p>
   </section>
 {% else %}
-  <div id="jobs-list" hx-get="/jobs/list" hx-trigger="sse:state" hx-swap="innerHTML">
+  <div id="jobs-list" hx-get="/jobs/list"
+       hx-trigger="sse:state, sse:progress"
+       hx-sync="this:replace"
+       hx-swap="innerHTML">
     {% include "_jobs_list.html" %}
   </div>
   <script src="{{ url_for('static', path='/connection-state.js') }}" defer></script>

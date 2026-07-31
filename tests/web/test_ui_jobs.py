@@ -142,6 +142,30 @@ def test_jobs_update_live_over_sse(page: Page, jobs_server: RunningServer, tmp_p
 
 
 @pytest.mark.parametrize("jobs_server", [{"mode": "hang", "hang_seconds": 30}], indirect=True)
+def test_jobs_fragment_refreshes_for_progress_events(
+    page: Page, jobs_server: RunningServer, tmp_path: Path
+) -> None:
+    citekey = _create_and_import(page, jobs_server, tmp_path / "library")
+    page.goto(f"{jobs_server.url}/jobs")
+    expect(page.locator("#connection-status")).to_contain_text("connected")
+    job_id = _queue_conversion(page, jobs_server, citekey)
+    row = page.locator(f"[data-job-id='{job_id}']")
+    expect(row.locator(".badge-running")).to_be_visible()
+
+    assert jobs_server.context.runtime is not None
+    job = jobs_server.context.runtime.queue.get(job_id)
+    assert job is not None
+    job.progress = "Fresh progress from the worker"
+    page.locator("#jobs-list").evaluate(
+        "element => element.dispatchEvent(new CustomEvent('sse:progress'))"
+    )
+
+    expect(row.locator(".job-progress")).to_have_text("Fresh progress from the worker")
+    cancelled = page.request.post(f"{jobs_server.url}/jobs/{job_id}/cancel")
+    assert cancelled.ok, cancelled.text()
+
+
+@pytest.mark.parametrize("jobs_server", [{"mode": "hang", "hang_seconds": 30}], indirect=True)
 def test_cancel_running_job(page: Page, jobs_server: RunningServer, tmp_path: Path) -> None:
     citekey = _create_and_import(page, jobs_server, tmp_path / "library")
     page.goto(f"{jobs_server.url}/jobs")

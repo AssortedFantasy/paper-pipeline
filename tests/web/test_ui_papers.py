@@ -422,6 +422,7 @@ def test_configured_work_cycles_run_overwrite_and_skips_ready_results(
     expect(batch_progress).to_contain_text("1/1 results installed")
     expect(batch_progress).to_contain_text("provider check")
     expect(batch_progress).to_contain_text("working files removed")
+    expect(batch_progress).to_contain_text("$0.0010 total spend")
     expect(page.get_by_text("Prepare recipe Batch", exact=False)).to_have_count(0)
     expect(page.get_by_text("Finalize recipe Batch", exact=False)).to_have_count(0)
 

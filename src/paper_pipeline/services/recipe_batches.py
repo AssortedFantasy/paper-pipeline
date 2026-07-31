@@ -368,11 +368,13 @@ async def _run_coordinator(
     local_cleanup = await asyncio.to_thread(_prune_local_payload, store, manifest, state)
     _write_summary_log(store, manifest, state)
     job.log_path = f"{OPERATIONAL_DIR}/{RECIPE_RUNS_DIR}/{run_id}/summary.log"
+    total_cost_usd = _total_cost_usd(state)
     job.meta.update(
         {
             "completed": str(successes),
             "failed": str(failures),
             "remote_status": state.remote_status or "",
+            "total_cost_usd": f"{total_cost_usd:.8f}",
         }
     )
     _publish_batch_progress(
@@ -1216,11 +1218,13 @@ async def _finish_cancelled(
     local_cleanup = await asyncio.to_thread(_prune_local_payload, store, manifest, state)
     _write_summary_log(store, manifest, state)
     job.log_path = f"{OPERATIONAL_DIR}/{RECIPE_RUNS_DIR}/{manifest.run_id}/summary.log"
+    total_cost_usd = _total_cost_usd(state)
     job.meta.update(
         {
             "completed": str(state.completed),
             "failed": str(state.failed),
             "remote_status": state.remote_status or "",
+            "total_cost_usd": f"{total_cost_usd:.8f}",
         }
     )
     _publish_batch_progress(
@@ -1321,6 +1325,7 @@ def _write_summary_log(
         f"requests={state.total}",
         f"installed={state.completed}",
         f"failed={state.failed}",
+        f"total_cost_usd={_total_cost_usd(state):.8f}",
     ]
     lines.extend(f"cleanup_warning={warning}" for warning in state.cleanup_warnings)
     if state.error:
@@ -1330,6 +1335,11 @@ def _write_summary_log(
         store.path(manifest.run_id, "summary.log"),
         "\n".join(lines) + "\n",
     )
+
+
+def _total_cost_usd(state: RecipeRunState) -> float:
+    """Return provider spend for every collected result, installed or not."""
+    return sum(outcome.cost_usd for outcome in state.outcomes.values())
 
 
 def _download_atomic(
