@@ -40,7 +40,9 @@ Markers left after a restart appear as interrupted work but never determine
 artifact validity.
 
 Job events and progress are in memory and published to the dashboard with
-Server-Sent Events. Closing a browser does not cancel work.
+Server-Sent Events. Each loaded browser document owns at most one event stream
+and releases it during page navigation; reconnecting or closing a browser does
+not cancel work.
 
 Remote-scope jobs use the same queue and event system but hold no paper lane or
 library barrier while waiting. Their resumable provider state is disposable

@@ -6,11 +6,11 @@
     <title>{% block title %}Paper Pipeline{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}?v=16">
     <script src="{{ url_for('static', path='/htmx.min.js') }}" defer></script>
-    <script src="{{ url_for('static', path='/htmx-sse.js') }}" defer></script>
+    <script src="{{ url_for('static', path='/events.js') }}?v=1" defer></script>
     <script src="{{ url_for('static', path='/papers.js') }}?v=6" defer></script>
     <script src="{{ url_for('static', path='/exit.js') }}?v=1" defer></script>
   </head>
-  <body hx-ext="sse"{% if library_root %} sse-connect="/events"{% endif %}>
+  <body{% if library_root %} data-events-url="/events"{% endif %}>
     <header class="app-header">
       <a class="brand" href="/library" aria-label="Paper Pipeline home">
         <span class="brand-mark">PP</span>
@@ -34,7 +34,7 @@
       </div>
     </header>
 
-    <div class="job-stream"{% if library_root %} hx-get="/fragments/job-strip" hx-trigger="sse:state" hx-swap="innerHTML"{% endif %}>
+    <div class="job-stream"{% if library_root %} hx-get="/fragments/job-strip" hx-trigger="sse:state from:body" hx-swap="innerHTML"{% endif %}>
       {% include "_job_strip.html" %}
     </div>
 

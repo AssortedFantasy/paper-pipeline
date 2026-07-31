@@ -22,7 +22,7 @@
   </section>
 {% else %}
   <div id="jobs-list" hx-get="/jobs/list"
-       hx-trigger="sse:state, sse:progress"
+       hx-trigger="sse:state from:body, sse:progress from:body"
        hx-sync="this:replace"
        hx-swap="innerHTML">
     {% include "_jobs_list.html" %}

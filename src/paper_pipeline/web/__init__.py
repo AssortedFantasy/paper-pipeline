@@ -11,6 +11,7 @@ Rules:
 - Server-owned state is never duplicated as independent client truth; the
   client owns only ephemeral interaction state (selections, open panels).
 - Inline DOM manipulation outside htmx/SSE swaps is prohibited.
+- Each loaded document owns at most one EventSource and closes it on pagehide.
 - Important views have stable URLs: ``/``, ``/library``, ``/papers``,
   ``/papers/{citekey}``, ``/jobs``, ``/import``.
 - Empty, loading, error, disconnected, cancelled, and interrupted states are
