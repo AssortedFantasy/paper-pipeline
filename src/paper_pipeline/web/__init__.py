@@ -17,6 +17,6 @@ Rules:
   designed, not accidental.
 - Closing the browser must not affect server-side jobs.
 
-Modules: ``app`` (FastAPI factory), ``api`` (JSON + fragment routes), and
-``templates/`` and ``static/`` (client).
+Modules: ``app`` (FastAPI factory), ``ui`` and ``jobs_ui`` (HTML routes),
+``events`` (SSE transport), and ``templates/`` and ``static/`` (client).
 """

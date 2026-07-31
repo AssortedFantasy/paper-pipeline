@@ -69,8 +69,8 @@ def import_server(tmp_path: Path, page: Page) -> Iterator[ImportServer]:
 
     library = tmp_path / "library"
     response = page.request.post(
-        f"{url}/api/library/create",
-        data={"path": str(library), "name": "Import Browser Test"},
+        f"{url}/library/create",
+        form={"library_path": str(library)},
     )
     assert response.ok, response.text()
     yield ImportServer(url, library)

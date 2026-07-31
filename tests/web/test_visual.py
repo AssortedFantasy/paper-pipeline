@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import re
 import socket
 import struct
 import threading
@@ -33,6 +34,7 @@ from paper_pipeline.library.paths import ATTEMPTS_DIR, FORMAT_VERSION
 from paper_pipeline.library.storage import create_library, open_library
 from paper_pipeline.services.runtime import RuntimeRegistry
 from paper_pipeline.web.app import create_app
+from paper_pipeline.web.context import WebContext
 
 pytestmark = pytest.mark.browser
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "zotero"
@@ -50,6 +52,7 @@ PNG = base64.b64decode(
 class VisualServer:
     url: str
     registry: RuntimeRegistry
+    context: WebContext
 
 
 def _config(tmp_path: Path) -> AppConfig:
@@ -92,7 +95,7 @@ def visual_server(tmp_path: Path, page: Page) -> Iterator[VisualServer]:
         thread.join(timeout=5)
         pytest.fail("visual-test server did not start")
     page.set_viewport_size(VIEWPORT)
-    yield VisualServer(url, registry)
+    yield VisualServer(url, registry, cast(WebContext, app.state.web_context))
     page.close()
     server.should_exit = True
     server.force_exit = True
@@ -101,27 +104,26 @@ def visual_server(tmp_path: Path, page: Page) -> Iterator[VisualServer]:
 
 
 def _create_library(page: Page, server: VisualServer, root: Path) -> None:
-    response = page.request.post(
-        f"{server.url}/api/library/create",
-        data={"path": str(root), "name": "Visual Fixture Library"},
-    )
-    assert response.ok, response.text()
+    del page
+    server.context.runtime = server.registry.create(root, name="Visual Fixture Library")
 
 
 def _open_library(page: Page, server: VisualServer, root: Path) -> None:
-    response = page.request.post(f"{server.url}/api/library/open", data={"path": str(root)})
-    assert response.ok, response.text()
+    del page
+    server.context.runtime = server.registry.open(root)
 
 
 def _import_fixture(page: Page, server: VisualServer, fixture: str = "clean") -> None:
     preview = page.request.post(
-        f"{server.url}/api/import/preview",
-        data={"export_path": str(FIXTURES / fixture)},
+        f"{server.url}/import/preview",
+        form={"export_path": str(FIXTURES / fixture)},
     )
     assert preview.ok, preview.text()
+    match = re.search(r'name="preview_id" value="([^"]+)"', preview.text())
+    assert match is not None
     applied = page.request.post(
-        f"{server.url}/api/import/apply",
-        data={"plan": preview.json()},
+        f"{server.url}/import/apply",
+        form={"preview_id": match.group(1)},
     )
     assert applied.ok, applied.text()
 
@@ -377,12 +379,23 @@ def test_visual_jobs_running_failed_interrupted(
 
     job_ids: list[str] = []
     for citekey in ("Running2026", "Failed2026"):
+        assert visual_server.context.runtime is not None
+        existing = {job.id for job in visual_server.context.runtime.queue.list_jobs()}
         response = page.request.post(
-            f"{visual_server.url}/api/jobs/conversion",
-            data={"citekeys": [citekey]},
+            f"{visual_server.url}/papers/actions/convert",
+            form={
+                "citekeys": citekey,
+                "library_key": visual_server.context.runtime.library_key,
+            },
         )
         assert response.ok, response.text()
-        job_ids.append(cast(str, response.json()["jobs"][0]["id"]))
+        queued = [
+            job.id
+            for job in visual_server.context.runtime.queue.list_jobs()
+            if job.id not in existing
+        ]
+        assert len(queued) == 1
+        job_ids.append(queued[0])
     runtime = visual_server.registry.open(root)
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:

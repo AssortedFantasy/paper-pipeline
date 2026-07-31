@@ -7,8 +7,7 @@ from urllib.parse import parse_qs
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from paper_pipeline.ingest.plan import ImportPlan
 from paper_pipeline.library.validation import VALIDATION_CATEGORIES
@@ -41,11 +40,9 @@ from paper_pipeline.services.processing import (
 )
 from paper_pipeline.services.recipe_batches import resume_recipe_runs
 from paper_pipeline.services.runtime import LibraryRuntime
-from paper_pipeline.web.api import WebContext
+from paper_pipeline.web.context import WebContext
 from paper_pipeline.web.paper_detail import build_paper_view
-
-_WEB_ROOT = Path(__file__).parent
-templates = Jinja2Templates(directory=_WEB_ROOT / "templates")
+from paper_pipeline.web.rendering import templates
 
 
 def create_ui_router(context: WebContext) -> APIRouter:
@@ -476,11 +473,12 @@ def create_ui_router(context: WebContext) -> APIRouter:
             artifact = await get_source_pdf(context.runtime, citekey)
         except (FileNotFoundError, ValueError):
             raise HTTPException(status_code=404, detail="Source PDF is unavailable") from None
-        return Response(
-            artifact.content,
+        return FileResponse(
+            artifact.path,
             media_type=artifact.media_type,
+            filename=artifact.filename,
+            content_disposition_type="inline",
             headers={
-                "Content-Disposition": 'inline; filename="source.pdf"',
                 "X-Content-Type-Options": "nosniff",
             },
         )
@@ -493,9 +491,11 @@ def create_ui_router(context: WebContext) -> APIRouter:
             artifact = await get_figure(context.runtime, citekey, figure)
         except (FileNotFoundError, ValueError):
             raise HTTPException(status_code=404, detail="Figure is unavailable") from None
-        return Response(
-            artifact.content,
+        return FileResponse(
+            artifact.path,
             media_type=artifact.media_type,
+            filename=artifact.filename,
+            content_disposition_type="inline",
             headers={"X-Content-Type-Options": "nosniff"},
         )
 

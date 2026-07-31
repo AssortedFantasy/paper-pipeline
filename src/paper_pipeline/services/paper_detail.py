@@ -36,7 +36,7 @@ class PaperDetailData:
 
 @dataclass(frozen=True)
 class MediaArtifact:
-    content: bytes
+    path: Path
     media_type: str
     filename: str
 
@@ -115,7 +115,7 @@ async def get_paper_detail(runtime: LibraryRuntime, citekey: str) -> PaperDetail
 
 
 async def get_source_pdf(runtime: LibraryRuntime, citekey: str) -> MediaArtifact:
-    """Return a hash-validated source PDF without exposing a filesystem path."""
+    """Locate a hash-validated source PDF for streaming by the web edge."""
     artifacts: list[MediaArtifact] = []
 
     async def read(session: LibrarySession, job: Job, token: CancellationToken) -> None:
@@ -129,7 +129,7 @@ async def get_source_pdf(runtime: LibraryRuntime, citekey: str) -> MediaArtifact
             raise FileNotFoundError("paper source PDF is missing or invalid")
         artifacts.append(
             MediaArtifact(
-                content=source.read_bytes(),
+                path=source,
                 media_type="application/pdf",
                 filename="source.pdf",
             )
@@ -164,7 +164,7 @@ async def get_figure(runtime: LibraryRuntime, citekey: str, figure: str) -> Medi
         if path is None:
             raise FileNotFoundError("figure is missing")
         media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-        artifacts.append(MediaArtifact(path.read_bytes(), media_type, path.name))
+        artifacts.append(MediaArtifact(path, media_type, path.name))
 
     job = await runtime.enqueue_library_read(JobKind.MAINTENANCE, "paper:figure", read)
     completed = await runtime.queue.wait(job.id)

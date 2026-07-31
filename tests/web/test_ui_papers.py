@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import socket
 import threading
 import time
@@ -78,21 +79,23 @@ def ui_server(tmp_path: Path, page: Page) -> Iterator[str]:
 
 def _create_library(page: Page, url: str, root: Path) -> None:
     response = page.request.post(
-        f"{url}/api/library/create",
-        data={"path": str(root), "name": "Browser Test Library"},
+        f"{url}/library/create",
+        form={"library_path": str(root)},
     )
     assert response.ok, response.text()
 
 
 def _import_papers(page: Page, url: str) -> None:
     preview = page.request.post(
-        f"{url}/api/import/preview",
-        data={"export_path": str(FIXTURE_EXPORT)},
+        f"{url}/import/preview",
+        form={"export_path": str(FIXTURE_EXPORT)},
     )
     assert preview.ok, preview.text()
+    match = re.search(r'name="preview_id" value="([^"]+)"', preview.text())
+    assert match is not None
     applied = page.request.post(
-        f"{url}/api/import/apply",
-        data={"plan": preview.json()},
+        f"{url}/import/apply",
+        form={"preview_id": match.group(1)},
     )
     assert applied.ok, applied.text()
 
@@ -108,13 +111,14 @@ def _replace_with_pdf(path: Path, pages: int) -> None:
 def _wait_for_jobs(page: Page, url: str, *, count: int) -> None:
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
-        response = page.request.get(f"{url}/api/jobs")
+        response = page.request.get(f"{url}/jobs/list")
         assert response.ok, response.text()
-        jobs = response.json()["jobs"]
-        if len(jobs) >= count and all(
-            job["state"] in {"succeeded", "failed", "cancelled"} for job in jobs
+        jobs = response.text()
+        if jobs.count('data-job-id="') >= count and not any(
+            state in jobs for state in ("badge-queued", "badge-running")
         ):
-            assert all(job["state"] == "succeeded" for job in jobs), jobs
+            assert "badge-failed" not in jobs, jobs
+            assert "badge-cancelled" not in jobs, jobs
             return
         time.sleep(0.05)
     pytest.fail("jobs did not finish")
@@ -385,9 +389,9 @@ def test_stale_papers_tab_cannot_launch_against_new_library(
     page.get_by_role("button", name="Queue (1 papers)").click()
 
     expect(page.get_by_role("alert")).to_contain_text("selected library changed")
-    jobs = page.request.get(f"{ui_server}/api/jobs")
+    jobs = page.request.get(f"{ui_server}/jobs/list")
     assert jobs.ok, jobs.text()
-    assert jobs.json()["jobs"] == []
+    assert "data-job-id=" not in jobs.text()
 
 
 def test_configured_work_cycles_run_overwrite_and_skips_ready_results(
@@ -427,8 +431,8 @@ def test_configured_work_cycles_run_overwrite_and_skips_ready_results(
     _configure_work(page, "Recipe: Summary")
     page.get_by_role("button", name="Queue (1 papers)").click()
     expect(page.get_by_role("status")).to_contain_text("already up to date")
-    jobs = page.request.get(f"{ui_server}/api/jobs").json()["jobs"]
-    assert len([job for job in jobs if job["kind"] == "recipe_batch"]) == 1
+    jobs = page.request.get(f"{ui_server}/jobs/list").text()
+    assert jobs.count("is-recipe-batch") == 1
 
     page.get_by_role("button", name="Configure", exact=False).click()
     summary = page.get_by_role("checkbox", name="Recipe: Summary", exact=False)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import socket
 import threading
 import time
@@ -25,6 +26,7 @@ from paper_pipeline.library.paths import ATTEMPTS_DIR, FORMAT_VERSION
 from paper_pipeline.library.storage import create_library
 from paper_pipeline.services.runtime import RuntimeRegistry
 from paper_pipeline.web.app import create_app
+from paper_pipeline.web.context import WebContext
 
 pytestmark = pytest.mark.browser
 FIXTURE_EXPORT = Path(__file__).parents[1] / "fixtures" / "zotero" / "clean"
@@ -33,6 +35,8 @@ FIXTURE_EXPORT = Path(__file__).parents[1] / "fixtures" / "zotero" / "clean"
 @dataclass(frozen=True)
 class RunningServer:
     url: str
+    registry: RuntimeRegistry
+    context: WebContext
 
 
 def _config(tmp_path: Path) -> AppConfig:
@@ -77,7 +81,11 @@ def jobs_server(
             time.sleep(0.02)
     else:
         pytest.fail("jobs UI test server did not start")
-    yield RunningServer(url=url)
+    yield RunningServer(
+        url=url,
+        registry=registry,
+        context=cast(WebContext, app.state.web_context),
+    )
     page.close()
     server.should_exit = True
     server.force_exit = True
@@ -86,27 +94,37 @@ def jobs_server(
 
 
 def _create_and_import(page: Page, server: RunningServer, root: Path) -> str:
-    created = page.request.post(
-        f"{server.url}/api/library/create",
-        data={"path": str(root), "name": "Jobs Test Library"},
-    )
-    assert created.ok, created.text()
+    server.context.runtime = server.registry.create(root, name="Jobs Test Library")
     preview = page.request.post(
-        f"{server.url}/api/import/preview",
-        data={"export_path": str(FIXTURE_EXPORT)},
+        f"{server.url}/import/preview",
+        form={"export_path": str(FIXTURE_EXPORT)},
     )
     assert preview.ok, preview.text()
-    applied = page.request.post(f"{server.url}/api/import/apply", data={"plan": preview.json()})
+    match = re.search(r'name="preview_id" value="([^"]+)"', preview.text())
+    assert match is not None
+    applied = page.request.post(
+        f"{server.url}/import/apply",
+        form={"preview_id": match.group(1)},
+    )
     assert applied.ok, applied.text()
-    papers = page.request.get(f"{server.url}/api/papers")
-    assert papers.ok, papers.text()
-    return cast(str, papers.json()["papers"][0]["metadata"]["citekey"])
+    assert server.context.runtime is not None
+    return server.context.runtime.catalog.snapshot().papers[0].record.metadata.citekey
 
 
 def _queue_conversion(page: Page, server: RunningServer, citekey: str) -> str:
-    response = page.request.post(f"{server.url}/api/jobs/conversion", data={"citekeys": [citekey]})
+    assert server.context.runtime is not None
+    existing = {job.id for job in server.context.runtime.queue.list_jobs()}
+    response = page.request.post(
+        f"{server.url}/papers/actions/convert",
+        form={
+            "citekeys": citekey,
+            "library_key": server.context.runtime.library_key,
+        },
+    )
     assert response.ok, response.text()
-    return cast(str, response.json()["jobs"][0]["id"])
+    queued = [job.id for job in server.context.runtime.queue.list_jobs() if job.id not in existing]
+    assert len(queued) == 1
+    return queued[0]
 
 
 def test_jobs_update_live_over_sse(page: Page, jobs_server: RunningServer, tmp_path: Path) -> None:
@@ -158,15 +176,13 @@ def test_failed_job_log_tail_and_retry(
 @pytest.mark.parametrize("jobs_server", [{"mode": "failure"}], indirect=True)
 def test_retry_selected_failed_jobs(page: Page, jobs_server: RunningServer, tmp_path: Path) -> None:
     _create_and_import(page, jobs_server, tmp_path / "library")
-    papers = page.request.get(f"{jobs_server.url}/api/papers")
-    citekeys = [paper["metadata"]["citekey"] for paper in papers.json()["papers"][:2]]
+    assert jobs_server.context.runtime is not None
+    citekeys = [
+        paper.record.metadata.citekey
+        for paper in jobs_server.context.runtime.catalog.snapshot().papers[:2]
+    ]
     page.goto(f"{jobs_server.url}/jobs")
-    response = page.request.post(
-        f"{jobs_server.url}/api/jobs/conversion",
-        data={"citekeys": citekeys},
-    )
-    assert response.ok, response.text()
-    original_ids = [job["id"] for job in response.json()["jobs"]]
+    original_ids = [_queue_conversion(page, jobs_server, citekey) for citekey in citekeys]
     for job_id in original_ids:
         expect(page.locator(f"[data-job-id='{job_id}'] .badge-failed")).to_be_visible()
 
@@ -208,8 +224,7 @@ def test_interrupted_attempt_is_labeled_and_retryable(
         library.operational_dir() / ATTEMPTS_DIR,
         managed_root=root,
     ).create(marker)
-    opened = page.request.post(f"{jobs_server.url}/api/library/open", data={"path": str(root)})
-    assert opened.ok, opened.text()
+    jobs_server.context.runtime = jobs_server.registry.open(root)
 
     page.goto(f"{jobs_server.url}/jobs")
     interrupted = page.locator("[data-job-id='interrupted-conversion']")
@@ -223,11 +238,10 @@ def test_interrupted_attempt_is_labeled_and_retryable(
 def test_disconnected_indicator_recovers(
     page: Page, jobs_server: RunningServer, tmp_path: Path
 ) -> None:
-    created = page.request.post(
-        f"{jobs_server.url}/api/library/create",
-        data={"path": str(tmp_path / "library"), "name": "Jobs Test Library"},
+    jobs_server.context.runtime = jobs_server.registry.create(
+        tmp_path / "library",
+        name="Jobs Test Library",
     )
-    assert created.ok, created.text()
 
     def abort_events(route: Route) -> None:
         route.abort()
@@ -252,12 +266,11 @@ def test_closing_real_sse_tab_does_not_cancel_running_job(
         expect(dashboard.locator(f"[data-job-id='{job_id}'] .badge-running")).to_be_visible()
         dashboard.close()
 
-        jobs = page.request.get(f"{jobs_server.url}/api/jobs")
-        assert jobs.ok, jobs.text()
-        state = next(job["state"] for job in jobs.json()["jobs"] if job["id"] == job_id)
-        assert state == "running"
+        assert jobs_server.context.runtime is not None
+        job = jobs_server.context.runtime.queue.get(job_id)
+        assert job is not None and job.state.value == "running"
 
-        cancelled = page.request.post(f"{jobs_server.url}/api/jobs/{job_id}/cancel")
+        cancelled = page.request.post(f"{jobs_server.url}/jobs/{job_id}/cancel")
         assert cancelled.ok, cancelled.text()
     finally:
         if not dashboard.is_closed():

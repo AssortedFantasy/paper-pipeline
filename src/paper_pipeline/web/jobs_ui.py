@@ -9,8 +9,8 @@ from fastapi.responses import HTMLResponse
 
 from paper_pipeline.services.job_ops import job_dashboard, read_log_tail, retry_selected_jobs
 from paper_pipeline.services.processing import cancel_job, retry_job
-from paper_pipeline.web.api import WebContext
-from paper_pipeline.web.ui import templates
+from paper_pipeline.web.context import WebContext
+from paper_pipeline.web.rendering import templates
 
 
 def create_jobs_router(context: WebContext) -> APIRouter:
@@ -48,8 +48,6 @@ def create_jobs_router(context: WebContext) -> APIRouter:
                 page_renderer_spec=context.page_renderer_spec,
                 timeout_seconds=context.config.converter_timeout_seconds,
                 page_render_timeout_seconds=context.config.page_render_timeout_seconds,
-                provider_name=context.provider_name,
-                model=context.config.llm_model or "",
             )
         except (KeyError, ValueError, RuntimeError) as error:
             return _jobs_response(context, request, error=str(error))
@@ -68,8 +66,6 @@ def create_jobs_router(context: WebContext) -> APIRouter:
                 page_renderer_spec=context.page_renderer_spec,
                 timeout_seconds=context.config.converter_timeout_seconds,
                 page_render_timeout_seconds=context.config.page_render_timeout_seconds,
-                provider_name=context.provider_name,
-                model=context.config.llm_model or "",
             )
         except (KeyError, ValueError, RuntimeError) as error:
             return _jobs_response(context, request, error=str(error))

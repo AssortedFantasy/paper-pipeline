@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import re
 import socket
 import threading
 import time
@@ -78,16 +79,21 @@ def paper_server(tmp_path: Path, page: Page) -> Iterator[str]:
 
 def _create_and_import(page: Page, url: str, root: Path) -> None:
     created = page.request.post(
-        f"{url}/api/library/create",
-        data={"path": str(root), "name": "Paper Detail Test"},
+        f"{url}/library/create",
+        form={"library_path": str(root)},
     )
     assert created.ok, created.text()
     preview = page.request.post(
-        f"{url}/api/import/preview",
-        data={"export_path": str(FIXTURE_EXPORT)},
+        f"{url}/import/preview",
+        form={"export_path": str(FIXTURE_EXPORT)},
     )
     assert preview.ok, preview.text()
-    applied = page.request.post(f"{url}/api/import/apply", data={"plan": preview.json()})
+    match = re.search(r'name="preview_id" value="([^"]+)"', preview.text())
+    assert match is not None
+    applied = page.request.post(
+        f"{url}/import/apply",
+        form={"preview_id": match.group(1)},
+    )
     assert applied.ok, applied.text()
 
 
